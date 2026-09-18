@@ -31,7 +31,10 @@ export default function DeployAgentModal({ isOpen, onClose, onDeployed }) {
   const [loadingToken, setLoadingToken] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
   const [serverUrl, setServerUrl] = useState(() => {
-    return window.location.origin.replace(':5173', ':8080').replace(':3000', ':8080') || 'http://localhost:8080';
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://192.168.1.2:8080';
+    }
+    return window.location.origin.replace(':5173', ':8080').replace(':3000', ':8080') || 'http://192.168.1.2:8080';
   });
 
   // Remote Push Deploy Form State
@@ -76,6 +79,15 @@ export default function DeployAgentModal({ isOpen, onClose, onDeployed }) {
       .finally(() => {
         if (active) setLoadingToken(false);
       });
+
+    fetch('/api/v1/config/public')
+      .then((res) => res.json())
+      .then((data) => {
+        if (active && data && data.backend_url) {
+          setServerUrl(data.backend_url);
+        }
+      })
+      .catch(() => {});
 
     return () => {
       active = false;

@@ -84,7 +84,7 @@ func (h *RemoteDeployHandler) ExecuteDeploy(c *gin.Context) {
 		}
 		host := c.Request.Host
 		if host == "" {
-			host = "localhost:8080"
+			host = "192.168.1.2:8080"
 		}
 		target.ServerURL = scheme + "://" + host
 	}

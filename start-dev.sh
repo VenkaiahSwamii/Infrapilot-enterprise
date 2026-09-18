@@ -20,8 +20,8 @@ echo "[3/3] Starting InfraPilot Agent (Go)..."
 
 echo ""
 echo "✅ All processes launched in background."
-echo "• Frontend: http://localhost:5173"
-echo "• Backend:  http://localhost:8080"
+echo "• Frontend: http://192.168.1.2:5173"
+echo "• Backend:  http://192.168.1.2:8080"
 echo ""
 echo "Press Ctrl+C to stop all services."
 wait

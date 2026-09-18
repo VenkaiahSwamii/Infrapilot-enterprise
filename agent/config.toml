@@ -2,8 +2,8 @@
 # InfraPilot Enterprise Agent Configuration (TOML)
 # ===================================================================
 
-server_address = "localhost:50051"
-backend_url = "http://localhost:8080"
+server_address = "192.168.1.2:50051"
+backend_url = "http://192.168.1.2:8080"
 machine_id = ""
 api_key = ""
 enrollment_token = ""
