@@ -98,10 +98,14 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 
 	remoteDeployService := services.NewRemoteDeployService(serverService)
 	remoteDeployHandler := handlers.NewRemoteDeployHandler(remoteDeployService)
+	configHandler := handlers.NewConfigHandler()
 
 	api := r.Group("/api/v1")
 	api.Use(apm.APMMiddleware(apmService))
 	{
+		// Dynamic Public Config route (single source of truth from config.toml)
+		api.GET("/config/public", configHandler.GetPublicConfig)
+
 		// Platform Self-Monitoring public health routes
 		api.GET("/platform/health", platformHandler.GetHealth)
 		api.GET("/platform/metrics", platformHandler.GetMetrics)

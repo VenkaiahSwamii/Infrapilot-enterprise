@@ -13,6 +13,7 @@ import (
 // Config holds all configuration for the application
 type Config struct {
 	// Server
+	BackendURL    string        `yaml:"backend_url" env:"BACKEND_URL"`
 	ServerPort    string        `yaml:"server_port" env:"SERVER_PORT"`
 	ServerMode    string        `yaml:"server_mode" env:"SERVER_MODE"`
 	ReadTimeout   time.Duration `yaml:"read_timeout" env:"READ_TIMEOUT"`
@@ -191,6 +192,7 @@ func Load() {
 		if data, err := os.ReadFile(tomlFile); err == nil {
 			var tomlCfg struct {
 				Server struct {
+					BackendURL     string   `toml:"backend_url"`
 					HTTPPort       int      `toml:"http_port"`
 					GRPCPort       int      `toml:"grpc_port"`
 					AllowedOrigins []string `toml:"allowed_origins"`
@@ -210,6 +212,9 @@ func Load() {
 				} `toml:"server"`
 			}
 			if err := toml.Unmarshal(data, &tomlCfg); err == nil {
+				if tomlCfg.Server.BackendURL != "" {
+					globalConfig.BackendURL = tomlCfg.Server.BackendURL
+				}
 				if tomlCfg.Server.HTTPPort != 0 {
 					globalConfig.ServerPort = strconv.Itoa(tomlCfg.Server.HTTPPort)
 				}
@@ -231,6 +236,10 @@ func Load() {
 			}
 			break
 		}
+	}
+
+	if globalConfig.BackendURL == "" {
+		globalConfig.BackendURL = getEnv("BACKEND_URL", "http://192.168.1.2:"+globalConfig.ServerPort)
 	}
 }
 

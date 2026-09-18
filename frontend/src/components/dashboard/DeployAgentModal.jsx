@@ -80,6 +80,15 @@ export default function DeployAgentModal({ isOpen, onClose, onDeployed }) {
         if (active) setLoadingToken(false);
       });
 
+    fetch('/api/v1/config/public')
+      .then((res) => res.json())
+      .then((data) => {
+        if (active && data && data.backend_url) {
+          setServerUrl(data.backend_url);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       active = false;
     };
