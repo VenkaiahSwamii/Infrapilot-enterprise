@@ -110,7 +110,7 @@ func Load() {
 	globalConfig = &Config{
 		// Server defaults
 		ServerPort:    getEnv("SERVER_PORT", "8080"),
-		ServerMode:    getEnv("SERVER_MODE", "release"),
+		ServerMode:    getEnv("SERVER_MODE", "debug"),
 		ReadTimeout:   getDuration("READ_TIMEOUT", 30*time.Second),
 		WriteTimeout:  getDuration("WRITE_TIMEOUT", 30*time.Second),
 		ShutdownGrace: getDuration("SHUTDOWN_GRACE", 15*time.Second),
@@ -131,7 +131,7 @@ func Load() {
 		RedisPoolSize: getInt("REDIS_POOL_SIZE", 10),
 
 		// JWT defaults
-		JWTSecret:     getEnv("JWT_SECRET", "change-me-in-production"),
+		JWTSecret:     getEnv("JWT_SECRET", "infrapilot-enterprise-local-dev-jwt-secret-key-2026"),
 		JWTExpiration: getDuration("JWT_EXPIRATION", 24*time.Hour),
 
 		// Logging defaults

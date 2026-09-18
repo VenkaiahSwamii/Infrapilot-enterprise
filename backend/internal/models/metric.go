@@ -7,7 +7,7 @@ import (
 )
 
 type Metric struct {
-	ID            uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID            uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	MachineID     uuid.UUID `gorm:"type:uuid;index;not null" json:"machine_id"`
 	CPUUsage      float64   `json:"cpu_usage"`
 	MemoryUsage   float64   `json:"memory_usage"`

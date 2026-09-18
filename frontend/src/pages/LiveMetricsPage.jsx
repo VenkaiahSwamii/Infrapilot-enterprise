@@ -14,6 +14,7 @@ import { getMachineMetrics } from '../api/machines.js';
 import DashboardCharts from '../components/dashboard/DashboardCharts.jsx';
 import { useServerStore } from '../store/serverStore.jsx';
 import { getMachineId } from '../utils/machineId.js';
+import ServerSelectDropdown from '../components/common/ServerSelectDropdown.jsx';
 
 export default function LiveMetricsPage() {
   const store = useServerStore();
@@ -22,11 +23,20 @@ export default function LiveMetricsPage() {
   const telemetryHistoryMap = store?.telemetryHistoryMap || {};
   const fetchServers = store?.fetchServers;
 
-  const [selectedServerId, setSelectedServerId] = useState('');
+  const globalSelectedId = store?.selectedServerId || '';
+  const setGlobalSelectedId = store?.setSelectedServerId;
+
+  const [selectedServerId, setSelectedServerId] = useState(globalSelectedId);
   const [initialSamples, setInitialSamples] = useState([]);
   const [range, setRange] = useState('1h');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
+
+  useEffect(() => {
+    if (globalSelectedId) {
+      setSelectedServerId(globalSelectedId);
+    }
+  }, [globalSelectedId]);
 
   // 1. Initial Load of Servers
   useEffect(() => {
@@ -50,8 +60,9 @@ export default function LiveMetricsPage() {
     if (!selectedServerId && connectedServers.length > 0) {
       const activeId = getMachineId(connectedServers[0]);
       setSelectedServerId(activeId);
+      if (setGlobalSelectedId) setGlobalSelectedId(activeId);
     }
-  }, [connectedServers, selectedServerId]);
+  }, [connectedServers, selectedServerId, setGlobalSelectedId]);
 
   // 4. Fetch metrics for selected machine
   const loadMetrics = useCallback(async () => {
@@ -129,35 +140,13 @@ export default function LiveMetricsPage() {
 
         {/* Monitored Machine Selector & Refresh Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#0d1220', border: '1px solid #1f2e44', padding: '8px 14px', borderRadius: '8px' }}>
-            <Server size={14} color="#06b6d4" />
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>HOST:</span>
-            <select
-              value={selectedServerId}
-              onChange={(e) => setSelectedServerId(e.target.value)}
-              style={{
-                backgroundColor: 'transparent',
-                border: 'none',
-                color: '#f1f5f9',
-                fontWeight: 600,
-                fontSize: '13px',
-                outline: 'none',
-                cursor: 'pointer',
-                minWidth: '220px',
-              }}
-            >
-              {servers.length === 0 && <option value="">Loading Machines...</option>}
-              {servers.map((s) => {
-                const sId = getMachineId(s);
-                const isOnline = String(s.status || s.Status || '').toUpperCase() === 'ONLINE' || s.online === true;
-                return (
-                  <option key={sId} value={sId} style={{ background: '#0f172a', color: '#f1f5f9' }}>
-                    {isOnline ? '🟢' : '🔴'} {s.hostname || 'Host'} ({s.ip_address || '127.0.0.1'})
-                  </option>
-                );
-              })}
-            </select>
-          </div>
+          <ServerSelectDropdown
+            value={selectedServerId}
+            onChange={(sId) => {
+              setSelectedServerId(sId);
+              if (setGlobalSelectedId) setGlobalSelectedId(sId);
+            }}
+          />
 
           <button
             onClick={loadMetrics}

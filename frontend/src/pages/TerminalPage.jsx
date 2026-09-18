@@ -4,7 +4,9 @@ import { Terminal, Play, Server, AlertTriangle, Cpu, Clock, RefreshCw } from 'lu
 import { listServers } from '../api/server.js';
 import { apiClient } from '../api/client.js';
 import { useDashboardStore } from '../store/dashboardStore.jsx';
+import { useServerStore } from '../store/serverStore.jsx';
 import { getMachineId } from '../utils/machineId.js';
+import ServerSelectDropdown from '../components/common/ServerSelectDropdown.jsx';
 
 export default function TerminalPage() {
   const [searchParams] = useSearchParams();
@@ -164,25 +166,10 @@ export default function TerminalPage() {
         {/* Server Selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <label style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>TARGET SERVER:</label>
-          <select
+          <ServerSelectDropdown
             value={selectedServerId}
-            onChange={(e) => setSelectedServerId(e.target.value)}
-            style={{
-              backgroundColor: '#0d1220',
-              border: '1px solid #1f2e44',
-              color: '#f1f5f9',
-              borderRadius: '8px',
-              padding: '8px 16px',
-              outline: 'none',
-              fontSize: '13px',
-              minWidth: '200px',
-            }}
-          >
-            {servers.length === 0 && <option value="">No Online Servers</option>}
-            {servers.map(s => (
-              <option key={s.id || s.ID} value={s.id || s.ID}>{s.hostname} ({s.ip_address || 'No IP'})</option>
-            ))}
-          </select>
+            onChange={(sId) => setSelectedServerId(sId)}
+          />
         </div>
       </div>
 

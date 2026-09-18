@@ -8,7 +8,7 @@ import (
 
 // Organization represents an enterprise tenant organization
 type Organization struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	Name      string    `gorm:"type:varchar(255);not null" json:"name"`
 	Slug      string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"slug"`
 	Status    string    `gorm:"type:varchar(50);default:'active';index" json:"status"` // active, archived
@@ -24,7 +24,7 @@ func (Organization) TableName() string {
 
 // OrganizationUser maps user membership and RBAC role inside an organization
 type OrganizationUser struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
 	UserID         uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
 	Role           string    `gorm:"type:varchar(50);default:'viewer';not null" json:"role"` // owner, admin, operator, viewer, auditor, billing_admin
@@ -39,7 +39,7 @@ func (OrganizationUser) TableName() string {
 
 // OrganizationSettings holds tenant white-label branding, policies, and configuration
 type OrganizationSettings struct {
-	ID                uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID                uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID    uuid.UUID `gorm:"type:uuid;uniqueIndex;not null" json:"organization_id"`
 	CompanyName       string    `gorm:"type:varchar(255)" json:"company_name"`
 	LogoURL           string    `gorm:"type:varchar(500)" json:"logo_url"`
@@ -66,7 +66,7 @@ func (OrganizationSettings) TableName() string {
 
 // OrganizationInvitation manages pending team member email invitations
 type OrganizationInvitation struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
 	Email          string    `gorm:"type:varchar(255);not null;index" json:"email"`
 	Role           string    `gorm:"type:varchar(50);default:'operator'" json:"role"`
@@ -84,7 +84,7 @@ func (OrganizationInvitation) TableName() string {
 
 // OrganizationBilling handles SaaS subscription readiness and payment provider state
 type OrganizationBilling struct {
-	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID              uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID  uuid.UUID `gorm:"type:uuid;uniqueIndex;not null" json:"organization_id"`
 	SubscriptionID  string    `gorm:"type:varchar(255)" json:"subscription_id"`
 	Plan            string    `gorm:"type:varchar(50);default:'enterprise'" json:"plan"`         // starter, professional, enterprise
@@ -104,7 +104,7 @@ func (OrganizationBilling) TableName() string {
 
 // OrganizationQuota manages resource consumption limits per tenant
 type OrganizationQuota struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID uuid.UUID `gorm:"type:uuid;uniqueIndex;not null" json:"organization_id"`
 	MaxMachines    int       `gorm:"default:50" json:"max_machines"` // 0 = unlimited
 	MaxUsers       int       `gorm:"default:20" json:"max_users"`    // 0 = unlimited
@@ -125,7 +125,7 @@ func (OrganizationQuota) TableName() string {
 
 // OrganizationSSO configures SAML 2.0 / OIDC / LDAP enterprise SSO for tenant
 type OrganizationSSO struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID uuid.UUID `gorm:"type:uuid;uniqueIndex;not null" json:"organization_id"`
 	ProviderType   string    `gorm:"type:varchar(50);default:'saml'" json:"provider_type"` // saml, oidc, ldap, google, azure_ad, okta
 	Enabled        bool      `gorm:"default:false" json:"enabled"`
@@ -145,7 +145,7 @@ func (OrganizationSSO) TableName() string {
 
 // OrganizationAuditLog records tenant-scoped administrative events
 type OrganizationAuditLog struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
 	Username       string    `gorm:"type:varchar(255);not null" json:"username"`
 	IP             string    `gorm:"type:varchar(50)" json:"ip"`
@@ -163,7 +163,7 @@ func (OrganizationAuditLog) TableName() string {
 
 // OrganizationAPIKey holds tenant API key credentials
 type OrganizationAPIKey struct {
-	ID             uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
 	Name           string     `gorm:"type:varchar(255);not null" json:"name"`
 	KeyPrefix      string     `gorm:"type:varchar(20);index;not null" json:"key_prefix"`

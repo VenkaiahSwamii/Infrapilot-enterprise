@@ -8,7 +8,7 @@ import (
 
 // Log defines the database model for logs table
 type Log struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	MachineID uuid.UUID `gorm:"type:uuid;index;not null" json:"machine_id"`
 	Hostname  string    `gorm:"index;size:255" json:"hostname"`
 	Platform  string    `gorm:"size:50" json:"platform"`               // linux, windows

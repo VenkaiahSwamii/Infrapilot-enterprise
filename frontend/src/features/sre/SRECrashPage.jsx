@@ -9,11 +9,12 @@ import {
   Search,
   Download,
   Shield,
-  Activity,
-  Layers
+  Layers,
 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
 import { getMachineId } from '../../utils/machineId.js';
+import { useServerStore } from '../../store/serverStore.jsx';
+import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
 
 export default function SRECrashPage() {
   const [machines, setMachines] = useState([]);
@@ -55,7 +56,8 @@ export default function SRECrashPage() {
     }, 600);
   };
 
-  const primaryMachine = machines[0] || {};
+  const { selectedServer } = useServerStore();
+  const primaryMachine = selectedServer || machines[0] || {};
   const activeHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'luffy';
 
   const servicesList = [
@@ -119,7 +121,8 @@ export default function SRECrashPage() {
           </p>
         </div>
 
-        <div className="header-status-meta">
+        <div className="header-status-meta" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <ServerSelectDropdown size="sm" />
           <span className="live-status-pill">
             <span className="green-dot pulse" /> Live Monitoring
           </span>

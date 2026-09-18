@@ -322,11 +322,17 @@ func (g *ReportGenerator) collectDockerStatus(report *Report) (map[string]interf
 	}
 
 	var dockerRecords []models.LinuxDocker
-	if err := database.DB.Raw(`
-		SELECT DISTINCT ON (machine_id) * 
-		FROM linux_dockers 
-		ORDER BY machine_id, sampled_at DESC
-	`).Scan(&dockerRecords).Error; err != nil {
+	var err error
+	if database.DB.Dialector.Name() == "postgres" {
+		err = database.DB.Raw(`
+			SELECT DISTINCT ON (machine_id) * 
+			FROM linux_dockers 
+			ORDER BY machine_id, sampled_at DESC
+		`).Scan(&dockerRecords).Error
+	} else {
+		err = database.DB.Order("sampled_at DESC").Find(&dockerRecords).Error
+	}
+	if err != nil {
 		return data, err
 	}
 
@@ -358,11 +364,17 @@ func (g *ReportGenerator) collectKubernetesStatus(report *Report) (map[string]in
 	}
 
 	var k8sRecords []models.LinuxKubernetes
-	if err := database.DB.Raw(`
-		SELECT DISTINCT ON (machine_id) * 
-		FROM linux_kubernetes 
-		ORDER BY machine_id, sampled_at DESC
-	`).Scan(&k8sRecords).Error; err != nil {
+	var err error
+	if database.DB.Dialector.Name() == "postgres" {
+		err = database.DB.Raw(`
+			SELECT DISTINCT ON (machine_id) * 
+			FROM linux_kubernetes 
+			ORDER BY machine_id, sampled_at DESC
+		`).Scan(&k8sRecords).Error
+	} else {
+		err = database.DB.Order("sampled_at DESC").Find(&k8sRecords).Error
+	}
+	if err != nil {
 		return data, err
 	}
 

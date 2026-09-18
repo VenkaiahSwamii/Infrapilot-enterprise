@@ -17,6 +17,8 @@ import { apiClient } from '../../api/client.js';
 import { getMachineMetrics } from '../../api/machines.js';
 import { createLiveEventsSocket } from '../../websocket/liveEvents.js';
 import { getMachineId } from '../../utils/machineId.js';
+import { useServerStore } from '../../store/serverStore.jsx';
+import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
 
 export default function SREDiskPage() {
   const [machines, setMachines] = useState([]);
@@ -85,8 +87,10 @@ export default function SREDiskPage() {
     setTimeout(() => setIsScanning(false), 800);
   };
 
+  const { selectedServer } = useServerStore();
+
   // Derive real connected disk info
-  const primaryMachine = machines[0] || {};
+  const primaryMachine = selectedServer || machines[0] || {};
   const activeHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'luffy';
   const machineId = getMachineId(primaryMachine);
   const live = liveMetrics[machineId] || {};
@@ -144,7 +148,8 @@ export default function SREDiskPage() {
           <p className="subtitle-txt">Filesystem saturation and predictive capacity analytics across all attached volumes.</p>
         </div>
 
-        <div className="header-status-meta">
+        <div className="header-status-meta" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <ServerSelectDropdown size="sm" />
           <span className="live-status-pill">
             <span className="green-dot pulse" /> Live Monitoring
           </span>

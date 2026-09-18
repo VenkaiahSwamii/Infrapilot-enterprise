@@ -16,6 +16,8 @@ import { apiClient } from '../../api/client.js';
 import { getMachineMetrics } from '../../api/machines.js';
 import { createLiveEventsSocket } from '../../websocket/liveEvents.js';
 import { getMachineId } from '../../utils/machineId.js';
+import { useServerStore } from '../../store/serverStore.jsx';
+import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
 
 // SVG Sparkline component
 function LatencySparkline({ data = [17.2, 17.5, 17.8, 17.4, 17.7, 17.6, 17.9, 17.7], color = '#22c55e' }) {
@@ -98,7 +100,8 @@ export default function SRELatencyPage() {
     };
   }, []);
 
-  const primaryMachine = machines[0] || {};
+  const { selectedServer } = useServerStore();
+  const primaryMachine = selectedServer || machines[0] || {};
   const activeHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'luffy';
   const machineId = getMachineId(primaryMachine);
   const live = liveMetrics[machineId] || {};
@@ -146,7 +149,8 @@ export default function SRELatencyPage() {
           </p>
         </div>
 
-        <div className="header-status-meta">
+        <div className="header-status-meta" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <ServerSelectDropdown size="sm" />
           <span className="live-status-pill">
             <span className="green-dot pulse" /> Live Monitoring
           </span>

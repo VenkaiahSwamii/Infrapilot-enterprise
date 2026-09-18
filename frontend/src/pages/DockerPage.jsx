@@ -3,6 +3,7 @@ import { Layers, Activity, RefreshCw, Server, AlertTriangle, ShieldCheck, Play, 
 import { listServers } from '../api/server.js';
 import { getDockerContainers, getDockerOverview } from '../api/docker.js';
 import { useDashboardStore } from '../store/dashboardStore.jsx';
+import ServerSelectDropdown from '../components/common/ServerSelectDropdown.jsx';
 
 export default function DockerPage() {
   const [servers, setServers] = useState([]);
@@ -160,25 +161,12 @@ export default function DockerPage() {
           />
         </div>
 
-        <select
+        <ServerSelectDropdown
           value={selectedServerId}
-          onChange={(e) => setSelectedServerId(e.target.value)}
-          style={{
-            backgroundColor: '#0d1220',
-            border: '1px solid #1f2e44',
-            color: '#f1f5f9',
-            borderRadius: '8px',
-            padding: '8px 16px',
-            outline: 'none',
-            fontSize: '13px',
-            minWidth: '180px',
-          }}
-        >
-          <option value="all">All Servers</option>
-          {servers.map(s => (
-            <option key={s.id || s.ID} value={s.id || s.ID}>{s.hostname}</option>
-          ))}
-        </select>
+          onChange={(sId) => setSelectedServerId(sId)}
+          showAll={true}
+          allLabel="All Servers"
+        />
       </div>
 
       {/* Containers Table */}

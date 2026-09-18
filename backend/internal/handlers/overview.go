@@ -128,11 +128,15 @@ func EnterpriseOverview(c *gin.Context) {
 	// 1. Calculate DockerContainers
 	dockerContainers := 0
 	var dockerRecords []models.LinuxDocker
-	database.DB.Raw(`
-		SELECT DISTINCT ON (machine_id) * 
-		FROM linux_dockers 
-		ORDER BY machine_id, sampled_at DESC
-	`).Scan(&dockerRecords)
+	if database.DB.Dialector.Name() == "postgres" {
+		database.DB.Raw(`
+			SELECT DISTINCT ON (machine_id) * 
+			FROM linux_dockers 
+			ORDER BY machine_id, sampled_at DESC
+		`).Scan(&dockerRecords)
+	} else {
+		database.DB.Order("sampled_at DESC").Find(&dockerRecords)
+	}
 	for _, record := range dockerRecords {
 		var containers []interface{}
 		if record.ContainersJSON != "" {
@@ -145,11 +149,15 @@ func EnterpriseOverview(c *gin.Context) {
 	// 2. Calculate KubernetesPods
 	kubernetesPods := 0
 	var k8sRecords []models.LinuxKubernetes
-	database.DB.Raw(`
-		SELECT DISTINCT ON (machine_id) * 
-		FROM linux_kubernetes 
-		ORDER BY machine_id, sampled_at DESC
-	`).Scan(&k8sRecords)
+	if database.DB.Dialector.Name() == "postgres" {
+		database.DB.Raw(`
+			SELECT DISTINCT ON (machine_id) * 
+			FROM linux_kubernetes 
+			ORDER BY machine_id, sampled_at DESC
+		`).Scan(&k8sRecords)
+	} else {
+		database.DB.Order("sampled_at DESC").Find(&k8sRecords)
+	}
 	for _, record := range k8sRecords {
 		var pods []interface{}
 		if record.PodsJSON != "" {

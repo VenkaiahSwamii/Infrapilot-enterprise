@@ -8,7 +8,7 @@ import (
 
 // AnomalyRecord represents a detected telemetry anomaly
 type AnomalyRecord struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	MachineID      string    `gorm:"type:varchar(100);index" json:"machine_id"`
 	Hostname       string    `gorm:"type:varchar(255)" json:"hostname"`
@@ -29,7 +29,7 @@ func (AnomalyRecord) TableName() string {
 
 // PredictionRecord represents a predicted infrastructure failure
 type PredictionRecord struct {
-	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID              uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID  string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	MachineID       string    `gorm:"type:varchar(100);index" json:"machine_id"`
 	Hostname        string    `gorm:"type:varchar(255)" json:"hostname"`
@@ -49,7 +49,7 @@ func (PredictionRecord) TableName() string {
 
 // CapacityForecastRecord stores resource capacity projections
 type CapacityForecastRecord struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	ResourceType   string    `gorm:"type:varchar(100);index" json:"resource_type"` // cpu, ram, storage, network, k8s_nodes
 	CurrentUsage   float64   `json:"current_usage"`
@@ -67,7 +67,7 @@ func (CapacityForecastRecord) TableName() string {
 
 // RootCauseRecord stores root cause analysis causality graphs
 type RootCauseRecord struct {
-	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID              uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID  string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	IncidentID      string    `gorm:"type:varchar(100);index" json:"incident_id"`
 	RootCause       string    `gorm:"type:varchar(255)" json:"root_cause"`
@@ -83,7 +83,7 @@ func (RootCauseRecord) TableName() string {
 
 // AIRecommendationRecord stores actionable remediation suggestions
 type AIRecommendationRecord struct {
-	ID               uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID               uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID   string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	MachineID        string    `gorm:"type:varchar(100);index" json:"machine_id"`
 	Hostname         string    `gorm:"type:varchar(255)" json:"hostname"`
@@ -104,7 +104,7 @@ func (AIRecommendationRecord) TableName() string {
 
 // SLARecord stores availability and SLA metrics
 type SLARecord struct {
-	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID              uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID  string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	Period          string    `gorm:"type:varchar(50);index" json:"period"` // daily, monthly
 	AvailabilityPct float64   `json:"availability_pct"`
@@ -122,7 +122,7 @@ func (SLARecord) TableName() string {
 
 // SecurityAnalyticRecord stores security threat intelligence events
 type SecurityAnalyticRecord struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	EventType      string    `gorm:"type:varchar(100);index" json:"event_type"` // brute_force, unauthorized_login, suspicious_process, privilege_escalation
 	Severity       string    `gorm:"type:varchar(50)" json:"severity"`
@@ -139,7 +139,7 @@ func (SecurityAnalyticRecord) TableName() string {
 
 // CostOptimizationRecord stores cloud/infra cost reduction recommendations
 type CostOptimizationRecord struct {
-	ID               uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID               uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID   string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	ResourceName     string    `gorm:"type:varchar(255)" json:"resource_name"`
 	ResourceType     string    `gorm:"type:varchar(100)" json:"resource_type"` // vm, k8s_node, pvc, docker_container
