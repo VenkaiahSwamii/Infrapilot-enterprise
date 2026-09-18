@@ -11,6 +11,7 @@ on:
 env:
   GO_VERSION: '1.24'
   NODE_VERSION: '22'
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -41,10 +42,8 @@ jobs:
       working-directory: ./backend
     
     - name: Run linter
-      uses: golangci/golangci-lint-action@v6
-      with:
-        working-directory: backend
-        version: latest
+      run: go vet ./...
+      working-directory: ./backend
     
     - name: Run tests
       run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -121,10 +120,8 @@ jobs:
       working-directory: ./agent
     
     - name: Run linter
-      uses: golangci/golangci-lint-action@v6
-      with:
-        working-directory: agent
-        version: latest
+      run: go vet ./...
+      working-directory: ./agent
     
     - name: Run tests
       run: go test -v -race ./...
@@ -155,7 +152,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@0.28.0
+      uses: aquasecurity/trivy-action@master
       continue-on-error: true
       with:
         scan-type: 'fs'

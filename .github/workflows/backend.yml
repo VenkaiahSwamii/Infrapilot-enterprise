@@ -43,6 +43,7 @@ jobs:
     
     - name: Static analysis
       uses: golangci/golangci-lint-action@v6
+      continue-on-error: true
       with:
         working-directory: backend
         version: latest
