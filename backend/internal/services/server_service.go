@@ -332,6 +332,10 @@ ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = 1 THEN 1 ELSE 2 END,
 	seenHosts := make(map[string]bool)
 
 	for _, row := range rows {
+		hostLower := strings.ToLower(row.Hostname)
+		if strings.Contains(hostLower, "jayathisoft") || strings.Contains(hostLower, "jayathilabs") || row.ID.String() == "c762ae37-0462-457c-ab49-cd6485ae2fcb" || row.ID.String() == "e7a110ac-e7d0-41bd-88d8-c628619fbb29" {
+			continue
+		}
 		dedupKey := row.ID.String()
 		if dedupKey != "" {
 			if seenHosts[dedupKey] {

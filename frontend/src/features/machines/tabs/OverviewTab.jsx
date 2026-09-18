@@ -83,8 +83,8 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
   const rawMemTotal = metrics?.memory_total ?? metrics?.total_memory ?? machine?.total_memory ?? machine?.memory_total ?? machine?.total_memory_gb ?? machine?.TotalMemoryGB;
   const rawMemUsed = metrics?.memory_used ?? machine?.memory_used;
 
-  const totalMemGb = parseGB(rawMemTotal) || (machine?.total_memory_gb ? Number(machine.total_memory_gb) : (isLinux ? 4.0 : 8.0));
-  const usedMemGb = rawMemUsed ? parseGB(rawMemUsed) : ((memVal / 100) * totalMemGb);
+  const totalMemGb = parseGB(rawMemTotal) || (machine?.total_memory_gb ? Number(machine.total_memory_gb) : 0);
+  const usedMemGb = rawMemUsed ? parseGB(rawMemUsed) : (totalMemGb > 0 ? (memVal / 100) * totalMemGb : 0);
 
   // 4. Physical Storage
   let fsTotalBytes = 0;
@@ -101,32 +101,37 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
 
   const totalDiskGb = fsTotalBytes > 0
     ? parseGB(fsTotalBytes)
-    : (parseGB(rawDiskTotal) || (machine?.total_disk_gb ? Number(machine.total_disk_gb) : (isLinux ? 2013.0 : 512.0)));
+    : (parseGB(rawDiskTotal) || (machine?.total_disk_gb ? Number(machine.total_disk_gb) : 0));
 
   const usedDiskGb = fsUsedBytes > 0
     ? parseGB(fsUsedBytes)
     : rawDiskUsed
     ? parseGB(rawDiskUsed)
-    : ((diskVal / 100) * totalDiskGb);
+    : (totalDiskGb > 0 ? (diskVal / 100) * totalDiskGb : 0);
 
   const actualDiskPct = totalDiskGb > 0 ? (usedDiskGb / totalDiskGb) * 100 : (diskVal || 0);
 
   // 5. Processor & Hardware Specs
-  const cpuCores = metrics?.cpu_cores || machine?.cpu_cores || machine?.CPUCores || (isLinux ? 4 : 4);
-  const cpuModel = machine?.cpu_model || metrics?.cpu_model || '11th Gen Intel(R) Core(TM) i3-1115G4 @ 3.00GHz';
-  const gpuModel = machine?.gpu || (isLinux ? 'Direct3D / Virtual GPU' : 'Intel(R) UHD Graphics');
-  const deviceId = machine?.id || machine?.hostname || 'Unknown';
-  const productId = machine?.product_id || (isLinux ? 'LINUX-ENTERPRISE-AGENT' : 'WIN-ENTERPRISE-AGENT');
+  const cpuCores = metrics?.cpu_cores || machine?.cpu_cores || machine?.CPUCores || null;
+  const cpuModel = machine?.cpu_model || metrics?.cpu_model || '--';
+  const gpuModel = machine?.gpu || metrics?.gpu || '--';
+  const deviceId = machine?.id || machine?.hostname || '--';
+  const productId = machine?.product_id || (machine?.os ? `${String(machine.os).toUpperCase()}-ENTERPRISE-AGENT` : '--');
+  const osDisplay = machine?.operating_system || machine?.platform || (machine?.os ? String(machine.os) : '--');
+  const systemTypeDisplay = machine?.architecture
+    ? (machine.architecture.includes('64') ? `64-bit operating system, ${machine.architecture}-based processor` : machine.architecture)
+    : '64-bit operating system, x64-based processor';
 
-  const agentVersion = machine?.agent_version || machine?.AgentVersion || 'v1.4.2';
-  const isOnline = String(machine?.status || 'ONLINE').toUpperCase() === 'ONLINE' || machine?.online === true;
+  const agentVersion = machine?.agent_version || machine?.AgentVersion || '--';
+  const rawStatus = String(machine?.status || '').toUpperCase();
+  const isOnline = rawStatus === 'ONLINE' || machine?.online === true;
 
   // 6. Dynamic Uptime Formatter
   const rawUptimeSec = metrics?.uptime ?? machine?.uptime ?? 0;
   const formatUptime = (sec) => {
     if (typeof sec === 'string') return sec;
     const num = Number(sec);
-    if (isNaN(num) || num <= 0) return '0s';
+    if (isNaN(num) || num <= 0) return '--';
     const d = Math.floor(num / (3600 * 24));
     const h = Math.floor((num % (3600 * 24)) / 3600);
     const m = Math.floor((num % 3600) / 60);
@@ -140,7 +145,7 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
     ? new Date(metrics.created_at).toLocaleString('en-GB')
     : machine?.last_seen
     ? new Date(machine.last_seen).toLocaleString('en-GB')
-    : 'Just now';
+    : '--';
 
   return (
     <div className="overview-tab-root">
@@ -156,15 +161,15 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
           <div className="system-info-rows">
             <div className="info-item">
               <span className="lbl"><Monitor size={14} /> Hostname</span>
-              <span className="val">{machine.hostname || (isLinux ? 'Venkyyy' : 'Venkyyy')}</span>
+              <span className="val">{machine?.hostname || '--'}</span>
             </div>
             <div className="info-item">
               <span className="lbl"><Network size={14} /> IP Address</span>
-              <span className="val">{machine.ip_address || (isLinux ? '172.30.120.10' : '192.168.1.11')}</span>
+              <span className="val">{machine?.ip_address || '--'}</span>
             </div>
             <div className="info-item">
               <span className="lbl"><Layers size={14} /> Operating System</span>
-              <span className="val">{machine.operating_system || (isLinux ? 'Ubuntu 24.04 LTS (WSL2)' : 'Windows 11 Home Single Language')}</span>
+              <span className="val">{osDisplay}</span>
             </div>
             <div className="info-item">
               <span className="lbl"><Cpu size={14} /> Processor</span>
@@ -176,7 +181,7 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
             </div>
             <div className="info-item">
               <span className="lbl"><Layers size={14} /> System Type</span>
-              <span className="val">64-bit operating system, x64-based processor</span>
+              <span className="val">{systemTypeDisplay}</span>
             </div>
             <div className="info-item">
               <span className="lbl"><ShieldCheck size={14} /> Device ID</span>
@@ -218,8 +223,8 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
                   </svg>
                   <div className="gauge-val cyan-text">{cpuVal.toFixed(1)}%</div>
                 </div>
-                <div className="gauge-sub">Cores: {cpuCores}</div>
-                <div className="gauge-sub">{metrics?.cpu_frequency_mhz ? `${(metrics.cpu_frequency_mhz / 1000).toFixed(2)} GHz` : 'Live Clock'}</div>
+                <div className="gauge-sub">Cores: {cpuCores != null ? cpuCores : '--'}</div>
+                <div className="gauge-sub">{metrics?.cpu_frequency_mhz ? `${(metrics.cpu_frequency_mhz / 1000).toFixed(2)} GHz` : '--'}</div>
               </div>
 
               {/* Memory Gauge */}
@@ -235,13 +240,13 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
                       fill="none"
                       stroke="#f59e0b"
                       strokeWidth="8"
-                      strokeDasharray={`${(memVal / 100) * 251} 251`}
+                      strokeDasharray={`${totalMemGb > 0 ? (memVal / 100) * 251 : 0} 251`}
                       strokeLinecap="round"
                     />
                   </svg>
-                  <div className="gauge-val yellow-text">{memVal.toFixed(1)}%</div>
+                  <div className="gauge-val yellow-text">{totalMemGb > 0 ? `${memVal.toFixed(1)}%` : '--'}</div>
                 </div>
-                <div className="gauge-sub">{usedMemGb.toFixed(2)} / {totalMemGb.toFixed(2)} GB</div>
+                <div className="gauge-sub">{totalMemGb > 0 ? `${usedMemGb.toFixed(2)} / ${totalMemGb.toFixed(2)} GB` : '--'}</div>
               </div>
 
               {/* Disk Gauge */}
@@ -257,13 +262,13 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
                       fill="none"
                       stroke={actualDiskPct > 80 ? '#ef4444' : actualDiskPct > 60 ? '#f59e0b' : '#3b82f6'}
                       strokeWidth="8"
-                      strokeDasharray={`${(actualDiskPct / 100) * 251} 251`}
+                      strokeDasharray={`${totalDiskGb > 0 ? (actualDiskPct / 100) * 251 : 0} 251`}
                       strokeLinecap="round"
                     />
                   </svg>
-                  <div className={`gauge-val ${actualDiskPct > 80 ? 'red-text' : actualDiskPct > 60 ? 'yellow-text' : 'blue-text'}`}>{actualDiskPct.toFixed(1)}%</div>
+                  <div className={`gauge-val ${actualDiskPct > 80 ? 'red-text' : actualDiskPct > 60 ? 'yellow-text' : 'blue-text'}`}>{totalDiskGb > 0 ? `${actualDiskPct.toFixed(1)}%` : '--'}</div>
                 </div>
-                <div className="gauge-sub">{usedDiskGb.toFixed(0)} / {totalDiskGb.toFixed(0)} GB</div>
+                <div className="gauge-sub">{totalDiskGb > 0 ? `${usedDiskGb.toFixed(0)} / ${totalDiskGb.toFixed(0)} GB` : '--'}</div>
               </div>
 
               {/* Network Gauge */}
@@ -272,7 +277,7 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
                 <div className="gauge-ring-box">
                   <svg viewBox="0 0 100 100" className="gauge-svg">
                     <circle cx="50" cy="50" r="40" fill="none" stroke="#182335" strokeWidth="8" />
-                    <circle cx="50" cy="50" r="40" fill="none" stroke="#3b82f6" strokeWidth="8" strokeDasharray="60 251" strokeLinecap="round" />
+                    <circle cx="50" cy="50" r="40" fill="none" stroke="#3b82f6" strokeWidth="8" strokeDasharray={`${Math.min(251, (Number(netMbps) / 100) * 251)} 251`} strokeLinecap="round" />
                   </svg>
                   <div className="gauge-val blue-text">{netMbps} Mbps</div>
                 </div>
