@@ -57,6 +57,18 @@ func GetMetrics() (*metrics.Metrics, error) {
 
 	info, _ := host.Info()
 
+	var uptime uint64
+	if u, err := host.Uptime(); err == nil && u > 0 {
+		uptime = u
+	} else if info != nil && info.Uptime > 0 {
+		uptime = info.Uptime
+	} else if bootTime, err := host.BootTime(); err == nil && bootTime > 0 {
+		nowSec := uint64(time.Now().Unix())
+		if nowSec > bootTime {
+			uptime = nowSec - bootTime
+		}
+	}
+
 	cpuUsage, _ := cpu.Percent(200*time.Millisecond, false)
 	cpuPerCore, _ := cpu.Percent(0, true)
 	cpuInfos, _ := cpu.Info()
@@ -116,11 +128,7 @@ func GetMetrics() (*metrics.Metrics, error) {
 	var usedDiskBytes uint64 = 0
 	var diskPercent float64 = 0.0
 
-	if diskInfo != nil && diskInfo.Total > 0 {
-		totalDiskBytes = diskInfo.Total
-		usedDiskBytes = diskInfo.Used
-		diskPercent = diskInfo.UsedPercent
-	} else if len(filesystems) > 0 {
+	if len(filesystems) > 0 {
 		for _, fs := range filesystems {
 			totalDiskBytes += fs.Total
 			usedDiskBytes += fs.Used
@@ -128,6 +136,10 @@ func GetMetrics() (*metrics.Metrics, error) {
 		if totalDiskBytes > 0 {
 			diskPercent = (float64(usedDiskBytes) / float64(totalDiskBytes)) * 100.0
 		}
+	} else if diskInfo != nil && diskInfo.Total > 0 {
+		totalDiskBytes = diskInfo.Total
+		usedDiskBytes = diskInfo.Used
+		diskPercent = diskInfo.UsedPercent
 	}
 
 	cpuFrequency := 0.0
@@ -143,7 +155,7 @@ func GetMetrics() (*metrics.Metrics, error) {
 		OS:                  info.OS,
 		Platform:            info.Platform,
 		PlatformVer:         info.PlatformVersion,
-		Uptime:              info.Uptime,
+		Uptime:              uptime,
 		Kernel:              info.KernelVersion,
 		Architecture:        runtime.GOARCH,
 		Timezone:            time.Now().Location().String(),

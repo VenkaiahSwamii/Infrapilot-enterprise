@@ -125,7 +125,7 @@ export default function MachineDetailPage() {
               filesystems: latestSample?.filesystems || machinePayload.filesystems,
               total_memory_gb: machinePayload.total_memory_gb || machinePayload.TotalMemoryGB,
               total_disk_gb: machinePayload.total_disk_gb || machinePayload.TotalDiskGB,
-              cpu_cores: machinePayload.cpu_cores || machinePayload.CPUCores || 4,
+              cpu_cores: Number(machinePayload.cpu_cores || machinePayload.CPUCores) > 0 ? Number(machinePayload.cpu_cores || machinePayload.CPUCores) : (String(machinePayload.os || '').toLowerCase().includes('win') ? 4 : 2),
               agent_version: machinePayload.agent_version || machinePayload.AgentVersion || 'v1.4.2',
               uptime: latestSample?.uptime || machinePayload.uptime || 0,
               created_at: latestSample

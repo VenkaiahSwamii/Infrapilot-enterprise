@@ -28,6 +28,7 @@ func SaveMetric(e events.Event) {
 	}
 
 	metric := models.Metric{
+		ID:          uuid.New(),
 		MachineID:   machine.ID,
 		CPUUsage:    metricEvent.CPU,
 		MemoryUsage: metricEvent.Memory,
@@ -54,6 +55,7 @@ func SaveAuditLog(e events.Event) {
 
 	// Create audit log entry with basic information
 	auditLog := models.AuditLog{
+		ID:        uuid.New(),
 		Username:  "system",
 		Action:    eventName,
 		Result:    "success",

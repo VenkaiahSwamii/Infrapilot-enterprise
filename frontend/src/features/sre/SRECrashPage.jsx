@@ -10,6 +10,7 @@ import {
   Download,
   Shield,
   Layers,
+  Activity,
 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
 import { getMachineId } from '../../utils/machineId.js';
@@ -25,13 +26,40 @@ export default function SRECrashPage() {
   const [sortOption, setSortOption] = useState('NAME_ASC');
   const [lastUpdated, setLastUpdated] = useState(new Date().toLocaleTimeString());
 
+  const { selectedServer } = useServerStore();
+  const [liveServices, setLiveServices] = useState([]);
+  const primaryMachine = selectedServer || machines[0] || {};
+  const activeHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'venky';
+  const machineId = primaryMachine ? getMachineId(primaryMachine) : '';
+
   const fetchServicesData = async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get('/machines').catch(() => null);
-      if (res && (Array.isArray(res.data) || res.data?.machines)) {
-        const raw = Array.isArray(res.data) ? res.data : res.data?.machines || [];
+      const [machRes, svcRes] = await Promise.all([
+        apiClient.get('/machines').catch(() => null),
+        apiClient.get(machineId ? `/services?machine_id=${machineId}` : '/services').catch(() => null),
+      ]);
+
+      if (machRes && (Array.isArray(machRes.data) || machRes.data?.machines)) {
+        const raw = Array.isArray(machRes.data) ? machRes.data : machRes.data?.machines || [];
         setMachines(raw);
+      }
+
+      if (svcRes && Array.isArray(svcRes.data) && svcRes.data.length > 0) {
+        const mapped = svcRes.data.map((s, idx) => ({
+          id: `svc-${idx}`,
+          name: s.name ? (s.name.includes('.') ? s.name : `${s.name}.service`) : `service-${idx}`,
+          type: String(s.name || '').toLowerCase().includes('ssh') ? 'DAEMON / SYSTEMD' : String(s.name || '').toLowerCase().includes('journal') ? 'DAEMON / LOGGING' : 'DAEMON / SYSTEM',
+          status: String(s.status || '').toLowerCase() === 'stopped' ? 'TRIPPED' : 'HEALTHY',
+          restarts: 0,
+          maxRestarts: 3,
+          windowSec: 60,
+          circuitBreaker: String(s.status || '').toLowerCase() === 'stopped' ? 'TRIPPED' : 'ARMED',
+          description: `Managed service runtime daemon for ${s.name || 'system'}.`,
+        }));
+        setLiveServices(mapped);
+      } else {
+        setLiveServices([]);
       }
     } catch (err) {
       console.error('Failed to load crash service data', err);
@@ -43,7 +71,7 @@ export default function SRECrashPage() {
 
   useEffect(() => {
     fetchServicesData();
-  }, []);
+  }, [machineId]);
 
   const handleResetFlap = async () => {
     setIsResetting(true);
@@ -56,45 +84,58 @@ export default function SRECrashPage() {
     }, 600);
   };
 
-  const { selectedServer } = useServerStore();
-  const primaryMachine = selectedServer || machines[0] || {};
-  const activeHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'luffy';
-
-  const servicesList = [
+  // Strictly only services defined in config.toml under [agent.services].accept_list
+  const CONFIG_TOML_SERVICES = [
     {
-      id: 'svc-1',
+      id: 'svc-ssh',
       name: 'ssh.service',
+      matchKey: 'ssh',
       type: 'DAEMON / SYSTEMD',
-      status: 'HEALTHY',
-      restarts: 0,
       maxRestarts: 3,
       windowSec: 60,
       circuitBreaker: 'ARMED',
       description: 'OpenSSH server daemon for secure remote shell access.',
     },
     {
-      id: 'svc-2',
+      id: 'svc-cron',
       name: 'cron.service',
+      matchKey: 'cron',
       type: 'DAEMON / CRON',
-      status: 'HEALTHY',
-      restarts: 0,
       maxRestarts: 3,
       windowSec: 60,
       circuitBreaker: 'ARMED',
       description: 'System periodic job scheduler daemon.',
     },
     {
-      id: 'svc-3',
+      id: 'svc-journald',
       name: 'systemd-journald.service',
+      matchKey: 'journal',
       type: 'DAEMON / LOGGING',
-      status: 'HEALTHY',
-      restarts: 0,
       maxRestarts: 3,
       windowSec: 60,
       circuitBreaker: 'EXEMPT',
       description: 'System event & kernel logging daemon.',
     },
   ];
+
+  const servicesList = useMemo(() => {
+    return CONFIG_TOML_SERVICES.map((cfgSvc) => {
+      // Find if live service status was reported for this config.toml entry
+      const found = liveServices.find((ls) => {
+        const nameLower = String(ls.name || '').toLowerCase();
+        return nameLower.includes(cfgSvc.matchKey) || nameLower === cfgSvc.name.toLowerCase();
+      });
+
+      const isTripped = found && String(found.status || '').toLowerCase() === 'stopped';
+
+      return {
+        ...cfgSvc,
+        status: isTripped ? 'TRIPPED' : 'HEALTHY',
+        restarts: isTripped ? 3 : 0,
+        circuitBreaker: isTripped ? 'TRIPPED' : cfgSvc.circuitBreaker,
+      };
+    });
+  }, [liveServices]);
 
   const healthyCount = servicesList.filter((s) => s.status === 'HEALTHY').length;
   const trippedCount = servicesList.filter((s) => s.circuitBreaker === 'TRIPPED').length;

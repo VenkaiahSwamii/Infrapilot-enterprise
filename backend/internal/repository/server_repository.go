@@ -9,6 +9,7 @@ import (
 	"infrapilot/backend/internal/models"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type ServerRepository struct{}
@@ -172,7 +173,45 @@ func (r *ServerRepository) DeleteServer(id uuid.UUID) error {
 	if database.DB == nil {
 		return nil
 	}
-	return database.DB.Delete(&models.Server{}, "id = ?", id).Error
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		strID := id.String()
+		tx.Exec("DELETE FROM linux_metrics WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_dockers WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_kubernetes WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_processes WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_services WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_logs WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_alerts WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_networks WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_storages WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM linux_servers WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM metrics WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM historical_metrics WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM audit_logs WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM user_host_permissions WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM terminal_commands WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM terminal_sessions WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM commands WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM file_operations WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM remediation_jobs WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM workflow_executions WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM incidents WHERE machine_id = ?", id)
+		tx.Exec("DELETE FROM remote_deployment_records WHERE machine_id = ?", strID)
+		tx.Exec("DELETE FROM aiops_anomalies WHERE machine_id = ?", strID)
+		tx.Exec("DELETE FROM aiops_predictions WHERE machine_id = ?", strID)
+		tx.Exec("DELETE FROM aiops_recommendations WHERE machine_id = ?", strID)
+		tx.Exec("DELETE FROM docker_containers WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM docker_images WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM docker_volumes WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM docker_networks WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM docker_events WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM docker_hosts WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM kubernetes_clusters WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM ai_recommendations WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM ai_predictions WHERE server_id = ?", id)
+		tx.Exec("DELETE FROM ai_health_scores WHERE server_id = ?", id)
+		return tx.Exec("DELETE FROM servers WHERE id = ?", id).Error
+	})
 }
 
 func (r *ServerRepository) UpdateHeartbeat(id uuid.UUID, lastSeen time.Time) error {

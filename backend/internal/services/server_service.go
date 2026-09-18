@@ -275,6 +275,15 @@ type serverWithMetrics struct {
 	Uptime         uint64
 	CPUTemperature float64
 	CPUCores       int
+	TotalMemory    uint64
+	FreeMemory     uint64
+	MemoryTotal    uint64
+	MemoryUsed     uint64
+	DiskTotal      uint64
+	DiskUsed       uint64
+	LinuxMemUsed   uint64
+	LinuxMemFree   uint64
+	LinuxMemCached uint64
 }
 
 func (s *ServerService) GetServers() ([]models.ServerSnapshot, error) {
@@ -293,7 +302,16 @@ mt.upload_mbps,
 mt.download_mbps,
 mt.uptime,
 mt.cpu_temperature,
-mt.cpu_cores
+mt.total_memory,
+mt.free_memory,
+mt.memory_total,
+mt.memory_used,
+mt.disk_total,
+mt.disk_used,
+lm.memory_used as linux_mem_used,
+lm.memory_free as linux_mem_free,
+lm.memory_cached as linux_mem_cached,
+COALESCE(NULLIF(mt.cpu_cores, 0), 2) as cpu_cores
 FROM servers m
 LEFT JOIN LATERAL (
     SELECT *
@@ -302,6 +320,13 @@ LEFT JOIN LATERAL (
     ORDER BY created_at DESC
     LIMIT 1
 ) mt ON TRUE
+LEFT JOIN LATERAL (
+    SELECT cpu_per_core_json, memory_used, memory_free, memory_cached
+    FROM linux_metrics
+    WHERE linux_metrics.machine_id = m.id
+    ORDER BY sampled_at DESC
+    LIMIT 1
+) lm ON TRUE
 ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = true THEN 1 ELSE 2 END, m.last_seen DESC NULLS LAST, m.created_at DESC;
 `).Scan(&rows).Error; err != nil {
 			return nil, err
@@ -317,6 +342,12 @@ mt.upload_mbps,
 mt.download_mbps,
 mt.uptime,
 mt.cpu_temperature,
+mt.total_memory,
+mt.free_memory,
+mt.memory_total,
+mt.memory_used,
+mt.disk_total,
+mt.disk_used,
 mt.cpu_cores
 FROM servers m
 LEFT JOIN metrics mt ON mt.machine_id = m.id AND mt.id = (
@@ -355,9 +386,20 @@ ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = 1 THEN 1 ELSE 2 END,
 			Uptime:         row.Uptime,
 			CPUTemperature: row.CPUTemperature,
 			CPUCores:       row.CPUCores,
+			TotalMemory:    row.TotalMemory,
+			FreeMemory:     row.FreeMemory,
+			MemoryTotal:    row.MemoryTotal,
+			MemoryUsed:     row.MemoryUsed,
+			DiskTotal:      row.DiskTotal,
+			DiskUsed:       row.DiskUsed,
 			CreatedAt:      time.Now(),
 		}
-		snapshot := buildServerSnapshot(row.Server, metric, models.LinuxMetric{})
+		rich := models.LinuxMetric{
+			MemoryUsed:   row.LinuxMemUsed,
+			MemoryFree:   row.LinuxMemFree,
+			MemoryCached: row.LinuxMemCached,
+		}
+		snapshot := buildServerSnapshot(row.Server, metric, rich)
 		result = append(result, snapshot)
 	}
 	return result, nil
@@ -391,7 +433,7 @@ func buildServerSnapshot(server models.Server, metric models.Metric, rich models
 	}
 
 	snapshot := models.ServerSnapshot{Server: server}
-	if metric.ID == uuid.Nil {
+	if metric.ID == uuid.Nil && rich.ID == uuid.Nil {
 		return snapshot
 	}
 
@@ -411,6 +453,9 @@ func buildServerSnapshot(server models.Server, metric models.Metric, rich models
 	}
 
 	metricAt := metric.CreatedAt
+	if metricAt.IsZero() && !rich.SampledAt.IsZero() {
+		metricAt = rich.SampledAt
+	}
 	network := metric.UploadMbps + metric.DownloadMbps
 	snapshot.CPUUsage = &metric.CPUUsage
 	snapshot.MemoryUsage = &metric.MemoryUsage
@@ -423,6 +468,31 @@ func buildServerSnapshot(server models.Server, metric models.Metric, rich models
 	snapshot.MetricAt = &metricAt
 	snapshot.CPUTemperature = &metric.CPUTemperature
 	snapshot.CPUCores = &metric.CPUCores
+
+	// Assign real raw bytes memory & disk
+	if metric.TotalMemory > 0 {
+		snapshot.MemoryTotal = metric.TotalMemory
+	} else if metric.MemoryTotal > 0 {
+		snapshot.MemoryTotal = metric.MemoryTotal
+	} else if rich.MemoryUsed > 0 {
+		snapshot.MemoryTotal = rich.MemoryUsed + rich.MemoryFree + rich.MemoryCached
+	}
+
+	if metric.FreeMemory > 0 && snapshot.MemoryTotal >= metric.FreeMemory {
+		snapshot.MemoryUsed = snapshot.MemoryTotal - metric.FreeMemory
+	} else if metric.MemoryUsed > 0 {
+		snapshot.MemoryUsed = metric.MemoryUsed
+	} else if rich.MemoryUsed > 0 {
+		snapshot.MemoryUsed = rich.MemoryUsed
+	}
+
+	if metric.DiskTotal > 0 {
+		snapshot.DiskTotal = metric.DiskTotal
+	}
+	if metric.DiskUsed > 0 {
+		snapshot.DiskUsed = metric.DiskUsed
+	}
+
 	if rich.ID != uuid.Nil {
 		snapshot.CPUFrequencyMHz = &rich.CPUFrequencyMHz
 		snapshot.DiskReadBps = &rich.DiskReadBps

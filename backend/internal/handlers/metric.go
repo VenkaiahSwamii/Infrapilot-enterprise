@@ -238,18 +238,10 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		return
 	}
 
-	// 8. Direct database SQL check to guarantee blocked status in both tables
+	// 8. Direct database SQL check to guarantee blocked status in servers table
 	if database.DB != nil && machine != nil {
 		var count int64
 		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?)) AND (is_blocked = true OR LOWER(status) = 'blocked')", machine.ID, machine.Hostname).Scan(&count).Error
-		if count > 0 {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":  "Machine is blocked by administrator.",
-				"status": "blocked",
-			})
-			return
-		}
-		_ = database.DB.Raw("SELECT COUNT(*) FROM machines WHERE (id = ? OR LOWER(hostname) = LOWER(?)) AND (is_blocked = true OR LOWER(status) = 'blocked')", machine.ID, machine.Hostname).Scan(&count).Error
 		if count > 0 {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":  "Machine is blocked by administrator.",

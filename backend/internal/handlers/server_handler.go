@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 
@@ -277,41 +278,70 @@ func (h *ServerHandler) DeleteServer(c *gin.Context) {
 	}
 
 	server, err := h.serverService.GetServerByIDOrHostname(idStr)
-	var sID string
+	var sUUID uuid.UUID
 	var hostname string
 	if err == nil && server != nil {
-		sID = server.ID.String()
+		sUUID = server.ID
 		hostname = server.Hostname
-	} else {
-		sID = idStr
+	} else if parsed, parseErr := uuid.Parse(idStr); parseErr == nil {
+		sUUID = parsed
 		hostname = idStr
 	}
 
-	tablesWithMachineID := []string{
-		"metrics", "linux_metrics", "linux_logs", "linux_dockers", "linux_processes",
-		"linux_services", "linux_alerts", "user_host_permissions", "incidents",
-		"terminal_commands", "remote_deployment_records",
-	}
-	for _, tbl := range tablesWithMachineID {
-		if database.DB != nil && database.DB.Migrator().HasTable(tbl) {
-			_ = database.DB.Exec(fmt.Sprintf("DELETE FROM %s WHERE machine_id::text = ? OR machine_id::text = ?", tbl), sID, idStr)
-		}
-	}
-
-	tablesWithServerID := []string{
-		"kubernetes_clusters", "docker_hosts", "ai_recommendations", "ai_predictions",
-		"ai_health_scores", "docker_containers", "docker_images", "docker_volumes",
-		"docker_networks", "docker_events", "linux_kubernetes",
-	}
-	for _, tbl := range tablesWithServerID {
-		if database.DB != nil && database.DB.Migrator().HasTable(tbl) {
-			_ = database.DB.Exec(fmt.Sprintf("DELETE FROM %s WHERE server_id::text = ? OR server_id::text = ?", tbl), sID, idStr)
-		}
-	}
-
 	if database.DB != nil {
-		_ = database.DB.Exec("DELETE FROM servers WHERE id::text = ? OR LOWER(hostname) = LOWER(?)", idStr, hostname)
-		_ = database.DB.Exec("DELETE FROM machines WHERE id::text = ? OR LOWER(hostname) = LOWER(?)", idStr, hostname)
+		txErr := database.DB.Transaction(func(tx *gorm.DB) error {
+			if sUUID != uuid.Nil {
+				strID := sUUID.String()
+				// Child tables referencing machine_id / server_id
+				tx.Exec("DELETE FROM linux_metrics WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_dockers WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_kubernetes WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_processes WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_services WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_logs WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_alerts WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_networks WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_storages WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM linux_servers WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM metrics WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM historical_metrics WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM audit_logs WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM user_host_permissions WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM terminal_commands WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM terminal_sessions WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM commands WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM file_operations WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM remediation_jobs WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM workflow_executions WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM incidents WHERE machine_id = ?", sUUID)
+				tx.Exec("DELETE FROM remote_deployment_records WHERE machine_id = ?", strID)
+				tx.Exec("DELETE FROM aiops_anomalies WHERE machine_id = ?", strID)
+				tx.Exec("DELETE FROM aiops_predictions WHERE machine_id = ?", strID)
+				tx.Exec("DELETE FROM aiops_recommendations WHERE machine_id = ?", strID)
+				tx.Exec("DELETE FROM docker_containers WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM docker_images WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM docker_volumes WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM docker_networks WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM docker_events WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM docker_hosts WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM kubernetes_clusters WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM ai_recommendations WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM ai_predictions WHERE server_id = ?", sUUID)
+				tx.Exec("DELETE FROM ai_health_scores WHERE server_id = ?", sUUID)
+				// Finally delete the server record itself
+				if err := tx.Exec("DELETE FROM servers WHERE id = ?", sUUID).Error; err != nil {
+					return err
+				}
+			}
+			if hostname != "" {
+				tx.Exec("DELETE FROM servers WHERE LOWER(hostname) = LOWER(?)", hostname)
+			}
+			return nil
+		})
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Server deleted successfully"})

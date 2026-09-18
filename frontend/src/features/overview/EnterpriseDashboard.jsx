@@ -131,7 +131,7 @@ export default function EnterpriseDashboard() {
   const [liveMetrics, setLiveMetrics] = useState({});
   const [alerts, setAlerts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('online');
   const [viewMode, setViewMode] = useState('table');
   const [timeRange, setTimeRange] = useState('Last 6 Hours');
   const [currentPage, setCurrentPage] = useState(1);
@@ -496,23 +496,48 @@ export default function EnterpriseDashboard() {
         return num;
       };
 
+      const formatGB = (val) => {
+        if (val == null || isNaN(val) || Number(val) <= 0) return '0.0';
+        const num = Number(val);
+        return num % 1 === 0 ? num.toFixed(0) : num.toFixed(1);
+      };
+
       // Real RAM values (Used / Total GB)
-      const rawMemTotal = live.memory_total ?? live.total_memory ?? m.total_memory ?? m.memory_total ?? m.total_memory_gb ?? m.TotalMemoryGB;
+      const rawMemTotal = live.memory_total ?? live.total_memory ?? m.memory_total ?? m.total_memory ?? m.total_memory_gb ?? m.TotalMemoryGB;
       const rawMemUsed = isOnline ? (live.memory_used ?? m.memory_used) : 0;
       const totalMemGb = parseGB(rawMemTotal) || (m.total_memory_gb ? Number(m.total_memory_gb) : 0);
       const usedMemGb = (isOnline && rawMemUsed) ? parseGB(rawMemUsed) : ((isOnline && memory > 0 && totalMemGb > 0) ? (memory / 100) * totalMemGb : 0);
-      const memValStr = totalMemGb > 0 ? `${usedMemGb.toFixed(1)} / ${totalMemGb.toFixed(0)} GB` : (isOnline ? `${usedMemGb.toFixed(1)} GB` : '-');
+      const memValStr = totalMemGb > 0 ? `${formatGB(usedMemGb)} / ${formatGB(totalMemGb)} GB` : (isOnline ? `${formatGB(usedMemGb)} GB` : '-');
 
       // Real Disk values (Used / Total GB)
+      let fsTotalBytes = 0;
+      let fsUsedBytes = 0;
+      const fsList = (Array.isArray(live.filesystems) && live.filesystems.length > 0)
+        ? live.filesystems
+        : (Array.isArray(m.filesystems) ? m.filesystems : []);
+
+      if (fsList.length > 0) {
+        fsList.forEach((fs) => {
+          fsTotalBytes += Number(fs.total_bytes || fs.total || 0);
+          fsUsedBytes += Number(fs.used_bytes || fs.used || 0);
+        });
+      }
+
       const rawDiskTotal = live.disk_total ?? live.total_disk_gb ?? m.disk_total ?? m.total_disk_gb ?? m.TotalDiskGB;
       const rawDiskUsed = isOnline ? (live.disk_used ?? m.disk_used) : 0;
-      const totalDiskGb = parseGB(rawDiskTotal) || (m.total_disk_gb ? Number(m.total_disk_gb) : 0);
-      const usedDiskGb = (isOnline && rawDiskUsed) ? parseGB(rawDiskUsed) : ((isOnline && disk > 0 && totalDiskGb > 0) ? (disk / 100) * totalDiskGb : 0);
-      const diskValStr = totalDiskGb > 0 ? `${usedDiskGb.toFixed(0)} / ${totalDiskGb.toFixed(0)} GB` : (isOnline ? `${usedDiskGb.toFixed(0)} GB` : '-');
+      const totalDiskGb = fsTotalBytes > 0
+        ? parseGB(fsTotalBytes)
+        : (parseGB(rawDiskTotal) || (m.total_disk_gb ? Number(m.total_disk_gb) : 0));
+      const usedDiskGb = (isOnline && fsUsedBytes > 0)
+        ? parseGB(fsUsedBytes)
+        : (isOnline && rawDiskUsed)
+        ? parseGB(rawDiskUsed)
+        : ((isOnline && disk > 0 && totalDiskGb > 0) ? (disk / 100) * totalDiskGb : 0);
+      const diskValStr = totalDiskGb > 0 ? `${formatGB(usedDiskGb)} / ${formatGB(totalDiskGb)} GB` : (isOnline ? `${formatGB(usedDiskGb)} GB` : '-');
 
       // Real CPU values (Active Cores / Total Cores)
-      const rawCores = live.cpu_cores ?? live.cores ?? m.cpu_cores ?? m.CPUCores;
-      const cores = Number(rawCores) || (m.os === 'windows' ? 4 : (m.cpu_cores || 4));
+      const rawCores = live.cpu_cores ?? live.cores ?? (Array.isArray(live.cpu_per_core) && live.cpu_per_core.length > 0 ? live.cpu_per_core.length : null) ?? m.cpu_cores ?? m.CPUCores;
+      const cores = Number(rawCores) > 0 ? Number(rawCores) : (m.os === 'windows' ? 4 : 2);
       const usedCores = (isOnline && cpu > 0) ? ((cpu / 100) * cores).toFixed(1) : '0.0';
       const cpuValStr = isOnline ? `${usedCores} / ${cores} Cores` : `0.0 / ${cores} Cores`;
 
@@ -825,17 +850,17 @@ export default function EnterpriseDashboard() {
               <div className="status-chip-group">
                 <button
                   type="button"
-                  className={`chip-btn ${statusFilter === 'all' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('all')}
-                >
-                  All ({totalMachinesCount})
-                </button>
-                <button
-                  type="button"
                   className={`chip-btn online ${statusFilter === 'online' ? 'active' : ''}`}
                   onClick={() => setStatusFilter('online')}
                 >
                   Online ({onlineCount})
+                </button>
+                <button
+                  type="button"
+                  className={`chip-btn ${statusFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('all')}
+                >
+                  All ({totalMachinesCount})
                 </button>
                 <button
                   type="button"
