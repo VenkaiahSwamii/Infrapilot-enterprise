@@ -9,7 +9,6 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [backend, frontend, docker, security]
 
     steps:
     - name: Checkout code

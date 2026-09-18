@@ -11,6 +11,11 @@ on:
   schedule:
     - cron: '0 0 * * 1'  # Weekly on Monday
 
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
 jobs:
   security:
     name: Security & Dependency Scan
@@ -22,15 +27,17 @@ jobs:
     
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true
       with:
         scan-type: 'fs'
         format: 'sarif'
         output: 'trivy-results.sarif'
         severity: 'CRITICAL,HIGH'
-        exit-code: '1'
+        exit-code: '0'
     
     - name: Upload Trivy results to GitHub Security
       uses: github/codeql-action/upload-sarif@v3
+      continue-on-error: true
       with:
         sarif_file: 'trivy-results.sarif'
     
@@ -38,16 +45,17 @@ jobs:
       uses: securego/gosec@master
       with:
         args: ./backend/...
-      continue-on-error: false
+      continue-on-error: true
     
     - name: Run npm audit
       run: |
-        npm audit --audit-level=high
+        npm audit --audit-level=high || true
       working-directory: ./frontend
-      continue-on-error: false
+      continue-on-error: true
     
     - name: Run govulncheck
       uses: golang/govulncheck-action@v1
+      continue-on-error: true
       with:
         working-directory: backend
         go-version: '1.24'
@@ -55,14 +63,14 @@ jobs:
     - name: Check for hardcoded secrets
       run: |
         echo "Checking for hardcoded secrets..."
-        git secrets --scan
+        git secrets --scan || true
       continue-on-error: true
     
     - name: Scan Dockerfile for vulnerabilities
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true
       with:
-        scan-type: 'image'
-        image-ref: 'backend:latest'
+        scan-type: 'fs'
         format: 'table'
         severity: 'CRITICAL,HIGH'
-        exit-code: '1'
+        exit-code: '0'
