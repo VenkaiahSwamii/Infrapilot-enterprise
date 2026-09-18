@@ -38,8 +38,8 @@ type RegisterServerInput struct {
 	Architecture   string
 	MACAddress     string
 	CPUModel       string
-	TotalMemoryGB  uint64
-	TotalDiskGB    uint64
+	TotalMemoryGB  float64
+	TotalDiskGB    float64
 	GPU            string
 	Virtualization string
 	CloudProvider  string

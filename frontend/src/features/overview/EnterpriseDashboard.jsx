@@ -516,17 +516,31 @@ export default function EnterpriseDashboard() {
         : (Array.isArray(m.filesystems) ? m.filesystems : []);
 
       if (fsList.length > 0) {
-        fsList.forEach((fs) => {
-          fsTotalBytes += Number(fs.total_bytes || fs.total || 0);
-          fsUsedBytes += Number(fs.used_bytes || fs.used || 0);
+        const primaryFs = fsList.find((fs) => {
+          const mp = String(fs.mount_point || fs.mountPoint || fs.device || '').toLowerCase();
+          return mp === '/' || mp === 'c:' || mp === 'c:\\';
         });
+        if (primaryFs) {
+          fsTotalBytes = Number(primaryFs.total_bytes || primaryFs.total || 0);
+          fsUsedBytes = Number(primaryFs.used_bytes || primaryFs.used || 0);
+        } else {
+          const validFsList = fsList.filter((fs) => {
+            const mp = String(fs.mount_point || fs.mountPoint || fs.device || '').toLowerCase();
+            const fstype = String(fs.fs_type || fs.type || '').toLowerCase();
+            return !mp.includes('/dev/shm') && !mp.includes('/run') && !mp.includes('/boot') && fstype !== 'tmpfs' && fstype !== 'devtmpfs';
+          });
+          validFsList.forEach((fs) => {
+            fsTotalBytes += Number(fs.total_bytes || fs.total || 0);
+            fsUsedBytes += Number(fs.used_bytes || fs.used || 0);
+          });
+        }
       }
 
       const rawDiskTotal = live.disk_total ?? live.total_disk_gb ?? m.disk_total ?? m.total_disk_gb ?? m.TotalDiskGB;
       const rawDiskUsed = isOnline ? (live.disk_used ?? m.disk_used) : 0;
-      const totalDiskGb = fsTotalBytes > 0
+      const totalDiskGb = parseGB(rawDiskTotal) || (fsTotalBytes > 0
         ? parseGB(fsTotalBytes)
-        : (parseGB(rawDiskTotal) || (m.total_disk_gb ? Number(m.total_disk_gb) : 0));
+        : (m.total_disk_gb ? Number(m.total_disk_gb) : 0));
       const usedDiskGb = (isOnline && fsUsedBytes > 0)
         ? parseGB(fsUsedBytes)
         : (isOnline && rawDiskUsed)

@@ -128,7 +128,11 @@ func GetMetrics() (*metrics.Metrics, error) {
 	var usedDiskBytes uint64 = 0
 	var diskPercent float64 = 0.0
 
-	if len(filesystems) > 0 {
+	if diskInfo != nil && diskInfo.Total > 0 {
+		totalDiskBytes = diskInfo.Total
+		usedDiskBytes = diskInfo.Used
+		diskPercent = diskInfo.UsedPercent
+	} else if len(filesystems) > 0 {
 		for _, fs := range filesystems {
 			totalDiskBytes += fs.Total
 			usedDiskBytes += fs.Used
@@ -136,10 +140,6 @@ func GetMetrics() (*metrics.Metrics, error) {
 		if totalDiskBytes > 0 {
 			diskPercent = (float64(usedDiskBytes) / float64(totalDiskBytes)) * 100.0
 		}
-	} else if diskInfo != nil && diskInfo.Total > 0 {
-		totalDiskBytes = diskInfo.Total
-		usedDiskBytes = diskInfo.Used
-		diskPercent = diskInfo.UsedPercent
 	}
 
 	cpuFrequency := 0.0

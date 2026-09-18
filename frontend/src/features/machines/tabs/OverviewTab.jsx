@@ -92,7 +92,7 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
     return Number(val) % 1 === 0 ? Number(val).toFixed(0) : Number(val).toFixed(1);
   };
 
-  // 4. Physical Storage (Aggregate across all mounted drives like C: and D:)
+  // 4. Physical Storage (Prefer primary root drive / main partition)
   let fsTotalBytes = 0;
   let fsUsedBytes = 0;
   const fsList = (Array.isArray(metricObj.filesystems) && metricObj.filesystems.length > 0)
@@ -100,18 +100,32 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
     : (Array.isArray(machine?.filesystems) ? machine.filesystems : []);
 
   if (fsList.length > 0) {
-    fsList.forEach((fs) => {
-      fsTotalBytes += Number(fs.total_bytes || fs.total || 0);
-      fsUsedBytes += Number(fs.used_bytes || fs.used || 0);
+    const primaryFs = fsList.find((fs) => {
+      const mp = String(fs.mount_point || fs.mountPoint || fs.device || '').toLowerCase();
+      return mp === '/' || mp === 'c:' || mp === 'c:\\';
     });
+    if (primaryFs) {
+      fsTotalBytes = Number(primaryFs.total_bytes || primaryFs.total || 0);
+      fsUsedBytes = Number(primaryFs.used_bytes || primaryFs.used || 0);
+    } else {
+      const validFsList = fsList.filter((fs) => {
+        const mp = String(fs.mount_point || fs.mountPoint || fs.device || '').toLowerCase();
+        const fstype = String(fs.fs_type || fs.type || '').toLowerCase();
+        return !mp.includes('/dev/shm') && !mp.includes('/run') && !mp.includes('/boot') && fstype !== 'tmpfs' && fstype !== 'devtmpfs';
+      });
+      validFsList.forEach((fs) => {
+        fsTotalBytes += Number(fs.total_bytes || fs.total || 0);
+        fsUsedBytes += Number(fs.used_bytes || fs.used || 0);
+      });
+    }
   }
 
   const rawDiskTotal = metricObj.disk_total ?? metricObj.total_disk_gb ?? machine?.disk_total ?? machine?.total_disk_gb ?? machine?.TotalDiskGB;
   const rawDiskUsed = metricObj.disk_used ?? machine?.disk_used;
 
-  const totalDiskGb = fsTotalBytes > 0
+  const totalDiskGb = parseGB(rawDiskTotal) || (fsTotalBytes > 0
     ? parseGB(fsTotalBytes)
-    : (parseGB(rawDiskTotal) || (machine?.total_disk_gb ? Number(machine.total_disk_gb) : 0));
+    : (machine?.total_disk_gb ? Number(machine.total_disk_gb) : 0));
 
   const usedDiskGb = fsUsedBytes > 0
     ? parseGB(fsUsedBytes)

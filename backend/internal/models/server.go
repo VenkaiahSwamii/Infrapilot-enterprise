@@ -26,8 +26,8 @@ type Server struct {
 	Architecture   string `json:"architecture"`
 	MACAddress     string `json:"mac_address"`
 	CPUModel       string `json:"cpu_model"`
-	TotalMemoryGB  uint64 `json:"total_memory_gb"`
-	TotalDiskGB    uint64 `json:"total_disk_gb"`
+	TotalMemoryGB  float64 `json:"total_memory_gb"`
+	TotalDiskGB    float64 `json:"total_disk_gb"`
 	GPU            string `json:"gpu"`
 	Virtualization string `json:"virtualization"`
 	CloudProvider  string `json:"cloud_provider"`

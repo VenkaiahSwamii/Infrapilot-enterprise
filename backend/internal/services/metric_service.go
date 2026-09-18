@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -232,18 +233,28 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 		machine.CPUModel = input.CPUModel
 	}
 	if input.TotalMemory > 0 {
-		memGB := input.TotalMemory / (1024 * 1024 * 1024)
+		memGB := math.Round((float64(input.TotalMemory)/(1024.0*1024.0*1024.0))*10.0) / 10.0
 		if memGB > 0 {
 			updates["total_memory_gb"] = memGB
 			machine.TotalMemoryGB = memGB
 		}
 	}
 	var totalDiskBytes uint64
-	for _, fs := range input.Filesystems {
-		totalDiskBytes += fs.Total
+	if len(input.Filesystems) > 0 {
+		for _, fs := range input.Filesystems {
+			if fs.MountPoint == "/" || strings.EqualFold(fs.MountPoint, "c:") {
+				totalDiskBytes = fs.Total
+				break
+			}
+		}
+		if totalDiskBytes == 0 {
+			for _, fs := range input.Filesystems {
+				totalDiskBytes += fs.Total
+			}
+		}
 	}
 	if totalDiskBytes > 0 {
-		diskGB := totalDiskBytes / (1024 * 1024 * 1024)
+		diskGB := math.Round((float64(totalDiskBytes)/(1024.0*1024.0*1024.0))*10.0) / 10.0
 		if diskGB > 0 {
 			updates["total_disk_gb"] = diskGB
 			machine.TotalDiskGB = diskGB
