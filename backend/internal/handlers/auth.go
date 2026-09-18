@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -157,10 +158,13 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":       user.ID,
-		"username": user.Username,
-		"email":    user.Email,
-		"role":     user.Role,
+		"id":               user.ID,
+		"username":         user.Username,
+		"email":            user.Email,
+		"role":             user.Role,
+		"allowed_machines": user.AllowedMachines,
+		"allowed_modules":  user.AllowedModules,
+		"is_active":        user.IsActive,
 	})
 }
 
@@ -228,6 +232,67 @@ func (h *AuthHandler) UpdateUserRole(c *gin.Context) {
 	utils.LogAudit(actor, uuid.Nil, "Update role for user "+idStr+" to "+req.Role, "Success")
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Role updated successfully",
+		"user":    user,
+	})
+}
+
+type UpdatePermissionsRequest struct {
+	Role            string `json:"role"`
+	AllowedMachines string `json:"allowed_machines"`
+	AllowedModules  string `json:"allowed_modules"`
+	IsActive        *bool  `json:"is_active"`
+}
+
+func (h *AuthHandler) UpdateUserPermissions(c *gin.Context) {
+	idStr := c.Param("id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid user ID",
+		})
+		return
+	}
+
+	var req UpdatePermissionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "User not found",
+		})
+		return
+	}
+
+	if req.Role != "" {
+		user.Role = req.Role
+	}
+	if req.AllowedMachines != "" {
+		user.AllowedMachines = req.AllowedMachines
+	}
+	if req.AllowedModules != "" {
+		user.AllowedModules = req.AllowedModules
+	}
+	if req.IsActive != nil {
+		user.IsActive = *req.IsActive
+	}
+
+	if err := database.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to update permissions",
+		})
+		return
+	}
+
+	actor := c.GetString("username")
+	utils.LogAudit(actor, uuid.Nil, fmt.Sprintf("Updated permissions for user %s: role=%s, machines=%s, modules=%s", idStr, user.Role, user.AllowedMachines, user.AllowedModules), "Success")
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Permissions updated successfully",
 		"user":    user,
 	})
 }

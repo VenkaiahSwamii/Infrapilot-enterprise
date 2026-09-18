@@ -16,6 +16,10 @@ export function updateUserRole(id, role) {
   return apiPatch(`/admin/users/${id}/role`, { role });
 }
 
+export function updateUserPermissions(id, permissions) {
+  return apiPatch(`/admin/users/${id}/permissions`, permissions);
+}
+
 export function toggleUserStatus(id) {
   return apiPatch(`/admin/users/${id}/status`, {});
 }

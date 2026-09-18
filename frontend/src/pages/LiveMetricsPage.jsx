@@ -102,12 +102,12 @@ export default function LiveMetricsPage() {
 
   const latestSample = displaySamples.length > 0 ? displaySamples[displaySamples.length - 1] : null;
 
-  const currentCpu = Number(liveMetric?.cpu_usage ?? latestSample?.cpu_usage ?? selectedServer?.cpu_usage ?? 44.2);
-  const currentRam = Number(liveMetric?.memory_usage ?? latestSample?.memory_usage ?? selectedServer?.memory_usage ?? 86.0);
-  const currentDisk = Number(liveMetric?.disk_usage ?? latestSample?.disk_usage ?? selectedServer?.disk_usage ?? 56.4);
+  const currentCpu = Number(liveMetric?.cpu_usage ?? latestSample?.cpu_usage ?? selectedServer?.cpu_usage ?? 0);
+  const currentRam = Number(liveMetric?.memory_usage ?? latestSample?.memory_usage ?? selectedServer?.memory_usage ?? 0);
+  const currentDisk = Number(liveMetric?.disk_usage ?? latestSample?.disk_usage ?? selectedServer?.disk_usage ?? 0);
 
-  const uploadMbps = Number(liveMetric?.upload_mbps ?? latestSample?.upload_mbps ?? 0.05);
-  const downloadMbps = Number(liveMetric?.download_mbps ?? latestSample?.download_mbps ?? 0.12);
+  const uploadMbps = Number(liveMetric?.upload_mbps ?? latestSample?.upload_mbps ?? 0);
+  const downloadMbps = Number(liveMetric?.download_mbps ?? latestSample?.download_mbps ?? 0);
   const totalNetworkMbps = (uploadMbps + downloadMbps).toFixed(2);
 
   const osName = String(selectedServer?.os || selectedServer?.OS || 'linux').toLowerCase();

@@ -53,19 +53,15 @@ function formatAgentTs(d) {
   return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss}`;
 }
 
-function buildMetricLogEntry({ hostname, cpu, ramMb, timestamp, customText, isSystem }) {
+function buildMetricLogEntry({ hostname, cpu, ramMb, timestamp, customText, isSystem, agentCpu = '0.1', agentRam = '18' }) {
   const now = timestamp ? new Date(timestamp) : new Date();
-  const agentTime = new Date(now.getTime() - Math.floor(Math.random() * 800 + 450));
   const ingestTs = formatIngestTs(now);
   const serverTs = formatServerTs(now);
-  const agentTs = formatAgentTs(agentTime);
+  const agentTs = formatAgentTs(now);
 
-  const cpuNum = Number(cpu != null && !isNaN(cpu) ? cpu : 2.4);
-  const cpuPct = (cpuNum < 1 ? cpuNum * 10 : cpuNum).toFixed(1);
-  const ramUsed = Math.round(Number(ramMb != null && !isNaN(ramMb) && Number(ramMb) > 0 ? ramMb : 1350));
-
-  const agentCpu = (Math.random() * 0.15 + 0.1).toFixed(1);
-  const agentRam = Math.floor(Math.random() * 2 + 16);
+  const cpuNum = Number(cpu != null && !isNaN(cpu) ? cpu : 0);
+  const cpuPct = Number(cpuNum).toFixed(1);
+  const ramUsed = Math.round(Number(ramMb != null && !isNaN(ramMb) && Number(ramMb) > 0 ? ramMb : 0));
 
   const rawText = customText || `Received Metric from ${hostname}: CPU=${cpuPct}%, RAM=${ramUsed}MB (Agent: CPU=${agentCpu}%, RAM=${agentRam}MB)`;
 
@@ -110,42 +106,90 @@ export default function FleetTerminal({ machine, machineName }) {
   const termBottomRef = useRef(null);
   const terminalBoxRef = useRef(null);
 
-  // 1. Generate initial metric logs history based on real active node stats
+  // 1. Fetch real historical telemetry metrics and system logs from backend
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    const initialList = [];
-    const now = Date.now();
-    const targetHost = rawHost || 'venky';
 
-    // Retrieve real machine RAM from store or snapshot
-    const liveObj = (machineId && liveMetricsMap[machineId]) || {};
-    const baseCpu = liveObj.cpu_usage ?? liveObj.cpu ?? activeMachine?.cpu_usage ?? 2.4;
-    const rawMemBytes = liveObj.memory_used ?? activeMachine?.memory_used ?? 0;
-    const baseRamMb = rawMemBytes > 0
-      ? (rawMemBytes > 10000000 ? rawMemBytes / (1024 * 1024) : rawMemBytes)
-      : (activeMachine?.total_memory_gb ? Number(activeMachine.total_memory_gb) * 1024 * 0.32 : 1350);
+    const loadRealData = async () => {
+      try {
+        const targetId = machineId || activeMachine?.id || activeMachine?.hostname;
+        const targetHost = rawHost || activeMachine?.hostname || 'Node';
 
-    // Pre-populate past 25 real streaming intervals (every 10s)
-    for (let i = 24; i >= 0; i--) {
-      const sampleTime = new Date(now - i * 10000);
-      const jitterCpu = Math.max(0.5, Number(baseCpu) + (Math.sin(i) * 0.4));
-      const jitterRam = Math.max(200, Number(baseRamMb) + Math.round(Math.cos(i) * 8));
+        const [metricRes, logRes] = await Promise.all([
+          targetId ? apiClient.get(`/machines/${targetId}/metrics?range=1h`).catch(() => null) : null,
+          targetId ? apiClient.get(`/machines/${targetId}/logs?limit=50`).catch(() => null) : null,
+        ]);
 
-      initialList.push(
-        buildMetricLogEntry({
-          hostname: targetHost,
-          cpu: jitterCpu,
-          ramMb: jitterRam,
-          timestamp: sampleTime,
-        })
-      );
-    }
+        if (!active) return;
 
-    setLogs(initialList);
-    setLoading(false);
-  }, [machineId, rawHost]);
+        const logEntries = [];
 
-  // 2. Real-Time WebSocket live streaming listener
+        // Parse real historical metrics
+        const rawSamples = metricRes?.data?.samples || metricRes?.data?.data || [];
+        if (Array.isArray(rawSamples) && rawSamples.length > 0) {
+          rawSamples.forEach((sample) => {
+            const cpu = sample.cpu_usage ?? sample.cpu ?? 0;
+            const ramBytes = sample.memory_used ?? 0;
+            const ramMb = ramBytes > 0
+              ? (ramBytes > 10000000 ? ramBytes / (1024 * 1024) : ramBytes)
+              : (sample.memory_percent && activeMachine?.total_memory_gb ? (sample.memory_percent / 100) * (activeMachine.total_memory_gb * 1024) : 0);
+
+            logEntries.push(
+              buildMetricLogEntry({
+                hostname: targetHost,
+                cpu,
+                ramMb,
+                timestamp: sample.created_at || sample.time || new Date(),
+              })
+            );
+          });
+        }
+
+        // Parse real system logs
+        const rawLogs = logRes?.data || [];
+        if (Array.isArray(rawLogs) && rawLogs.length > 0) {
+          rawLogs.forEach((l) => {
+            logEntries.push(
+              buildMetricLogEntry({
+                hostname: targetHost,
+                customText: `[${l.level || 'INFO'}] ${l.message || l.log_message}`,
+                timestamp: l.timestamp || l.created_at || new Date(),
+                isSystem: true,
+              })
+            );
+          });
+        }
+
+        if (logEntries.length > 0) {
+          logEntries.sort((a, b) => new Date(a.ingestTs).getTime() - new Date(b.ingestTs).getTime());
+          setLogs(logEntries);
+        } else {
+          // If node just connected, show live banner
+          setLogs([
+            buildMetricLogEntry({
+              hostname: targetHost,
+              customText: `[SYSTEM] Connected to live metric stream for ${targetHost} (${ipAddress})`,
+              timestamp: new Date(),
+              isSystem: true,
+            })
+          ]);
+        }
+      } catch (err) {
+        console.error('Failed to fetch real telemetry history:', err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    loadRealData();
+
+    return () => {
+      active = false;
+    };
+  }, [machineId, rawHost, ipAddress]);
+
+  // 2. Real-Time WebSocket live streaming listener (pure real incoming payloads only)
   useEffect(() => {
     if (!streaming) return;
 
@@ -158,21 +202,20 @@ export default function FleetTerminal({ machine, machineName }) {
           const eventHost = payload.hostname || payload.Hostname || payload.machine_id || rawHost;
           const eventMachineId = payload.machine_id || payload.server_id || payload.ID;
 
-          // Check if event is for this machine or if viewing all
           const matches = !machineId || String(eventMachineId).toLowerCase() === String(machineId).toLowerCase() || String(eventHost).toLowerCase() === String(rawHost).toLowerCase();
 
-          if (matches) {
-            const cpu = payload.cpu_usage ?? payload.cpu ?? payload.CPUUsage ?? 2.4;
-            const ramBytes = payload.memory_used ?? payload.MemoryUsed;
+          if (matches && (payload.cpu_usage !== undefined || payload.cpu !== undefined || payload.memory_usage !== undefined || payload.memory !== undefined)) {
+            const cpu = payload.cpu_usage ?? payload.cpu ?? payload.CPUUsage ?? 0;
+            const ramBytes = payload.memory_used ?? payload.MemoryUsed ?? 0;
             const ramMb = ramBytes > 0
               ? (ramBytes > 10000000 ? ramBytes / (1024 * 1024) : ramBytes)
-              : (payload.memory ? (payload.memory / 100) * 4096 : 1350);
+              : (payload.memory ? (payload.memory / 100) * 4096 : 0);
 
             const newEntry = buildMetricLogEntry({
               hostname: eventHost || rawHost,
               cpu,
               ramMb,
-              timestamp: new Date(),
+              timestamp: payload.created_at || payload.timestamp || new Date(),
             });
 
             setLogs((prev) => [...prev.slice(-350), newEntry]);
@@ -189,35 +232,6 @@ export default function FleetTerminal({ machine, machineName }) {
       if (socket) socket.close();
     };
   }, [streaming, machineId, rawHost]);
-
-  // 3. Fallback active live poll interval every 10 seconds to guarantee smooth live stream if WS is quiet
-  useEffect(() => {
-    if (!streaming) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const liveObj = (machineId && liveMetricsMap[machineId]) || {};
-        const cpu = liveObj.cpu_usage ?? liveObj.cpu ?? (Math.random() * 0.6 + 2.3);
-        const ramBytes = liveObj.memory_used ?? 0;
-        const ramMb = ramBytes > 0
-          ? (ramBytes > 10000000 ? ramBytes / (1024 * 1024) : ramBytes)
-          : 1350;
-
-        const newEntry = buildMetricLogEntry({
-          hostname: rawHost || 'venky',
-          cpu,
-          ramMb,
-          timestamp: new Date(),
-        });
-
-        setLogs((prev) => [...prev.slice(-350), newEntry]);
-      } catch {
-        // silent
-      }
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [streaming, machineId, rawHost, liveMetricsMap]);
 
   // 4. Auto-scroll to bottom on new log entries
   useEffect(() => {

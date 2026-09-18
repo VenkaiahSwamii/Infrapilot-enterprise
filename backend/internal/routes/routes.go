@@ -380,6 +380,8 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 				admin.DELETE("/users/:id", authHandler.DeleteUser)
 				admin.PATCH("/users/:id/role", authHandler.UpdateUserRole)
 				admin.PATCH("/users/:id/status", authHandler.ToggleUserStatus)
+				admin.PUT("/users/:id/permissions", authHandler.UpdateUserPermissions)
+				admin.PATCH("/users/:id/permissions", authHandler.UpdateUserPermissions)
 				admin.GET("/super-dashboard", orgHandler.GetSuperAdminMetrics)
 				admin.GET("/platform/status", handlers.GetPlatformStatus)
 				admin.POST("/backup/run", handlers.RunBackupHandler)

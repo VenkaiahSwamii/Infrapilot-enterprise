@@ -413,7 +413,7 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 		} else if strings.HasPrefix(target.Host, "192.168.159.") {
 			serverURL = "http://192.168.159.1:8080"
 		} else {
-			serverURL = "http://192.168.1.16:8080"
+			serverURL = "http://192.168.1.2:8080"
 		}
 	}
 

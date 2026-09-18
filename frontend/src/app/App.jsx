@@ -12,6 +12,7 @@ import DeployPage from '../features/deploy/DeployPage.jsx';
 
 // Custom pages supporting sidebar paths
 import DockerPage from '../pages/DockerPage.jsx';
+import KubernetesPage from '../pages/KubernetesPage.jsx';
 import TerminalPage from '../pages/TerminalPage.jsx';
 import LiveMetricsPage from '../pages/LiveMetricsPage.jsx';
 import InfrastructurePage from '../pages/InfrastructurePage.jsx';
@@ -73,6 +74,8 @@ export default function App() {
                 <Route path="servers" element={<Navigate to="/" replace />} />
                 <Route path="machines/:machineId" element={<MachineDetailPage />} />
                 <Route path="docker" element={<DockerPage />} />
+                <Route path="kubernetes" element={<KubernetesPage />} />
+                <Route path="k8s" element={<KubernetesPage />} />
                 <Route path="alerts" element={<AlertsPage />} />
                 <Route path="logs" element={<LogsPage />} />
                 <Route path="analytics" element={<AnalyticsSuite />} />

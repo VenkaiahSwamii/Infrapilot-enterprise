@@ -96,33 +96,61 @@ export default function SREDiskPage() {
   const live = liveMetrics[machineId] || {};
 
   // Real or derived live disk numbers (GB / Percent)
-  const totalDiskBytes = live.disk_total || primaryMachine.disk_total || (78.2 * 1024 * 1024 * 1024);
-  const usedDiskBytes = live.disk_used || primaryMachine.disk_used || (40.0 * 1024 * 1024 * 1024);
-
-  const totalGB = (totalDiskBytes / (1024 * 1024 * 1024)).toFixed(1);
-  const usedGB = (usedDiskBytes / (1024 * 1024 * 1024)).toFixed(1);
-  const freeGB = Math.max(0, (totalGB - usedGB)).toFixed(1);
-  const usagePct = live.disk_usage !== undefined
-    ? Number(live.disk_usage).toFixed(1)
-    : ((usedGB / totalGB) * 100).toFixed(1);
+  const fsList = (Array.isArray(live.filesystems) && live.filesystems.length > 0)
+    ? live.filesystems
+    : (Array.isArray(primaryMachine.filesystems) ? primaryMachine.filesystems : []);
 
   const osStr = String(primaryMachine.os || primaryMachine.platform || '').toLowerCase();
   const isWindows = osStr.includes('win');
 
-  // Volumes list
-  const volumes = [
-    {
-      id: 'vol-root',
-      name: isWindows ? 'C: (System)' : 'root',
-      type: isWindows ? 'NTFS / LOCAL' : 'EXT4 / LOCAL',
-      mountPoint: isWindows ? 'C:' : '/',
-      usedGB: Number(usedGB),
-      freeGB: Number(freeGB),
-      totalGB: Number(totalGB),
-      usagePct: Number(usagePct),
-      status: Number(usagePct) >= 90 ? 'CRITICAL' : Number(usagePct) >= 80 ? 'WARNING' : 'HEALTHY',
-    },
-  ];
+  let volumes = [];
+
+  if (fsList.length > 0) {
+    volumes = fsList.map((fs, idx) => {
+      const tot = (Number(fs.total || fs.total_bytes || 0) / (1024 * 1024 * 1024)).toFixed(1);
+      const used = (Number(fs.used || fs.used_bytes || 0) / (1024 * 1024 * 1024)).toFixed(1);
+      const free = Math.max(0, Number(tot) - Number(used)).toFixed(1);
+      const pct = fs.used_percent != null
+        ? Number(fs.used_percent)
+        : Number(tot) > 0 ? (Number(used) / Number(tot)) * 100 : 0;
+
+      return {
+        id: `vol-${idx}`,
+        name: fs.mount_point?.includes('C') ? 'Windows (C:)' : fs.mount_point?.includes('D') ? 'New Volume (D:)' : (fs.mount_point || `Drive ${idx + 1}`),
+        type: fs.fs_type || (isWindows ? 'NTFS / LOCAL' : 'EXT4 / LOCAL'),
+        mountPoint: fs.mount_point || '/',
+        usedGB: Number(used),
+        freeGB: Number(free),
+        totalGB: Number(tot),
+        usagePct: Number(pct.toFixed(1)),
+        status: pct >= 90 ? 'CRITICAL' : pct >= 80 ? 'WARNING' : 'HEALTHY',
+      };
+    });
+  } else {
+    const totalDiskBytes = live.disk_total || (primaryMachine.total_disk_gb ? primaryMachine.total_disk_gb * 1024 * 1024 * 1024 : 0);
+    const usedDiskBytes = live.disk_used || (live.disk_usage && totalDiskBytes ? (live.disk_usage / 100) * totalDiskBytes : 0);
+
+    const totalGB = totalDiskBytes > 0 ? (totalDiskBytes / (1024 * 1024 * 1024)).toFixed(1) : '0.0';
+    const usedGB = usedDiskBytes > 0 ? (usedDiskBytes / (1024 * 1024 * 1024)).toFixed(1) : '0.0';
+    const freeGB = Math.max(0, (Number(totalGB) - Number(usedGB))).toFixed(1);
+    const usagePct = live.disk_usage !== undefined
+      ? Number(live.disk_usage).toFixed(1)
+      : (Number(totalGB) > 0 ? ((Number(usedGB) / Number(totalGB)) * 100).toFixed(1) : '0.0');
+
+    volumes = [
+      {
+        id: 'vol-root',
+        name: isWindows ? 'C: (System)' : 'root',
+        type: isWindows ? 'NTFS / LOCAL' : 'EXT4 / LOCAL',
+        mountPoint: isWindows ? 'C:' : '/',
+        usedGB: Number(usedGB),
+        freeGB: Number(freeGB),
+        totalGB: Number(totalGB),
+        usagePct: Number(usagePct),
+        status: Number(usagePct) >= 90 ? 'CRITICAL' : Number(usagePct) >= 80 ? 'WARNING' : 'HEALTHY',
+      },
+    ];
+  }
 
   const healthyCount = volumes.filter((v) => v.status === 'HEALTHY').length;
   const warningCount = volumes.filter((v) => v.status === 'WARNING').length;

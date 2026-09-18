@@ -218,9 +218,7 @@ func (r *ServerRepository) UpdateHeartbeat(id uuid.UUID, lastSeen time.Time) err
 	if database.DB == nil {
 		return nil
 	}
-	if id.String() == "c762ae37-0462-457c-ab49-cd6485ae2fcb" || id.String() == "e7a110ac-e7d0-41bd-88d8-c628619fbb29" {
-		return errors.New("server permanently deleted and blocked by policy")
-	}
+
 	return database.DB.Model(&models.Server{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"last_seen": lastSeen,
 		"status":    "ONLINE",

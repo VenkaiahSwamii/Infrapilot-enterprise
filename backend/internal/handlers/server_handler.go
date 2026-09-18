@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -121,14 +122,7 @@ func (h *ServerHandler) RegisterServer(c *gin.Context) {
 		return
 	}
 
-	hostLower := strings.ToLower(req.Hostname)
-	if strings.Contains(hostLower, "jayathisoft") || strings.Contains(hostLower, "jayathilabs") || req.MachineID == "c762ae37-0462-457c-ab49-cd6485ae2fcb" || req.MachineID == "e7a110ac-e7d0-41bd-88d8-c628619fbb29" {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error":  "Machine is permanently blocked by administrator.",
-			"status": "blocked",
-		})
-		return
-	}
+
 
 	ip := req.IP
 	if ip == "" {
@@ -213,6 +207,39 @@ func (h *ServerHandler) GetServers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query servers"})
 		return
 	}
+
+	// RBAC Machine-level filtering for assigned users
+	userIDStr := c.GetString("userId")
+	if userIDStr != "" {
+		if uid, err := uuid.Parse(userIDStr); err == nil {
+			var u models.User
+			if err := database.DB.First(&u, "id = ?", uid).Error; err == nil {
+				if u.Role != models.RoleAdmin && u.Role != models.RoleSuperAdmin && u.AllowedMachines != "" && u.AllowedMachines != "all" {
+					allowedMap := make(map[string]bool)
+					var list []string
+					if jsonErr := json.Unmarshal([]byte(u.AllowedMachines), &list); jsonErr == nil {
+						for _, item := range list {
+							allowedMap[strings.ToLower(item)] = true
+						}
+					} else {
+						for _, part := range strings.Split(u.AllowedMachines, ",") {
+							allowedMap[strings.ToLower(strings.TrimSpace(part))] = true
+						}
+					}
+
+					filtered := make([]models.ServerSnapshot, 0)
+					for _, s := range servers {
+						if allowedMap[strings.ToLower(s.ID.String())] || allowedMap[strings.ToLower(s.Hostname)] {
+							filtered = append(filtered, s)
+						}
+					}
+					c.JSON(http.StatusOK, filtered)
+					return
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, servers)
 }
 
@@ -221,6 +248,34 @@ func (h *ServerHandler) GetServerByID(c *gin.Context) {
 	if idStr == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing server ID"})
 		return
+	}
+
+	// RBAC Machine-level authorization check
+	userIDStr := c.GetString("userId")
+	if userIDStr != "" {
+		if uid, err := uuid.Parse(userIDStr); err == nil {
+			var u models.User
+			if err := database.DB.First(&u, "id = ?", uid).Error; err == nil {
+				if u.Role != models.RoleAdmin && u.Role != models.RoleSuperAdmin && u.AllowedMachines != "" && u.AllowedMachines != "all" {
+					allowedMap := make(map[string]bool)
+					var list []string
+					if jsonErr := json.Unmarshal([]byte(u.AllowedMachines), &list); jsonErr == nil {
+						for _, item := range list {
+							allowedMap[strings.ToLower(item)] = true
+						}
+					} else {
+						for _, part := range strings.Split(u.AllowedMachines, ",") {
+							allowedMap[strings.ToLower(strings.TrimSpace(part))] = true
+						}
+					}
+
+					if !allowedMap[strings.ToLower(idStr)] {
+						c.JSON(http.StatusForbidden, gin.H{"error": "Access to this machine is restricted by your administrator"})
+						return
+					}
+				}
+			}
+		}
 	}
 
 	server, err := h.serverService.GetServerSnapshotByIDOrHostname(idStr)

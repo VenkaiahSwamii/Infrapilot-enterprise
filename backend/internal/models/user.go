@@ -17,13 +17,15 @@ const (
 )
 
 type User struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	Username  string    `gorm:"size:100;unique;not null" json:"username"`
-	Email     string    `gorm:"size:255;unique;not null" json:"email"`
-	Password  string    `gorm:"not null" json:"-"`
-	Role      string    `gorm:"size:50;not null;default:'Viewer'" json:"role"`
-	IsActive  bool      `gorm:"default:true" json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
+	ID              uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	Username        string    `gorm:"size:100;unique;not null" json:"username"`
+	Email           string    `gorm:"size:255;unique;not null" json:"email"`
+	Password        string    `gorm:"not null" json:"-"`
+	Role            string    `gorm:"size:50;not null;default:'Viewer'" json:"role"`
+	AllowedMachines string    `gorm:"type:text;default:'all'" json:"allowed_machines"`
+	AllowedModules  string    `gorm:"type:text;default:'all'" json:"allowed_modules"`
+	IsActive        bool      `gorm:"default:true" json:"is_active"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) error {

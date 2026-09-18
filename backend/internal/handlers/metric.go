@@ -106,14 +106,7 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		return
 	}
 
-	hostLower := strings.ToLower(req.Hostname)
-	if strings.Contains(hostLower, "jayathisoft") || strings.Contains(hostLower, "jayathilabs") || c.Param("id") == "c762ae37-0462-457c-ab49-cd6485ae2fcb" || c.Param("id") == "e7a110ac-e7d0-41bd-88d8-c628619fbb29" {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error":  "Machine is permanently blocked by administrator.",
-			"status": "blocked",
-		})
-		return
-	}
+
 
 	apiKey := c.GetString("api_key")
 	if apiKey == "" {

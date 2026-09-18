@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Home,
@@ -17,34 +17,60 @@ import {
   HardDrive,
   Zap,
   Terminal,
+  Network,
 } from 'lucide-react';
 
 import { useAlertStore } from '../../store/alertStore.jsx';
 
-export default function Sidebar({ collapsed }) {
+export default function Sidebar({ collapsed, userProfile }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { activeCount, criticalCount } = useAlertStore();
 
-  const navItems = [
-    { label: 'Overview', icon: Home, path: '/' },
-    { label: 'Fleet Terminal', icon: Terminal, path: '/terminal', badge: 'CLI' },
-    { label: 'SRE Disk Space', icon: HardDrive, path: '/sre-disk', badge: 'DISK' },
-    { label: 'Crash & Service Health', icon: Zap, path: '/sre-crash', badge: 'SRE' },
-    { label: 'Latency & Gateway', icon: Radio, path: '/sre-latency', badge: 'SLO' },
-    { label: 'Machines', icon: Server, path: '/infrastructure' },
-    { label: 'Metrics', icon: Activity, path: '/live-metrics' },
+  const navItems = useMemo(() => [
+    { id: 'overview', label: 'Overview', icon: Home, path: '/' },
+    { id: 'terminal', label: 'Fleet Terminal', icon: Terminal, path: '/terminal', badge: 'CLI', badgeColor: '#0284c7' },
+    { id: 'sre', label: 'SRE Disk Space', icon: HardDrive, path: '/sre-disk', badge: 'DISK', badgeColor: '#d97706' },
+    { id: 'sre', label: 'Crash & Service Health', icon: Zap, path: '/sre-crash', badge: 'SRE', badgeColor: '#e11d48' },
+    { id: 'sre', label: 'Latency & Gateway', icon: Radio, path: '/sre-latency', badge: 'SLO', badgeColor: '#7c3aed' },
+    { id: 'machines', label: 'Machines', icon: Server, path: '/infrastructure' },
+    { id: 'docker', label: 'Docker', icon: Layers, path: '/docker', badge: 'CONTAINER', badgeColor: '#06b6d4' },
+    { id: 'kubernetes', label: 'Kubernetes', icon: Network, path: '/kubernetes', badge: 'K8S', badgeColor: '#a855f7' },
+    { id: 'metrics', label: 'Metrics', icon: Activity, path: '/live-metrics' },
     {
+      id: 'alerts',
       label: 'Alerts',
       icon: Bell,
       path: '/alerts',
       badge: activeCount > 0 ? (activeCount > 99 ? '99+' : activeCount) : null,
+      badgeColor: '#ef4444',
     },
-    { label: 'Analytics', icon: TrendingUp, path: '/analytics' },
-    { label: 'Reports', icon: Layers, path: '/reports' },
-    { label: 'Agents', icon: Bot, path: '/agents' },
-    { label: 'Settings', icon: Settings, path: '/admin/settings' },
-  ];
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp, path: '/analytics' },
+    { id: 'reports', label: 'Reports', icon: FileText, path: '/reports' },
+    { id: 'agents', label: 'Agents', icon: Bot, path: '/agents' },
+    { id: 'settings', label: 'Settings', icon: Settings, path: '/admin/settings' },
+  ], [activeCount]);
+
+  const userRole = String(userProfile?.role || 'Admin').toLowerCase();
+  const isAdmin = userRole.includes('admin') || userRole.includes('superadmin');
+
+  const allowedModules = useMemo(() => {
+    if (isAdmin) return 'all';
+    const raw = userProfile?.allowed_modules;
+    if (!raw || raw === 'all') return 'all';
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return new Set(parsed.map(s => String(s).toLowerCase()));
+    } catch {
+      return new Set(String(raw).split(',').map(s => s.trim().toLowerCase()));
+    }
+    return 'all';
+  }, [userProfile, isAdmin]);
+
+  const visibleNavItems = useMemo(() => {
+    if (allowedModules === 'all') return navItems;
+    return navItems.filter(item => !item.id || allowedModules.has(item.id) || item.id === 'overview');
+  }, [navItems, allowedModules]);
 
   return (
     <aside className={`sidebar-container ${collapsed ? 'collapsed' : ''}`}>
@@ -63,7 +89,7 @@ export default function Sidebar({ collapsed }) {
 
       {/* Navigation Links */}
       <nav className="sidebar-nav-list" aria-label="Main Navigation">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isMachines = item.path === '/infrastructure' && location.pathname.includes('/machines');
           const isActive =
             item.path === '/'
@@ -82,7 +108,10 @@ export default function Sidebar({ collapsed }) {
               <Icon size={17} className="nav-item-icon" />
               {!collapsed && <span className="nav-item-label">{item.label}</span>}
               {!collapsed && item.badge && (
-                <span className={`nav-item-badge ${item.label === 'Alerts' && criticalCount > 0 ? 'critical-pulse' : ''}`}>
+                <span 
+                  className={`nav-item-badge ${item.label === 'Alerts' && criticalCount > 0 ? 'critical-pulse' : ''}`}
+                  style={item.badgeColor ? { backgroundColor: item.badgeColor } : {}}
+                >
                   {item.badge}
                 </span>
               )}
@@ -243,12 +272,16 @@ export default function Sidebar({ collapsed }) {
         .nav-item-badge {
           background-color: #ef4444;
           color: #ffffff;
-          font-size: 10px;
-          font-weight: 800;
-          border-radius: 10px;
-          padding: 1px 6px;
-          line-height: 1.3;
+          font-size: 9.5px;
+          font-weight: 700;
+          letter-spacing: 0.03em;
+          border-radius: 6px;
+          padding: 2px 6px;
+          line-height: 1.2;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
         }
+
+
 
         /* Bottom System Status Box */
         .sidebar-system-status-card {

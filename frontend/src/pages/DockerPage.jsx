@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Layers, Activity, RefreshCw, Server, AlertTriangle, ShieldCheck, Play, Square, FileText } from 'lucide-react';
+import { Layers, Activity, RefreshCw, Server, AlertTriangle, ShieldCheck, Play, Square, FileText, Copy, Check, Terminal } from 'lucide-react';
 import { listServers } from '../api/server.js';
 import { getDockerContainers, getDockerOverview } from '../api/docker.js';
 import { useDashboardStore } from '../store/dashboardStore.jsx';
@@ -12,7 +12,20 @@ export default function DockerPage() {
   const [error, setError] = useState('');
   const [selectedServerId, setSelectedServerId] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [copiedCmd, setCopiedCmd] = useState(false);
   const { addToast } = useDashboardStore();
+
+  const backendHost = typeof window !== 'undefined' ? (window.location.hostname || '192.168.1.2') : '192.168.1.2';
+  const dockerCmd = `docker run -d --name infrapilot-agent --restart always --net=host -v /var/run/docker.sock:/var/run/docker.sock:ro -e BACKEND_URL=http://${backendHost}:8080 infrapilot/agent:latest`;
+
+  const handleCopyCmd = () => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(dockerCmd);
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 2000);
+      addToast('success', 'Copied', 'Docker 1-line run command copied to clipboard.');
+    }
+  };
 
   const fetchDockerData = async () => {
     setLoading(true);
@@ -125,6 +138,84 @@ export default function DockerPage() {
         >
           <RefreshCw size={14} className={loading ? 'spin' : ''} />
           {loading ? 'Refreshing...' : 'Refresh Telemetry'}
+        </button>
+      </div>
+
+      {/* 1-Line Docker Deploy Command Banner */}
+      <div style={{
+        background: 'linear-gradient(90deg, rgba(6, 182, 212, 0.08) 0%, rgba(13, 18, 32, 0.95) 100%)',
+        border: '1px solid rgba(6, 182, 212, 0.25)',
+        borderRadius: '10px',
+        padding: '12px 16px',
+        marginBottom: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '16px',
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '280px' }}>
+          <div style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '8px',
+            background: 'rgba(6, 182, 212, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Terminal size={16} color="#06b6d4" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              1-Line Docker Agent Deploy Command
+            </span>
+            <code style={{
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              color: '#e2e8f0',
+              backgroundColor: '#090d16',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              border: '1px solid #1e293b',
+              wordBreak: 'break-all',
+            }}>
+              {dockerCmd}
+            </code>
+          </div>
+        </div>
+
+        <button
+          onClick={handleCopyCmd}
+          type="button"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 14px',
+            background: copiedCmd ? '#064e3b' : '#0284c7',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '6px',
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            flexShrink: 0,
+          }}
+        >
+          {copiedCmd ? (
+            <>
+              <Check size={14} color="#34d399" />
+              <span>Copied to Clipboard!</span>
+            </>
+          ) : (
+            <>
+              <Copy size={14} />
+              <span>Copy 1-Line Command</span>
+            </>
+          )}
         </button>
       </div>
 

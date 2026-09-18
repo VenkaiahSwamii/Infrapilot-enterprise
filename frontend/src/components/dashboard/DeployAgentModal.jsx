@@ -249,45 +249,6 @@ export default function DeployAgentModal({ isOpen, onClose, onDeployed }) {
         'InfraPilot Windows Service will register and immediately begin telemetry heartbeat.',
       ],
     },
-    docker: {
-      title: 'Docker Container Host',
-      icon: Layers,
-      color: '#06b6d4',
-      description: 'Run the lightweight monitoring container with host-level metric access.',
-      command: `docker run -d \\
-  --name infrapilot-agent \\
-  --restart always \\
-  --net=host \\
-  --pid=host \\
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \\
-  -v /proc:/host/proc:ro \\
-  -v /sys:/host/sys:ro \\
-  -e INFRAPILOT_SERVER="${serverUrl}" \\
-  -e INFRAPILOT_TOKEN="${currentToken}" \\
-  infrapilot/agent:latest`,
-      steps: [
-        'Ensure Docker daemon is running on the target host.',
-        'Execute the container run command with required host socket bindings.',
-        'The agent automatically discovers and monitors all colocated containers.',
-      ],
-    },
-    kubernetes: {
-      title: 'Kubernetes Cluster (Helm / DaemonSet)',
-      icon: Network,
-      color: '#a855f7',
-      description: 'Deploy as a DaemonSet across all Kubernetes cluster worker nodes.',
-      command: `helm repo add infrapilot https://charts.infrapilot.io
-helm repo update
-helm install infrapilot-agent infrapilot/infrapilot-agent \\
-  --namespace infrapilot-system --create-namespace \\
-  --set server.url="${serverUrl}" \\
-  --set server.token="${currentToken}"`,
-      steps: [
-        'Add the official InfraPilot Helm repository.',
-        'Deploy the DaemonSet chart to stream node and pod performance metrics.',
-        'View cluster node health and pod telemetry in the Kubernetes overview tab.',
-      ],
-    },
   };
 
   return (

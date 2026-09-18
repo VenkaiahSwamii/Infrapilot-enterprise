@@ -93,10 +93,7 @@ func (s *ServerService) PublishEvent(e events.Event) {
 }
 
 func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*models.Server, error) {
-	hostLower := strings.ToLower(input.Hostname)
-	if strings.Contains(hostLower, "jayathisoft") || strings.Contains(hostLower, "jayathilabs") || input.ID.String() == "c762ae37-0462-457c-ab49-cd6485ae2fcb" || input.ID.String() == "e7a110ac-e7d0-41bd-88d8-c628619fbb29" {
-		return nil, errors.New("server permanently deleted and blocked by policy")
-	}
+
 
 	server, err := s.serverRepo.FindExistingServer(input.ID, input.Hostname, input.IPAddress, input.MACAddress, input.OS)
 	if err == nil && server != nil {
@@ -363,10 +360,7 @@ ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = 1 THEN 1 ELSE 2 END,
 	seenHosts := make(map[string]bool)
 
 	for _, row := range rows {
-		hostLower := strings.ToLower(row.Hostname)
-		if strings.Contains(hostLower, "jayathisoft") || strings.Contains(hostLower, "jayathilabs") || row.ID.String() == "c762ae37-0462-457c-ab49-cd6485ae2fcb" || row.ID.String() == "e7a110ac-e7d0-41bd-88d8-c628619fbb29" {
-			continue
-		}
+
 		dedupKey := row.ID.String()
 		if dedupKey != "" {
 			if seenHosts[dedupKey] {

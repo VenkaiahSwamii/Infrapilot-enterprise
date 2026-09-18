@@ -81,6 +81,19 @@ export default function KubernetesTab({ machine }) {
   const [yamlLoading, setYamlLoading] = useState(false);
 
   const [copiedId, setCopiedId] = useState(null);
+  const [copiedK8sCmd, setCopiedK8sCmd] = useState(false);
+
+  const backendHost = typeof window !== 'undefined' ? (window.location.hostname || '192.168.1.2') : '192.168.1.2';
+  const k8sDeployCmd = `kubectl apply -f http://${backendHost}:8080/downloads/k8s-daemonset.yaml`;
+
+  const handleCopyK8sCmd = () => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(k8sDeployCmd);
+      setCopiedK8sCmd(true);
+      setTimeout(() => setCopiedK8sCmd(false), 2000);
+      addToast('success', 'Copied', 'Kubernetes 1-line deploy command copied to clipboard.');
+    }
+  };
 
   // Fetch all Kubernetes Data
   const fetchK8sData = async (isManual = false) => {
@@ -230,6 +243,83 @@ export default function KubernetesTab({ machine }) {
   return (
     <div className="k8s-enterprise-tab" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       
+      {/* 1-Line Kubernetes Deploy Command Banner */}
+      <div style={{
+        background: 'linear-gradient(90deg, rgba(168, 85, 247, 0.08) 0%, rgba(13, 18, 32, 0.95) 100%)',
+        border: '1px solid rgba(168, 85, 247, 0.25)',
+        borderRadius: '10px',
+        padding: '12px 16px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '16px',
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '280px' }}>
+          <div style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '8px',
+            background: 'rgba(168, 85, 247, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Terminal size={16} color="#a855f7" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#c084fc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              1-Line Kubernetes DaemonSet Deploy Command
+            </span>
+            <code style={{
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              color: '#e2e8f0',
+              backgroundColor: '#090d16',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              border: '1px solid #1e293b',
+              wordBreak: 'break-all',
+            }}>
+              {k8sDeployCmd}
+            </code>
+          </div>
+        </div>
+
+        <button
+          onClick={handleCopyK8sCmd}
+          type="button"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 14px',
+            background: copiedK8sCmd ? '#064e3b' : '#7c3aed',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '6px',
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            flexShrink: 0,
+          }}
+        >
+          {copiedK8sCmd ? (
+            <>
+              <Check size={14} color="#34d399" />
+              <span>Copied to Clipboard!</span>
+            </>
+          ) : (
+            <>
+              <Copy size={14} />
+              <span>Copy 1-Line Command</span>
+            </>
+          )}
+        </button>
+      </div>
+
       {/* ========================================================================= */}
       {/* 1. CLUSTER TOPOLOGY & EXECUTIVE HEALTH CARDS */}
       {/* ========================================================================= */}

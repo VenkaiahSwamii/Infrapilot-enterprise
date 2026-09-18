@@ -251,8 +251,7 @@ export default function EnterpriseDashboard() {
           const hostLower = String(m.hostname || '').toLowerCase();
           return (
             (!id || !removedMachineIds.has(id)) &&
-            (!m.hostname || !removedMachineIds.has(m.hostname)) &&
-            !hostLower.includes('jayathi')
+            (!m.hostname || !removedMachineIds.has(m.hostname))
           );
         });
 
