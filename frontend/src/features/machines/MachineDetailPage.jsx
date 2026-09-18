@@ -138,25 +138,20 @@ export default function MachineDetailPage() {
         }
       } catch (error) {
         if (active) {
-          const isPowerHouse = String(machineId).toLowerCase().includes('powerhouse');
-          const cleanHost = String(machineId).replace(/-(linux|windows|ubuntu)$/i, '');
-          const isWindows = String(machineId).toLowerCase().includes('win');
-          const isUbuntu = String(machineId).toLowerCase().includes('ubuntu');
-
           const fallbackMachine = {
             id: machineId,
-            hostname: cleanHost || 'Venkyyy',
-            ip_address: isWindows ? '192.168.1.11' : '172.30.120.10',
-            os: isWindows ? 'windows' : isUbuntu ? 'ubuntu' : 'linux',
-            platform: isWindows ? 'Windows 11' : 'Linux / Ubuntu',
-            architecture: 'x86_64',
-            cpu_model: isWindows ? 'Host System CPU' : 'Linux Virtual CPU',
-            gpu: isWindows ? 'Host Integrated GPU' : 'Virtual Direct3D GPU',
-            total_memory_gb: isWindows ? 16 : 8,
-            total_disk_gb: isWindows ? 512 : 256,
-            status: 'ONLINE',
-            online: true,
-            last_seen: new Date().toISOString(),
+            hostname: machineId,
+            ip_address: '--',
+            os: '--',
+            platform: '--',
+            architecture: '--',
+            cpu_model: '--',
+            gpu: '--',
+            total_memory_gb: 0,
+            total_disk_gb: 0,
+            status: 'OFFLINE',
+            online: false,
+            last_seen: null,
           };
           setMachine(fallbackMachine);
           setError('');
@@ -218,7 +213,7 @@ export default function MachineDetailPage() {
   const ActiveComponent = TABS.find((t) => t.id === activeTab)?.component;
 
   const rawStatusUpper = String(machine?.status || '').toUpperCase();
-  const isDBOnline = rawStatusUpper === 'ONLINE' || rawStatusUpper === 'CONNECTED' || machine?.online === true;
+  const isDBOnline = rawStatusUpper === 'ONLINE' || machine?.online === true;
 
   let lastSeenDiff = Infinity;
   const lastSeenVal = liveMetric?.created_at || machine?.last_seen || machine?.LastSeen;
@@ -226,30 +221,24 @@ export default function MachineDetailPage() {
     const t = new Date(lastSeenVal).getTime();
     if (!isNaN(t)) lastSeenDiff = Math.abs(Date.now() - t);
   }
-  const isRecentTelemetry = lastSeenDiff < 300000; // 5 minutes
+  const isRecentTelemetry = lastSeenDiff < 120000; // 2 minutes
 
-  const isOnline = isDBOnline || isRecentTelemetry || liveStatus === 'CONNECTED' || liveMetric !== undefined;
-
-  const hostnameStr = String(machine?.hostname || normalizedId || machineId || '').toLowerCase();
-  const isLinux = String(machine?.os || '').toLowerCase() === 'linux' || (hostnameStr.includes('linux') && !hostnameStr.includes('win'));
-  const defaultDeviceId = machine?.id || machineId || (isLinux ? '2e3655d2-d33b-4312-a72f-5a8e2e853b82' : 'e53dee5c-584a-42bd-874d-7ab54da9e8db');
-  const defaultIp = isLinux ? '172.30.120.10' : '192.168.1.11';
-  const defaultHostname = machine?.hostname || 'Venkyyy';
+  const isOnline = isDBOnline && (isRecentTelemetry || liveMetric !== undefined);
 
   const resolvedMachine = machine || {
-    id: defaultDeviceId,
-    hostname: defaultHostname,
-    ip_address: defaultIp,
-    os: isLinux ? 'linux' : 'windows',
-    platform: isLinux ? 'Ubuntu 24.04 LTS (WSL2)' : 'Windows 11 Home Single Language',
-    architecture: 'x86_64',
-    cpu_model: isLinux ? 'WSL2 / Linux Virtual CPU' : '11th Gen Intel(R) Core(TM) i3-1115G4 @ 3.00GHz',
-    gpu: isLinux ? 'Direct3D / Virtual GPU' : 'Intel(R) UHD Graphics',
-    total_memory_gb: isLinux ? 4 : 8,
-    total_disk_gb: isLinux ? 2013 : 512,
-    status: 'ONLINE',
-    online: true,
-    last_seen: new Date().toISOString(),
+    id: machineId,
+    hostname: machineId,
+    ip_address: '--',
+    os: '--',
+    platform: '--',
+    architecture: '--',
+    cpu_model: '--',
+    gpu: '--',
+    total_memory_gb: 0,
+    total_disk_gb: 0,
+    status: 'OFFLINE',
+    online: false,
+    last_seen: null,
   };
 
   return (
@@ -348,7 +337,7 @@ export default function MachineDetailPage() {
       {/* Host Title & Live Status */}
       <div className="host-title-bar">
         <div className="host-title-left">
-          <h1 className="host-name">{resolvedMachine?.hostname || defaultHostname}</h1>
+          <h1 className="host-name">{resolvedMachine?.hostname || machineId}</h1>
           <span className={`status-badge ${isOnline ? 'online' : 'offline'}`}>
             <span className="dot" /> {isOnline ? 'ONLINE' : 'OFFLINE'}
           </span>
@@ -360,7 +349,7 @@ export default function MachineDetailPage() {
             <span>{isOnline ? 'CONNECTED' : 'DISCONNECTED'}</span>
           </div>
           <span className="last-seen-label">
-            Last seen: {liveMetric?.created_at ? new Date(liveMetric.created_at).toLocaleString('en-GB') : resolvedMachine?.last_seen ? new Date(resolvedMachine.last_seen).toLocaleString('en-GB') : 'Just now'}
+            Last seen: {liveMetric?.created_at ? new Date(liveMetric.created_at).toLocaleString('en-GB') : resolvedMachine?.last_seen ? new Date(resolvedMachine.last_seen).toLocaleString('en-GB') : '--'}
           </span>
         </div>
       </div>
@@ -369,27 +358,27 @@ export default function MachineDetailPage() {
       <div className="metadata-ribbon-grid">
         <div className="ribbon-box">
           <span className="lbl">Machine ID</span>
-          <span className="val mono">{resolvedMachine?.id && resolvedMachine.id.length > 20 && !resolvedMachine.id.startsWith('venky') && !resolvedMachine.id.startsWith('power') ? resolvedMachine.id : defaultDeviceId}</span>
+          <span className="val mono">{resolvedMachine?.id || machineId || '--'}</span>
         </div>
 
         <div className="ribbon-box">
           <span className="lbl">IP Address</span>
-          <span className="val">{resolvedMachine?.ip_address || defaultIp}</span>
+          <span className="val">{resolvedMachine?.ip_address || '--'}</span>
         </div>
 
         <div className="ribbon-box">
           <span className="lbl">OS</span>
-          <span className="val">{resolvedMachine?.os || 'Windows'}</span>
+          <span className="val">{resolvedMachine?.os || '--'}</span>
         </div>
 
         <div className="ribbon-box flex-wide">
           <span className="lbl">Platform</span>
-          <span className="val">{resolvedMachine?.platform || resolvedMachine?.operating_system || 'Microsoft Windows 11 Home'}</span>
+          <span className="val">{resolvedMachine?.platform || resolvedMachine?.operating_system || resolvedMachine?.os || '--'}</span>
         </div>
 
         <div className="ribbon-box">
           <span className="lbl">Architecture</span>
-          <span className="val">{resolvedMachine?.architecture || 'x64'}</span>
+          <span className="val">{resolvedMachine?.architecture || '--'}</span>
         </div>
       </div>
 

@@ -6,27 +6,6 @@ export default function StorageTab({ machine }) {
   const [filesystems, setFilesystems] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const hostnameStr = String(machine?.hostname || '').toLowerCase();
-  const isPowerHouse = hostnameStr.includes('powerhouse') || hostnameStr.includes('10');
-
-  const osStr = String(machine?.os || machine?.platform || '').toLowerCase();
-  const isLinux = osStr.includes('lin') || osStr.includes('ubuntu') || hostnameStr.includes('venky');
-
-  // Exact partition layout matching target OS
-  const defaultPartitions = isLinux
-    ? [
-        { name: 'Root (/)', mount_point: '/', fs_type: 'ext4', total: 1007 * 1024 * 1024 * 1024, used: 6.4 * 1024 * 1024 * 1024, free: 950 * 1024 * 1024 * 1024, used_percent: 1.0 },
-      ]
-    : isPowerHouse
-    ? [
-        { name: 'Windows (C:)', mount_point: 'C:', fs_type: 'NTFS', total: 200 * 1024 * 1024 * 1024, used: 165 * 1024 * 1024 * 1024, free: 35 * 1024 * 1024 * 1024, used_percent: 82.5 },
-        { name: 'Data (D:)', mount_point: 'D:', fs_type: 'NTFS', total: 277 * 1024 * 1024 * 1024, used: 232 * 1024 * 1024 * 1024, free: 45 * 1024 * 1024 * 1024, used_percent: 83.8 },
-      ]
-    : [
-        { name: 'Windows (C:)', mount_point: 'C:', fs_type: 'NTFS', total: 199 * 1024 * 1024 * 1024, used: 184 * 1024 * 1024 * 1024, free: 15 * 1024 * 1024 * 1024, used_percent: 92.5 },
-        { name: 'New Volume (D:)', mount_point: 'D:', fs_type: 'NTFS', total: 275 * 1024 * 1024 * 1024, used: 69 * 1024 * 1024 * 1024, free: 206 * 1024 * 1024 * 1024, used_percent: 25.1 },
-      ];
-
   useEffect(() => {
     if (!machine?.id) {
       setLoading(false);
@@ -50,8 +29,7 @@ export default function StorageTab({ machine }) {
   const ignoredPrefixes = ['/sys', '/proc', '/dev', '/run', '/snap', '/mnt/wsl', '/usr/lib/wsl', '/init'];
   const ignoredFSTypes = ['tmpfs', 'devtmpfs', 'sysfs', 'proc', 'procfs', 'cgroup', 'cgroup2', 'squashfs', 'snapfuse', 'overlay', 'none'];
 
-  const rawDrives = filesystems.length > 0 ? filesystems : defaultPartitions;
-  const activeDrives = rawDrives.filter((fs) => {
+  const activeDrives = filesystems.filter((fs) => {
     const m = (fs.mount_point || fs.MountPoint || '').toLowerCase();
     const t = (fs.fs_type || fs.FSType || '').toLowerCase();
     if (ignoredFSTypes.includes(t)) return false;
@@ -59,12 +37,12 @@ export default function StorageTab({ machine }) {
     return true;
   });
 
-  const totalBytes = activeDrives.reduce((acc, fs) => acc + (Number(fs.total) || 0), 0);
-  const usedBytes = activeDrives.reduce((acc, fs) => acc + (Number(fs.used) || 0), 0);
-  const freeBytes = totalBytes - usedBytes;
-  const aggregatePct = totalBytes > 0 ? (usedBytes / totalBytes) * 100 : (isPowerHouse ? 83.2 : 53.0);
+  const totalBytes = activeDrives.reduce((acc, fs) => acc + (Number(fs.total || fs.total_bytes) || 0), 0);
+  const usedBytes = activeDrives.reduce((acc, fs) => acc + (Number(fs.used || fs.used_bytes) || 0), 0);
+  const freeBytes = totalBytes > usedBytes ? totalBytes - usedBytes : 0;
+  const aggregatePct = totalBytes > 0 ? (usedBytes / totalBytes) * 100 : 0;
 
-  const formatGB = (bytes) => (bytes / (1024 * 1024 * 1024)).toFixed(0);
+  const formatGB = (bytes) => (Number(bytes) > 0 ? (Number(bytes) / (1024 * 1024 * 1024)).toFixed(0) : '0');
 
   return (
     <div className="storage-tab-root">
@@ -105,56 +83,62 @@ export default function StorageTab({ machine }) {
         <h2>Devices and Drives ({activeDrives.length})</h2>
       </div>
 
-      <div className="drives-grid">
-        {activeDrives.map((fs) => {
-          const usedPct = fs.used_percent != null
-            ? Number(fs.used_percent)
-            : fs.total > 0
-            ? (Number(fs.used) / Number(fs.total)) * 100
-            : 0;
-          const isCritical = usedPct > 85;
-          const isWarning = usedPct > 70 && !isCritical;
-          const driveLabel = fs.name || `${fs.mount_point.includes('C') ? 'Windows' : 'Volume'} (${fs.mount_point})`;
-          const freeGB = formatGB(fs.free != null ? fs.free : (fs.total - fs.used));
-          const totalGB = formatGB(fs.total);
-          const usedGB = formatGB(fs.used);
+      {activeDrives.length === 0 ? (
+        <div style={{ padding: '32px', textAlign: 'center', color: '#94a3b8', backgroundColor: '#0d1424', borderRadius: '8px', border: '1px solid #1a253a' }}>
+          No physical storage devices reported for this machine.
+        </div>
+      ) : (
+        <div className="drives-grid">
+          {activeDrives.map((fs) => {
+            const usedPct = fs.used_percent != null
+              ? Number(fs.used_percent)
+              : fs.total > 0
+              ? (Number(fs.used) / Number(fs.total)) * 100
+              : 0;
+            const isCritical = usedPct > 85;
+            const isWarning = usedPct > 70 && !isCritical;
+            const driveLabel = fs.name || `${fs.mount_point?.includes('C') ? 'Windows' : 'Volume'} (${fs.mount_point || '/'})`;
+            const freeGB = formatGB(fs.free != null ? fs.free : (fs.total - fs.used));
+            const totalGB = formatGB(fs.total);
+            const usedGB = formatGB(fs.used);
 
-          return (
-            <div className="drive-card" key={fs.mount_point}>
-              <div className="drive-head">
-                <div className="drive-title-box">
-                  <div className={`drive-icon-badge ${isCritical ? 'crit' : ''}`}>
-                    <HardDrive size={18} />
+            return (
+              <div className="drive-card" key={fs.mount_point || driveLabel}>
+                <div className="drive-head">
+                  <div className="drive-title-box">
+                    <div className={`drive-icon-badge ${isCritical ? 'crit' : ''}`}>
+                      <HardDrive size={18} />
+                    </div>
+                    <div>
+                      <h3 className="drive-name">{driveLabel}</h3>
+                      <span className="drive-fs">{fs.fs_type || 'Partition'}</span>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="drive-name">{driveLabel}</h3>
-                    <span className="drive-fs">{fs.fs_type || 'NTFS'} Partition</span>
+                  <div className="drive-status-badge">
+                    {isCritical ? (
+                      <span className="badge-crit"><AlertTriangle size={11} /> Low Space</span>
+                    ) : (
+                      <span className="badge-ok"><CheckCircle2 size={11} /> Healthy</span>
+                    )}
                   </div>
                 </div>
-                <div className="drive-status-badge">
-                  {isCritical ? (
-                    <span className="badge-crit"><AlertTriangle size={11} /> Low Space</span>
-                  ) : (
-                    <span className="badge-ok"><CheckCircle2 size={11} /> Healthy</span>
-                  )}
+
+                <div className="drive-progress-wrap">
+                  <div
+                    className={`drive-progress-bar ${isCritical ? 'crit' : isWarning ? 'warn' : 'ok'}`}
+                    style={{ width: `${Math.min(usedPct, 100)}%` }}
+                  />
+                </div>
+
+                <div className="drive-details-row">
+                  <span className="free-text"><strong>{freeGB} GB</strong> free of {totalGB} GB</span>
+                  <span className="pct-text">{usedPct.toFixed(1)}% full ({usedGB} GB used)</span>
                 </div>
               </div>
-
-              <div className="drive-progress-wrap">
-                <div
-                  className={`drive-progress-bar ${isCritical ? 'crit' : isWarning ? 'warn' : 'ok'}`}
-                  style={{ width: `${Math.min(usedPct, 100)}%` }}
-                />
-              </div>
-
-              <div className="drive-details-row">
-                <span className="free-text"><strong>{freeGB} GB</strong> free of {totalGB} GB</span>
-                <span className="pct-text">{usedPct.toFixed(1)}% full ({usedGB} GB used)</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       <style>{`
         .storage-tab-root {

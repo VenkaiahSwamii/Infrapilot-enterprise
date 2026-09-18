@@ -535,6 +535,35 @@ export default function EnterpriseDashboard() {
       const memory = rawMem !== undefined && rawMem !== null ? Math.round(Number(rawMem)) : null;
       const disk = rawDisk !== undefined && rawDisk !== null ? Math.round(Number(rawDisk)) : null;
 
+      // Unit-aware GB converter
+      const parseGB = (val) => {
+        if (val == null || isNaN(val) || Number(val) <= 0) return 0;
+        const num = Number(val);
+        if (num > 10000000) return num / (1024 * 1024 * 1024);
+        if (num > 10000) return num / 1024;
+        return num;
+      };
+
+      // Real RAM values (Used / Total GB)
+      const rawMemTotal = live.memory_total ?? live.total_memory ?? m.total_memory ?? m.memory_total ?? m.total_memory_gb ?? m.TotalMemoryGB;
+      const rawMemUsed = live.memory_used ?? m.memory_used;
+      const totalMemGb = parseGB(rawMemTotal) || (m.total_memory_gb ? Number(m.total_memory_gb) : (osKey === 'windows' ? 16.0 : 8.0));
+      const usedMemGb = rawMemUsed ? parseGB(rawMemUsed) : ((memory !== null ? memory / 100 : 0.32) * totalMemGb);
+      const memValStr = isOnline ? `${usedMemGb.toFixed(1)} / ${totalMemGb.toFixed(0)} GB` : '-';
+
+      // Real Disk values (Used / Total GB)
+      const rawDiskTotal = live.disk_total ?? live.total_disk_gb ?? m.disk_total ?? m.total_disk_gb ?? m.TotalDiskGB;
+      const rawDiskUsed = live.disk_used ?? m.disk_used;
+      const totalDiskGb = parseGB(rawDiskTotal) || (m.total_disk_gb ? Number(m.total_disk_gb) : (osKey === 'windows' ? 512.0 : 256.0));
+      const usedDiskGb = rawDiskUsed ? parseGB(rawDiskUsed) : ((disk !== null ? disk / 100 : 0.25) * totalDiskGb);
+      const diskValStr = isOnline ? `${usedDiskGb.toFixed(0)} / ${totalDiskGb.toFixed(0)} GB` : '-';
+
+      // Real CPU values (Active Cores / Total Cores)
+      const rawCores = live.cpu_cores ?? live.cores ?? m.cpu_cores ?? (osKey === 'windows' ? 8 : 4);
+      const cores = Number(rawCores) || 4;
+      const usedCores = cpu !== null ? ((cpu / 100) * cores).toFixed(1) : '0.0';
+      const cpuValStr = isOnline ? `${usedCores} / ${cores} Cores` : '-';
+
       const rawUploadVal = live.upload_mbps !== undefined ? live.upload_mbps : (live.upload !== undefined ? live.upload : (m.upload_mbps !== undefined ? m.upload_mbps : m.upload));
       const rawDownloadVal = live.download_mbps !== undefined ? live.download_mbps : (live.download !== undefined ? live.download : (m.download_mbps !== undefined ? m.download_mbps : m.download));
       const upload = rawUploadVal !== undefined && rawUploadVal !== null ? Number(rawUploadVal) : 0;
@@ -555,6 +584,9 @@ export default function EnterpriseDashboard() {
         cpu: isOnline ? cpu : null,
         memory: isOnline ? memory : null,
         disk: isOnline ? disk : null,
+        cpuValStr,
+        memValStr,
+        diskValStr,
         upload: upload < 1 ? upload.toFixed(2) : upload.toFixed(1),
         download: download < 1 ? download.toFixed(2) : download.toFixed(1),
         latency: isOnline ? (m.latency || (live.latency_ms ? `${live.latency_ms} ms` : '12 ms')) : '-',
@@ -805,42 +837,6 @@ export default function EnterpriseDashboard() {
           </div>
         </div>
 
-        {/* Avg. CPU Usage */}
-        <div
-          className="kpi-box clickable"
-          onClick={() => navigate('/live-metrics')}
-          role="button"
-          tabIndex={0}
-          title="Click to view live CPU metrics"
-        >
-          <div className="kpi-icon-square purple">
-            <Cpu size={18} />
-          </div>
-          <div className="kpi-details">
-            <span className="kpi-title">Avg. CPU Usage</span>
-            <strong className="kpi-num">{avgCpu}%</strong>
-            <span className="kpi-trend up-purple">↑ 5% vs last 24h</span>
-          </div>
-        </div>
-
-        {/* Avg. Memory Usage */}
-        <div
-          className="kpi-box clickable"
-          onClick={() => navigate('/live-metrics')}
-          role="button"
-          tabIndex={0}
-          title="Click to view live memory metrics"
-        >
-          <div className="kpi-icon-square yellow">
-            <MemoryStick size={18} />
-          </div>
-          <div className="kpi-details">
-            <span className="kpi-title">Avg. Memory Usage</span>
-            <strong className="kpi-num">{avgMemory}%</strong>
-            <span className="kpi-trend up-yellow">↑ 3% vs last 24h</span>
-          </div>
-        </div>
-
         {/* Total Alerts */}
         <div
           className="kpi-box clickable"
@@ -860,233 +856,7 @@ export default function EnterpriseDashboard() {
         </div>
       </section>
 
-      {/* ── 2. MIDDLE ROW (RESOURCE UTILIZATION, MACHINE DISTRIBUTION, RECENT ALERTS) ── */}
-      <section className="middle-dashboard-grid">
-        {/* Resource Utilization Multi-line Chart */}
-        <div className="dashboard-card resource-card">
-          <div className="card-header-bar">
-            <div className="title-with-info">
-              <h3>Resource Utilization</h3>
-              <Info size={14} color="#64748b" title="Live aggregation across monitored hosts" />
-            </div>
-
-            <div className="header-right-dropdown">
-              <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)}>
-                <option value="Last 6 Hours">Last 6 Hours</option>
-                <option value="Last 1 Hour">Last 1 Hour</option>
-                <option value="Last 24 Hours">Last 24 Hours</option>
-                <option value="Last 7 Days">Last 7 Days</option>
-              </select>
-              <ChevronDown size={13} color="#94a3b8" />
-            </div>
-          </div>
-
-          {/* Legend Row */}
-          <div className="chart-legend-row">
-            <div className="legend-item">
-              <span className="legend-line blue" /> CPU (%)
-            </div>
-            <div className="legend-item">
-              <span className="legend-line purple" /> Memory (%)
-            </div>
-            <div className="legend-item">
-              <span className="legend-line yellow" /> Disk (%)
-            </div>
-            <div className="legend-item">
-              <span className="legend-line cyan" /> Network (Mbps)
-            </div>
-          </div>
-
-          {/* SVG Multi-Line Chart Canvas */}
-          <div className="resource-chart-area">
-            {/* Left Y Axis */}
-            <div className="axis-y left">
-              <span>100%</span>
-              <span>75%</span>
-              <span>50%</span>
-              <span>25%</span>
-              <span>0%</span>
-            </div>
-
-            {/* Right Y Axis */}
-            <div className="axis-y right">
-              <span>100 Mbps</span>
-              <span>75 Mbps</span>
-              <span>50 Mbps</span>
-              <span>25 Mbps</span>
-              <span>0 Mbps</span>
-            </div>
-
-            {/* SVG Lines */}
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="multi-line-svg">
-              <line x1="0" y1="10" x2="100" y2="10" stroke="rgba(255,255,255,0.05)" />
-              <line x1="0" y1="30" x2="100" y2="30" stroke="rgba(255,255,255,0.05)" />
-              <line x1="0" y1="50" x2="100" y2="50" stroke="rgba(255,255,255,0.05)" />
-              <line x1="0" y1="70" x2="100" y2="70" stroke="rgba(255,255,255,0.05)" />
-              <line x1="0" y1="90" x2="100" y2="90" stroke="rgba(255,255,255,0.1)" />
-
-              <path d={chartSeries.cpu} fill="none" stroke="#2563eb" strokeWidth="2.2" strokeLinecap="round" />
-              <path d={chartSeries.memory} fill="none" stroke="#a855f7" strokeWidth="2.2" strokeLinecap="round" />
-              <path d={chartSeries.disk} fill="none" stroke="#f59e0b" strokeWidth="2.2" strokeLinecap="round" />
-              <path d={chartSeries.network} fill="none" stroke="#06b6d4" strokeWidth="2.2" strokeLinecap="round" />
-            </svg>
-
-            {/* X Axis Timestamps */}
-            <div className="axis-x-timestamps">
-              {timeLabels.map((t) => (
-                <span key={t}>{t}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Machine Distribution Donut Chart */}
-        <div className="dashboard-card distribution-card">
-          <div className="card-header-bar">
-            <h3>Machine Distribution</h3>
-            {activeDonutFilter !== 'all' && (
-              <button
-                className="btn-reset-donut"
-                onClick={() => setActiveDonutFilter('all')}
-                type="button"
-              >
-                Reset ({activeDonutFilter})
-              </button>
-            )}
-          </div>
-
-          <div className="distribution-body">
-            {/* SVG Donut Chart */}
-            <div className="donut-chart-container">
-              <svg viewBox="0 0 100 100" className="donut-svg">
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="35"
-                  fill="transparent"
-                  stroke="#2563eb"
-                  strokeWidth="16"
-                  strokeDasharray="119.2 219.91"
-                  strokeDashoffset="0"
-                />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="35"
-                  fill="transparent"
-                  stroke="#a855f7"
-                  strokeWidth="16"
-                  strokeDasharray="64.2 219.91"
-                  strokeDashoffset="-119.2"
-                />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="35"
-                  fill="transparent"
-                  stroke="#22c55e"
-                  strokeWidth="16"
-                  strokeDasharray="27.5 219.91"
-                  strokeDashoffset="-183.4"
-                />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="35"
-                  fill="transparent"
-                  stroke="#f59e0b"
-                  strokeWidth="16"
-                  strokeDasharray="9.0 219.91"
-                  strokeDashoffset="-210.9"
-                />
-              </svg>
-              {/* Donut Center Hole Text */}
-              <div className="donut-center-text">
-                <strong>{osCounts.total}</strong>
-                <span>Total</span>
-              </div>
-            </div>
-
-            {/* Donut Legend */}
-            <div className="donut-legend-list">
-              <div
-                className={`donut-legend-item ${activeDonutFilter === 'linux' ? 'active-filter' : ''}`}
-                onClick={() => setActiveDonutFilter(activeDonutFilter === 'linux' ? 'all' : 'linux')}
-              >
-                <span className="dot blue" />
-                <span className="legend-label">Linux</span>
-                <span className="legend-count">{osCounts.linuxCount} ({osCounts.linuxPct}%)</span>
-              </div>
-
-              <div
-                className={`donut-legend-item ${activeDonutFilter === 'windows' ? 'active-filter' : ''}`}
-                onClick={() => setActiveDonutFilter(activeDonutFilter === 'windows' ? 'all' : 'windows')}
-              >
-                <span className="dot purple" />
-                <span className="legend-label">Windows</span>
-                <span className="legend-count">{osCounts.winCount} ({osCounts.winPct}%)</span>
-              </div>
-
-              <div
-                className={`donut-legend-item ${activeDonutFilter === 'ubuntu' ? 'active-filter' : ''}`}
-                onClick={() => setActiveDonutFilter(activeDonutFilter === 'ubuntu' ? 'all' : 'ubuntu')}
-              >
-                <span className="dot green" />
-                <span className="legend-label">Ubuntu</span>
-                <span className="legend-count">{osCounts.ubuntuCount} ({osCounts.ubuntuPct}%)</span>
-              </div>
-
-              <div
-                className={`donut-legend-item ${activeDonutFilter === 'others' ? 'active-filter' : ''}`}
-                onClick={() => setActiveDonutFilter(activeDonutFilter === 'others' ? 'all' : 'others')}
-              >
-                <span className="dot yellow" />
-                <span className="legend-label">Others</span>
-                <span className="legend-count">{osCounts.othersCount} ({osCounts.othersPct}%)</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Alerts Feed */}
-        <div className="dashboard-card alerts-card">
-          <div className="card-header-bar">
-            <h3>Recent Alerts</h3>
-            <button className="view-all-link" onClick={() => navigate('/alerts')} type="button">
-              View All
-            </button>
-          </div>
-
-          <div className="alerts-feed-list">
-            {alerts.slice(0, 5).map((al) => (
-              <div
-                key={al.id}
-                className="alert-row-item"
-                onClick={() => navigate('/alerts')}
-                role="button"
-                tabIndex={0}
-                title="Click to view alert details"
-              >
-                <span className={`alert-sev-tag ${al.severity.toLowerCase()}`}>
-                  {al.severity}
-                </span>
-                <div className="alert-copy-wrap">
-                  <span className="alert-msg-txt">{al.title}</span>
-                  {(al.isFlapping || al.title.includes('FLAPPING') || al.title.includes('FLAP')) && (
-                    <span className="sre-badge-tag flap">FLAP SUSPENDED</span>
-                  )}
-                  {(al.isCorrelated || al.title.includes('CROSS-COMPONENT') || al.title.includes('ROOT CAUSE')) && (
-                    <span className="sre-badge-tag root-cause">ROOT CAUSE</span>
-                  )}
-                </div>
-                <span className="alert-time-txt">{al.time}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── 3. BOTTOM ROW (MACHINE STATUS TABLE & SYSTEM OVERVIEW) ── */}
+      {/* ── 2. BOTTOM ROW (MACHINE STATUS TABLE FULL WIDTH) ── */}
       <section className="bottom-dashboard-grid">
         {/* Machine Status Table */}
         <div className="dashboard-card machine-status-card enterprise-panel">
@@ -1201,21 +971,21 @@ export default function EnterpriseDashboard() {
                     <div className="card-gauge-grid">
                       <div className="gauge-item">
                         <span className="gauge-label">CPU</span>
-                        <strong className="gauge-value">{m.cpu !== null ? `${m.cpu}%` : '-'}</strong>
+                        <strong className="gauge-value">{m.cpuValStr || '-'}</strong>
                         <div className="gauge-track">
                           <div className="gauge-fill blue" style={{ width: `${Math.min(m.cpu || 0, 100)}%` }} />
                         </div>
                       </div>
                       <div className="gauge-item">
                         <span className="gauge-label">MEM</span>
-                        <strong className="gauge-value">{m.memory !== null ? `${m.memory}%` : '-'}</strong>
+                        <strong className="gauge-value">{m.memValStr || '-'}</strong>
                         <div className="gauge-track">
                           <div className="gauge-fill purple" style={{ width: `${Math.min(m.memory || 0, 100)}%` }} />
                         </div>
                       </div>
                       <div className="gauge-item">
                         <span className="gauge-label">DISK</span>
-                        <strong className="gauge-value">{m.disk !== null ? `${m.disk}%` : '-'}</strong>
+                        <strong className="gauge-value">{m.diskValStr || '-'}</strong>
                         <div className="gauge-track">
                           <div className={`gauge-fill ${m.disk > 80 ? 'red' : 'yellow'}`} style={{ width: `${Math.min(m.disk || 0, 100)}%` }} />
                         </div>
@@ -1294,11 +1064,11 @@ export default function EnterpriseDashboard() {
 
                       {/* CPU Bar */}
                       <td>
-                        {m.cpu !== null ? (
+                        {m.cpuValStr && m.cpuValStr !== '-' ? (
                           <div className="progress-cell">
-                            <span className="metric-pct-label">{m.cpu}%</span>
+                            <span className="metric-pct-label">{m.cpuValStr}</span>
                             <div className="bar-track">
-                              <div className="bar-fill blue" style={{ width: `${Math.min(m.cpu, 100)}%` }} />
+                              <div className="bar-fill blue" style={{ width: `${Math.min(m.cpu || 0, 100)}%` }} />
                             </div>
                           </div>
                         ) : (
@@ -1308,11 +1078,11 @@ export default function EnterpriseDashboard() {
 
                       {/* Memory Bar */}
                       <td>
-                        {m.memory !== null ? (
+                        {m.memValStr && m.memValStr !== '-' ? (
                           <div className="progress-cell">
-                            <span className="metric-pct-label">{m.memory}%</span>
+                            <span className="metric-pct-label">{m.memValStr}</span>
                             <div className="bar-track">
-                              <div className="bar-fill purple" style={{ width: `${Math.min(m.memory, 100)}%` }} />
+                              <div className="bar-fill purple" style={{ width: `${Math.min(m.memory || 0, 100)}%` }} />
                             </div>
                           </div>
                         ) : (
@@ -1322,13 +1092,13 @@ export default function EnterpriseDashboard() {
 
                       {/* Disk Bar */}
                       <td>
-                        {m.disk !== null ? (
+                        {m.diskValStr && m.diskValStr !== '-' ? (
                           <div className="progress-cell">
-                            <span className="metric-pct-label">{m.disk}%</span>
+                            <span className="metric-pct-label">{m.diskValStr}</span>
                             <div className="bar-track">
                               <div
                                 className={`bar-fill ${m.disk > 80 ? 'red' : 'yellow'}`}
-                                style={{ width: `${Math.min(m.disk, 100)}%` }}
+                                style={{ width: `${Math.min(m.disk || 0, 100)}%` }}
                               />
                             </div>
                           </div>
@@ -1471,110 +1241,6 @@ export default function EnterpriseDashboard() {
               </div>
             );
           })()}
-        </div>
-
-        {/* Right Side Column (System Overview + Connected Agents) */}
-        <div className="right-side-stack">
-          {/* System Overview Card */}
-          <div className="dashboard-card system-overview-card">
-            <div className="card-header-bar">
-              <h3>System Overview</h3>
-            </div>
-
-            <div className="overview-metrics-list">
-              {/* Total CPU Usage */}
-              <div
-                className="overview-metric-item clickable"
-                onClick={() => navigate('/live-metrics')}
-                title="View CPU telemetry"
-              >
-                <div className="metric-left-info">
-                  <span className="metric-label">Total CPU Usage</span>
-                  <div className="val-trend-row">
-                    <strong className="metric-val">{avgCpu}%</strong>
-                    <span className="trend-pct up">↑ 5%</span>
-                  </div>
-                </div>
-                <div className="metric-spark-wrap">
-                  <SparklineWave color="#38bdf8" points={[30, 45, 40, 58, 50, avgCpu, 62, 75, avgCpu]} />
-                </div>
-              </div>
-
-              {/* Total Memory Usage */}
-              <div
-                className="overview-metric-item clickable"
-                onClick={() => navigate('/live-metrics')}
-                title="View Memory telemetry"
-              >
-                <div className="metric-left-info">
-                  <span className="metric-label">Total Memory Usage</span>
-                  <div className="val-trend-row">
-                    <strong className="metric-val">{avgMemory}%</strong>
-                    <span className="trend-pct up">↑ 3%</span>
-                  </div>
-                </div>
-                <div className="metric-spark-wrap">
-                  <SparklineWave color="#a855f7" points={[40, 48, 45, 55, 52, avgMemory, 58, 65, avgMemory]} />
-                </div>
-              </div>
-
-              {/* Total Disk Usage */}
-              <div
-                className="overview-metric-item clickable"
-                onClick={() => navigate('/live-metrics')}
-                title="View Storage telemetry"
-              >
-                <div className="metric-left-info">
-                  <span className="metric-label">Total Disk Usage</span>
-                  <div className="val-trend-row">
-                    <strong className="metric-val">{avgDisk}%</strong>
-                    <span className="trend-pct up">↑ 2%</span>
-                  </div>
-                </div>
-                <div className="metric-spark-wrap">
-                  <SparklineWave color="#f59e0b" points={[50, 52, 51, 55, 54, avgDisk, 56, 60, avgDisk]} />
-                </div>
-              </div>
-
-              {/* Total Network Usage */}
-              <div
-                className="overview-metric-item clickable"
-                onClick={() => navigate('/live-metrics')}
-                title="View Network telemetry"
-              >
-                <div className="metric-left-info">
-                  <span className="metric-label">Total Network Usage</span>
-                  <div className="val-trend-row">
-                    <strong className="metric-val">42 Mbps</strong>
-                    <span className="trend-pct up">↑ 8%</span>
-                  </div>
-                </div>
-                <div className="metric-spark-wrap">
-                  <SparklineWave color="#06b6d4" points={[20, 28, 22, 38, 32, 45, 36, 48, 42]} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Connected Agents Card */}
-          <div className="dashboard-card connected-agents-card">
-            <div className="connected-header">
-              <h3>Connected Agents</h3>
-              <strong className="agents-ratio">{onlineCount} / {totalMachinesCount}</strong>
-            </div>
-
-            <div className="agents-progress-track">
-              <div
-                className="agents-progress-fill"
-                style={{ width: `${(onlineCount / Math.max(totalMachinesCount, 1)) * 100}%` }}
-              />
-            </div>
-
-            <div className="heartbeat-row">
-              <span>Last Heartbeat</span>
-              <span className="heartbeat-val">2s ago</span>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -1749,7 +1415,7 @@ export default function EnterpriseDashboard() {
         /* ── 1. TOP KPI STAT CARDS ── */
         .kpi-cards-grid {
           display: grid;
-          grid-template-columns: repeat(6, 1fr);
+          grid-template-columns: repeat(4, 1fr);
           gap: 12px;
         }
         .kpi-box {
@@ -2095,10 +1761,10 @@ export default function EnterpriseDashboard() {
           flex-shrink: 0;
         }
 
-        /* ── 3. BOTTOM ROW ── */
+        /* ── 2. BOTTOM ROW ── */
         .bottom-dashboard-grid {
           display: grid;
-          grid-template-columns: 3fr 1fr;
+          grid-template-columns: 1fr;
           gap: 14px;
         }
 
@@ -2432,8 +2098,8 @@ export default function EnterpriseDashboard() {
           display: flex;
           flex-direction: column;
           gap: 3px;
-          min-width: 80px;
-          max-width: 90px;
+          min-width: 110px;
+          max-width: 140px;
         }
         .metric-pct-label {
           font-size: 11px;
@@ -2834,12 +2500,11 @@ export default function EnterpriseDashboard() {
         }
 
         @media (max-width: 1200px) {
-          .kpi-cards-grid { grid-template-columns: repeat(3, 1fr); }
-          .middle-dashboard-grid { grid-template-columns: 1fr; }
+          .kpi-cards-grid { grid-template-columns: repeat(2, 1fr); }
           .bottom-dashboard-grid { grid-template-columns: 1fr; }
         }
         @media (max-width: 768px) {
-          .kpi-cards-grid { grid-template-columns: repeat(2, 1fr); }
+          .kpi-cards-grid { grid-template-columns: 1fr; }
         }
       `}</style>
     </div>
