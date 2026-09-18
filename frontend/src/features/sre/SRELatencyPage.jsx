@@ -85,26 +85,36 @@ export default function SRELatencyPage() {
   useEffect(() => {
     fetchLatencyData();
 
-    const socket = createLiveEventsSocket();
-    socket.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (payload.machine_id) {
-          setLiveMetrics((prev) => ({ ...prev, [payload.machine_id]: payload }));
-        }
-      } catch {}
-    };
+    let socket = null;
+    try {
+      socket = createLiveEventsSocket();
+      if (socket) {
+        socket.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload?.machine_id) {
+              setLiveMetrics((prev) => ({ ...prev, [payload.machine_id]: payload }));
+            }
+          } catch {}
+        };
+      }
+    } catch (e) {
+      console.warn('Live events socket unavailable', e);
+    }
 
     return () => {
-      socket.close();
+      if (socket && typeof socket.close === 'function') {
+        try { socket.close(); } catch {}
+      }
     };
   }, []);
 
   const { selectedServer } = useServerStore();
   const primaryMachine = selectedServer || machines[0] || {};
-  const activeHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'luffy';
-  const machineId = getMachineId(primaryMachine);
-  const live = liveMetrics[machineId] || {};
+  const rawHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'System';
+  const activeHostname = typeof rawHostname === 'string' ? rawHostname : String(rawHostname?.name || rawHostname || 'System');
+  const machineId = primaryMachine ? (primaryMachine.id || primaryMachine.ID || getMachineId(primaryMachine)) : '';
+  const live = (machineId && liveMetrics[machineId]) ? liveMetrics[machineId] : {};
 
   // Real or derived live latency ms
   const realLatency = live.latency_ms !== undefined

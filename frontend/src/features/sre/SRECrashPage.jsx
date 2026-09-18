@@ -29,8 +29,9 @@ export default function SRECrashPage() {
   const { selectedServer } = useServerStore();
   const [liveServices, setLiveServices] = useState([]);
   const primaryMachine = selectedServer || machines[0] || {};
-  const activeHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'venky';
-  const machineId = primaryMachine ? getMachineId(primaryMachine) : '';
+  const rawHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'System';
+  const activeHostname = typeof rawHostname === 'string' ? rawHostname : String(rawHostname?.name || rawHostname || 'System');
+  const machineId = primaryMachine ? (primaryMachine.id || primaryMachine.ID || getMachineId(primaryMachine)) : '';
 
   const fetchServicesData = async () => {
     setLoading(true);
