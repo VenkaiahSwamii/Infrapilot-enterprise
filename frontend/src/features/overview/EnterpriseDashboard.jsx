@@ -104,14 +104,11 @@ function SparklineWave({ color = '#38bdf8', points = [] }) {
 
 // Format Last Seen nicely without second-by-second flickering
 function formatLastSeen(rawLastSeen, status) {
-  if (status === 'online') {
-    return 'Just now';
-  }
   if (!rawLastSeen) return 'Offline';
   const date = new Date(rawLastSeen);
   if (isNaN(date.getTime())) return typeof rawLastSeen === 'string' ? rawLastSeen : 'Offline';
   const diffSec = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-  if (diffSec < 60) return 'Just now';
+  if (diffSec < 60) return status === 'online' ? 'Just now' : `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
@@ -251,24 +248,15 @@ export default function EnterpriseDashboard() {
 
         const backendMachines = rawMachines.filter((m) => {
           const id = getMachineId(m);
-          return (!id || !removedMachineIds.has(id)) && (!m.hostname || !removedMachineIds.has(m.hostname));
+          const hostLower = String(m.hostname || '').toLowerCase();
+          return (
+            (!id || !removedMachineIds.has(id)) &&
+            (!m.hostname || !removedMachineIds.has(m.hostname)) &&
+            !hostLower.includes('jayathi')
+          );
         });
 
-        setMachines((prev) => {
-          const map = new Map();
-          (prev || []).forEach((p) => {
-            const k = getMachineId(p);
-            if (k) map.set(k, p);
-          });
-          backendMachines.forEach((b) => {
-            const k = getMachineId(b);
-            if (k) {
-              const existing = map.get(k);
-              map.set(k, existing ? { ...existing, ...b } : b);
-            }
-          });
-          return Array.from(map.values());
-        });
+        setMachines(backendMachines);
         setHasBackendFetched(true);
 
         if (backendMachines.length > 0) {
@@ -329,26 +317,9 @@ export default function EnterpriseDashboard() {
             }
             if (ip && os) next[`${ip}_${os}`] = payload;
             if (rawId && os) next[`${rawId}_${os}`] = payload;
+            if (rawId) next[rawId] = payload;
             return next;
           });
-
-          if (payload.hostname) {
-            setMachines((prev) => {
-              const synthetic = {
-                id: payload.machine_id,
-                hostname: payload.hostname,
-                os: payload.os || 'linux',
-                ip_address: payload.ip_address || '',
-                status: 'ONLINE',
-                last_seen: new Date().toISOString(),
-              };
-              const key = getMachineId(synthetic);
-              if (!prev.some((m) => getMachineId(m) === key)) {
-                return [...prev, synthetic];
-              }
-              return prev.map((m) => (getMachineId(m) === key ? { ...m, ...synthetic } : m));
-            });
-          }
         }
       } catch {
         // parse error ignored
@@ -471,35 +442,17 @@ export default function EnterpriseDashboard() {
     }
   };
 
-  // Helper for unique per-machine deterministic metrics when waiting for live sample
-  const getDistinctMachineMetric = (hostname, type) => {
-    let hash = 0;
-    const str = String(hostname || 'node');
-    for (let i = 0; i < str.length; i++) {
-      hash = (hash << 5) - hash + str.charCodeAt(i);
-      hash |= 0;
-    }
-    const abs = Math.abs(hash);
-    if (type === 'cpu') return (abs % 26) + 12; // 12% - 37%
-    if (type === 'memory') return (abs % 32) + 38; // 38% - 69%
-    if (type === 'disk') return (abs % 38) + 18; // 18% - 55%
-    if (type === 'upload') return ((abs % 45) / 10 + 0.8).toFixed(1); // 0.8 - 5.2
-    if (type === 'download') return ((abs % 85) / 10 + 2.5).toFixed(1); // 2.5 - 10.9
-    if (type === 'latency') return `${(abs % 14) + 8} ms`; // 8ms - 21ms
-    return 25;
-  };
-
   // Merge backend machines with formatted values and smart deduplication
   const tableData = useMemo(() => {
     const rawList = machines;
 
     const formattedList = rawList.map((m, idx) => {
       const rawId = m.id || m.ID || m.machine_id || '';
-      const hostName = m.hostname || m.Hostname || m.Name || `server-0${idx + 1}`;
+      const hostName = m.hostname || m.Hostname || m.Name || '--';
       const mId = getMachineId(m);
       const targetOS = String(m.os || m.OS || m.platform || '').toLowerCase();
       const isWin = targetOS.includes('win');
-      const osKey = isWin ? 'windows' : targetOS.includes('ubuntu') ? 'ubuntu' : 'linux';
+      const osKey = isWin ? 'windows' : targetOS.includes('ubuntu') ? 'ubuntu' : (targetOS ? 'linux' : '--');
 
       const rawIp = String(m.ip_address || m.IPAddress || '').trim();
       const live =
@@ -515,25 +468,24 @@ export default function EnterpriseDashboard() {
       const os = osKey;
 
       const statusUpper = String(m.status || m.Status || '').toUpperCase();
-      const lastSeenStr = live.last_seen || live.time || m.last_seen || m.LastSeen;
+      const lastSeenStr = live.created_at || live.last_seen || live.time || m.last_seen || m.LastSeen;
       let lastSeenDiff = Infinity;
       if (lastSeenStr) {
         const t = new Date(lastSeenStr).getTime();
         if (!isNaN(t)) lastSeenDiff = Math.abs(Date.now() - t);
       }
 
-      const isBackendOnline = statusUpper === 'ONLINE' || statusUpper === 'CONNECTED';
-      const isRecent = lastSeenDiff < 86400000; // 24 hours baseline stability
-      const isOnline = isBackendOnline || isRecent || live.cpu_usage !== undefined || live.cpu !== undefined;
+      // Truly ONLINE only if status is ONLINE AND heartbeat seen within 90 seconds
+      const isOnline = (statusUpper === 'ONLINE' || statusUpper === 'CONNECTED' || m.online === true) && lastSeenDiff < 90000;
       const normalizedStatus = isOnline ? 'online' : 'offline';
 
-      const rawCpu = live.cpu_usage !== undefined ? live.cpu_usage : (live.cpu !== undefined ? live.cpu : (live.cpu_percent ?? (m.cpu_usage ?? m.cpu)));
-      const rawMem = live.memory_usage !== undefined ? live.memory_usage : (live.memory !== undefined ? live.memory : (live.memory_percent ?? (m.memory_usage ?? m.memory)));
-      const rawDisk = live.disk_usage !== undefined ? live.disk_usage : (live.disk !== undefined ? live.disk : (live.disk_percent ?? (m.disk_usage ?? m.disk)));
+      const rawCpu = isOnline ? (live.cpu_usage !== undefined ? live.cpu_usage : (live.cpu !== undefined ? live.cpu : (live.cpu_percent ?? (m.cpu_usage ?? m.cpu)))) : 0;
+      const rawMem = isOnline ? (live.memory_usage !== undefined ? live.memory_usage : (live.memory !== undefined ? live.memory : (live.memory_percent ?? (m.memory_usage ?? m.memory)))) : 0;
+      const rawDisk = isOnline ? (live.disk_usage !== undefined ? live.disk_usage : (live.disk !== undefined ? live.disk : (live.disk_percent ?? (m.disk_usage ?? m.disk)))) : 0;
 
-      const cpu = rawCpu !== undefined && rawCpu !== null ? Math.round(Number(rawCpu)) : null;
-      const memory = rawMem !== undefined && rawMem !== null ? Math.round(Number(rawMem)) : null;
-      const disk = rawDisk !== undefined && rawDisk !== null ? Math.round(Number(rawDisk)) : null;
+      const cpu = isOnline && rawCpu !== undefined && rawCpu !== null ? Math.round(Number(rawCpu)) : 0;
+      const memory = isOnline && rawMem !== undefined && rawMem !== null ? Math.round(Number(rawMem)) : 0;
+      const disk = isOnline && rawDisk !== undefined && rawDisk !== null ? Math.round(Number(rawDisk)) : 0;
 
       // Unit-aware GB converter
       const parseGB = (val) => {
@@ -546,34 +498,32 @@ export default function EnterpriseDashboard() {
 
       // Real RAM values (Used / Total GB)
       const rawMemTotal = live.memory_total ?? live.total_memory ?? m.total_memory ?? m.memory_total ?? m.total_memory_gb ?? m.TotalMemoryGB;
-      const rawMemUsed = live.memory_used ?? m.memory_used;
-      const totalMemGb = parseGB(rawMemTotal) || (m.total_memory_gb ? Number(m.total_memory_gb) : (osKey === 'windows' ? 16.0 : 8.0));
-      const usedMemGb = rawMemUsed ? parseGB(rawMemUsed) : ((memory !== null ? memory / 100 : 0.32) * totalMemGb);
-      const memValStr = isOnline ? `${usedMemGb.toFixed(1)} / ${totalMemGb.toFixed(0)} GB` : '-';
+      const rawMemUsed = isOnline ? (live.memory_used ?? m.memory_used) : 0;
+      const totalMemGb = parseGB(rawMemTotal) || (m.total_memory_gb ? Number(m.total_memory_gb) : 0);
+      const usedMemGb = (isOnline && rawMemUsed) ? parseGB(rawMemUsed) : ((isOnline && memory > 0 && totalMemGb > 0) ? (memory / 100) * totalMemGb : 0);
+      const memValStr = totalMemGb > 0 ? `${usedMemGb.toFixed(1)} / ${totalMemGb.toFixed(0)} GB` : (isOnline ? `${usedMemGb.toFixed(1)} GB` : '-');
 
       // Real Disk values (Used / Total GB)
       const rawDiskTotal = live.disk_total ?? live.total_disk_gb ?? m.disk_total ?? m.total_disk_gb ?? m.TotalDiskGB;
-      const rawDiskUsed = live.disk_used ?? m.disk_used;
-      const totalDiskGb = parseGB(rawDiskTotal) || (m.total_disk_gb ? Number(m.total_disk_gb) : (osKey === 'windows' ? 512.0 : 256.0));
-      const usedDiskGb = rawDiskUsed ? parseGB(rawDiskUsed) : ((disk !== null ? disk / 100 : 0.25) * totalDiskGb);
-      const diskValStr = isOnline ? `${usedDiskGb.toFixed(0)} / ${totalDiskGb.toFixed(0)} GB` : '-';
+      const rawDiskUsed = isOnline ? (live.disk_used ?? m.disk_used) : 0;
+      const totalDiskGb = parseGB(rawDiskTotal) || (m.total_disk_gb ? Number(m.total_disk_gb) : 0);
+      const usedDiskGb = (isOnline && rawDiskUsed) ? parseGB(rawDiskUsed) : ((isOnline && disk > 0 && totalDiskGb > 0) ? (disk / 100) * totalDiskGb : 0);
+      const diskValStr = totalDiskGb > 0 ? `${usedDiskGb.toFixed(0)} / ${totalDiskGb.toFixed(0)} GB` : (isOnline ? `${usedDiskGb.toFixed(0)} GB` : '-');
 
       // Real CPU values (Active Cores / Total Cores)
-      const rawCores = live.cpu_cores ?? live.cores ?? m.cpu_cores ?? (osKey === 'windows' ? 8 : 4);
-      const cores = Number(rawCores) || 4;
-      const usedCores = cpu !== null ? ((cpu / 100) * cores).toFixed(1) : '0.0';
-      const cpuValStr = isOnline ? `${usedCores} / ${cores} Cores` : '-';
+      const rawCores = live.cpu_cores ?? live.cores ?? m.cpu_cores ?? m.CPUCores;
+      const cores = Number(rawCores) || (m.os === 'windows' ? 4 : (m.cpu_cores || 4));
+      const usedCores = (isOnline && cpu > 0) ? ((cpu / 100) * cores).toFixed(1) : '0.0';
+      const cpuValStr = isOnline ? `${usedCores} / ${cores} Cores` : `0.0 / ${cores} Cores`;
 
-      const rawUploadVal = live.upload_mbps !== undefined ? live.upload_mbps : (live.upload !== undefined ? live.upload : (m.upload_mbps !== undefined ? m.upload_mbps : m.upload));
-      const rawDownloadVal = live.download_mbps !== undefined ? live.download_mbps : (live.download !== undefined ? live.download : (m.download_mbps !== undefined ? m.download_mbps : m.download));
-      const upload = rawUploadVal !== undefined && rawUploadVal !== null ? Number(rawUploadVal) : 0;
-      const download = rawDownloadVal !== undefined && rawDownloadVal !== null ? Number(rawDownloadVal) : 0;
+      const rawUploadVal = isOnline ? (live.upload_mbps !== undefined ? live.upload_mbps : (live.upload !== undefined ? live.upload : (m.upload_mbps !== undefined ? m.upload_mbps : m.upload))) : 0;
+      const rawDownloadVal = isOnline ? (live.download_mbps !== undefined ? live.download_mbps : (live.download !== undefined ? live.download : (m.download_mbps !== undefined ? m.download_mbps : m.download))) : 0;
+      const upload = Number(rawUploadVal) || 0;
+      const download = Number(rawDownloadVal) || 0;
 
-      const ipAddress =
-        live.ip_address ||
-        m.ip_address ||
-        m.IPAddress ||
-        (osKey === 'linux' ? '172.30.120.10' : '192.168.1.11');
+      const ipAddress = m.ip_address || m.IPAddress || live.ip_address || '--';
+
+      const latencyStr = isOnline ? (live.latency_ms != null ? `${live.latency_ms} ms` : (m.latency ? `${m.latency} ms` : '--')) : '-';
 
       return {
         id: mId || rawId || `m-${idx}`,
@@ -581,15 +531,15 @@ export default function EnterpriseDashboard() {
         hostname: hostName,
         ip_address: ipAddress,
         os,
-        cpu: isOnline ? cpu : null,
-        memory: isOnline ? memory : null,
-        disk: isOnline ? disk : null,
+        cpu: isOnline ? cpu : 0,
+        memory: isOnline ? memory : 0,
+        disk: isOnline ? disk : 0,
         cpuValStr,
         memValStr,
         diskValStr,
         upload: upload < 1 ? upload.toFixed(2) : upload.toFixed(1),
         download: download < 1 ? download.toFixed(2) : download.toFixed(1),
-        latency: isOnline ? (m.latency || (live.latency_ms ? `${live.latency_ms} ms` : '12 ms')) : '-',
+        latency: latencyStr,
         latencyTone: isOnline ? (m.latencyTone || 'green') : 'muted',
         status: normalizedStatus,
         last_seen: formatLastSeen(lastSeenStr || m.last_seen || m.LastSeen, normalizedStatus),

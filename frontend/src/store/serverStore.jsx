@@ -163,8 +163,8 @@ export function ServerStoreProvider({ children }) {
       const newEntry = {
         id: normalizedId,
         hostname: rawMetrics.hostname || normalizedId,
-        ip_address: rawMetrics.ip_address || '192.168.1.133',
-        os: rawMetrics.os || 'windows',
+        ip_address: rawMetrics.ip_address || '--',
+        os: rawMetrics.os || '--',
         status: 'ONLINE',
         cpu_usage: normalizedMetric.cpu_usage,
         memory_usage: normalizedMetric.memory_usage,

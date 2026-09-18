@@ -359,10 +359,35 @@ func (s *ServerService) GetServerSnapshotByID(id uuid.UUID) (*models.ServerSnaps
 }
 
 func buildServerSnapshot(server models.Server, metric models.Metric, rich models.LinuxMetric) models.ServerSnapshot {
+	isOffline := time.Since(server.LastSeen) > 90*time.Second || strings.ToUpper(server.Status) == "OFFLINE"
+	if isOffline {
+		server.Status = "OFFLINE"
+		server.Online = false
+	} else {
+		server.Status = "ONLINE"
+		server.Online = true
+	}
+
 	snapshot := models.ServerSnapshot{Server: server}
 	if metric.ID == uuid.Nil {
 		return snapshot
 	}
+
+	zero := 0.0
+	zeroUint := uint64(0)
+	if isOffline {
+		snapshot.CPUUsage = &zero
+		snapshot.MemoryUsage = &zero
+		snapshot.DiskUsage = &zero
+		snapshot.StorageUsage = &zero
+		snapshot.UploadMbps = &zero
+		snapshot.DownloadMbps = &zero
+		snapshot.NetworkMbps = &zero
+		snapshot.Uptime = &zeroUint
+		snapshot.CPUCores = &metric.CPUCores
+		return snapshot
+	}
+
 	metricAt := metric.CreatedAt
 	network := metric.UploadMbps + metric.DownloadMbps
 	snapshot.CPUUsage = &metric.CPUUsage

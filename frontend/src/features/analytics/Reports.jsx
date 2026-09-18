@@ -29,8 +29,10 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { apiPost } from '../../api/client.js';
+import { useServerStore } from '../../store/serverStore.jsx';
 
 export default function Reports({ reports, onRefresh }) {
+  const { servers } = useServerStore();
   const [activeTab, setActiveTab] = useState('generator'); // 'generator' | 'schedules' | 'archive'
   const [name, setName] = useState('');
   const [type, setType] = useState('summary');
@@ -287,16 +289,18 @@ export default function Reports({ reports, onRefresh }) {
   // Export File simulation
   const downloadReportFile = (r) => {
     const filename = `${r.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${r.format}`;
-    let dummyContent = '';
+    let reportContent = '';
     if (r.format === 'csv') {
-      dummyContent = `Hostname,IP_Address,OS,CPU_Percent,Memory_Percent,Disk_Percent,Status\nVenkyyy,192.168.1.2,windows,4.2,48.1,20.4,ONLINE\nVenkyyy,172.30.120.10,linux,1.2,18.4,14.2,ONLINE\nvenky,192.168.160.131,linux,2.1,22.0,18.9,ONLINE`;
+      const header = 'Hostname,IP_Address,OS,CPU_Percent,Memory_Percent,Disk_Percent,Status\n';
+      const rows = (servers || []).map((s) => `${s.hostname || '--'},${s.ip_address || '--'},${s.os || '--'},${s.cpu_usage != null ? s.cpu_usage.toFixed(1) : 0},${s.memory_usage != null ? s.memory_usage.toFixed(1) : 0},${s.disk_usage != null ? s.disk_usage.toFixed(1) : 0},${s.status || 'OFFLINE'}`).join('\n');
+      reportContent = header + rows;
     } else if (r.format === 'xlsx') {
-      dummyContent = `InfraPilot Enterprise Report Export\nTitle: ${r.name}\nGenerated: ${r.created_at}\nTarget: ${r.scope}\nStatus: Certified Healthy\nHosts Active: 3/3 (100%)\nAvg CPU: 2.8%\nAvg Memory: 29.5%`;
+      reportContent = `InfraPilot Enterprise Report Export\nTitle: ${r.name}\nGenerated: ${r.created_at}\nTarget: ${r.scope}\nHosts Total: ${(servers || []).length}\n`;
     } else {
-      dummyContent = `%PDF-1.4\n1 0 obj << /Title (${r.name}) /Author (InfraPilot Enterprise) /Subject (Fleet Monitoring) >> endobj\n2 0 obj << /Type /Catalog /Pages 3 0 R >> endobj\nxref\n0 3\ntrailer << /Root 2 0 R >>\n%%EOF`;
+      reportContent = `%PDF-1.4\n1 0 obj << /Title (${r.name}) /Author (InfraPilot Enterprise) /Subject (Fleet Monitoring) >> endobj\n2 0 obj << /Type /Catalog /Pages 3 0 R >> endobj\nxref\n0 3\ntrailer << /Root 2 0 R >>\n%%EOF`;
     }
 
-    const blob = new Blob([dummyContent], {
+    const blob = new Blob([reportContent], {
       type: r.format === 'pdf' ? 'application/pdf' : r.format === 'csv' ? 'text/csv' : 'application/octet-stream'
     });
     const url = URL.createObjectURL(blob);
@@ -825,30 +829,28 @@ export default function Reports({ reports, onRefresh }) {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td><strong>Venkyyy</strong></td>
-                      <td>192.168.1.2</td>
-                      <td>Windows 11 (amd64)</td>
-                      <td>4.2%</td>
-                      <td>48.1%</td>
-                      <td><span className="p-online">ONLINE</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>Venkyyy (WSL2)</strong></td>
-                      <td>172.30.120.10</td>
-                      <td>Ubuntu Linux 24.04</td>
-                      <td>1.2%</td>
-                      <td>18.4%</td>
-                      <td><span className="p-online">ONLINE</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>venky (VMware VM)</strong></td>
-                      <td>192.168.160.131</td>
-                      <td>Linux (amd64)</td>
-                      <td>2.1%</td>
-                      <td>22.0%</td>
-                      <td><span className="p-online">ONLINE</span></td>
-                    </tr>
+                    {(servers || []).length === 0 ? (
+                      <tr>
+                        <td colSpan="6" style={{ textAlign: 'center', padding: '16px', color: '#94a3b8' }}>
+                          No connected machines registered.
+                        </td>
+                      </tr>
+                    ) : (
+                      (servers || []).map((s) => (
+                        <tr key={s.id || s.hostname}>
+                          <td><strong>{s.hostname || '--'}</strong></td>
+                          <td>{s.ip_address || '--'}</td>
+                          <td>{s.platform || s.os || '--'}</td>
+                          <td>{s.cpu_usage != null ? `${s.cpu_usage.toFixed(1)}%` : '0.0%'}</td>
+                          <td>{s.memory_usage != null ? `${s.memory_usage.toFixed(1)}%` : '0.0%'}</td>
+                          <td>
+                            <span className={s.status === 'ONLINE' ? 'p-online' : 'p-offline'}>
+                              {s.status || 'OFFLINE'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
