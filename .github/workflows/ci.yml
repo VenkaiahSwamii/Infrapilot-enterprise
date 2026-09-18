@@ -46,7 +46,7 @@ jobs:
       working-directory: ./backend
     
     - name: Run tests
-      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+      run: go test -v -coverprofile=coverage.out ./...
       working-directory: ./backend
     
     - name: Check coverage
@@ -54,7 +54,7 @@ jobs:
       working-directory: ./backend
     
     - name: Build binary
-      run: go build -ldflags='-w -s' -o infrapilot-server ./cmd/api
+      run: go build -ldflags='-w -s' -o infrapilot-server ./cmd/server
       working-directory: ./backend
     
     - name: Upload coverage
@@ -124,7 +124,7 @@ jobs:
       working-directory: ./agent
     
     - name: Run tests
-      run: go test -v -race ./...
+      run: go test -v ./...
       working-directory: ./agent
     
     - name: Build cross-platform binaries

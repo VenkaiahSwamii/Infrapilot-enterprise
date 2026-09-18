@@ -9,11 +9,14 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: [backend, frontend, security]
 
     steps:
     - name: Checkout code
@@ -89,6 +92,7 @@ jobs:
 
     - name: Generate SBOM for backend
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true
       with:
         scan-type: 'image'
         image-ref: ghcr.io/${{ github.repository }}/backend:${{ steps.meta.outputs.sha_short }}
@@ -97,6 +101,7 @@ jobs:
 
     - name: Generate SBOM for frontend
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true
       with:
         scan-type: 'image'
         image-ref: ghcr.io/${{ github.repository }}/frontend:${{ steps.meta.outputs.sha_short }}

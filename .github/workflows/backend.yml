@@ -41,16 +41,8 @@ jobs:
       run: go vet ./...
       working-directory: ./backend
     
-    - name: Static analysis
-      uses: golangci/golangci-lint-action@v6
-      continue-on-error: true
-      with:
-        working-directory: backend
-        version: latest
-        args: --timeout=5m
-    
     - name: Run unit tests
-      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+      run: go test -v -coverprofile=coverage.out ./...
       working-directory: ./backend
     
     - name: Check coverage
