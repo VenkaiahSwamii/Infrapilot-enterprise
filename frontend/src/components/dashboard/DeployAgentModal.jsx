@@ -31,7 +31,10 @@ export default function DeployAgentModal({ isOpen, onClose, onDeployed }) {
   const [loadingToken, setLoadingToken] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
   const [serverUrl, setServerUrl] = useState(() => {
-    return window.location.origin.replace(':5173', ':8080').replace(':3000', ':8080') || 'http://localhost:8080';
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://192.168.1.2:8080';
+    }
+    return window.location.origin.replace(':5173', ':8080').replace(':3000', ':8080') || 'http://192.168.1.2:8080';
   });
 
   // Remote Push Deploy Form State

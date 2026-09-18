@@ -19,5 +19,5 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$RootDir\agen
 
 Write-Host ""
 Write-Host "✅ All processes launched in separate terminal windows." -ForegroundColor Green
-Write-Host "• Frontend: http://localhost:5173" -ForegroundColor LightGray
-Write-Host "• Backend:  http://localhost:8080" -ForegroundColor LightGray
+Write-Host "• Frontend: http://192.168.1.2:5173" -ForegroundColor LightGray
+Write-Host "• Backend:  http://192.168.1.2:8080" -ForegroundColor LightGray
