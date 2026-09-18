@@ -14,6 +14,12 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+permissions:
+  contents: read
+  security-events: write
+  packages: write
+  actions: read
+
 jobs:
   # Build and test backend
   backend:
