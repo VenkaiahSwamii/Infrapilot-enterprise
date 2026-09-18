@@ -59,8 +59,46 @@ export default function ProcessesTab({ machine }) {
       return Number(b.pid || 0) - Number(a.pid || 0);
     });
 
+  const handleResetService = async (serviceName) => {
+    try {
+      const res = await fetch('http://localhost:8080/api/v1/services/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+        },
+        body: JSON.stringify({ target: serviceName, machine_id: machine?.id || 'luffy' }),
+      });
+      if (res.ok) {
+        alert(`Flap protection and health status reset successfully for ${serviceName}`);
+        fetchProcesses();
+      } else {
+        alert(`Failed to reset service status for ${serviceName}`);
+      }
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  };
+
+  const handleDownloadAgentPackage = () => {
+    const serverId = machine?.id || 'luffy';
+    window.open(`http://localhost:8080/api/v1/agent/package/?server_id=${serverId}`, '_blank');
+  };
+
   return (
     <div className="processes-tab-root">
+      {/* SREMonitor Flap Protection & Health Banner */}
+      <div className="sre-banner-card">
+        <div className="sre-banner-header">
+          <span className="sre-chip red-chip">● SRE MONITORING ACTIVE</span>
+          <span className="sre-chip amber-chip">FLAP PROTECTION: MAX 2 RESTARTS / 10 MINS</span>
+          <span className="sre-chip cyan-chip">MAINTENANCE AUTO-DETECTION (/opt/.maintenance_*)</span>
+        </div>
+        <p className="sre-banner-text">
+          Background systemd services (<code style={{ color: '#38bdf8' }}>ssh.service</code>, <code style={{ color: '#38bdf8' }}>nginx.service</code>, <code style={{ color: '#38bdf8' }}>docker.service</code>, <code style={{ color: '#38bdf8' }}>postgresql.service</code>) are actively monitored. A 3rd crash within 10 minutes halts auto-restarts and escalates as <strong style={{ color: '#f59e0b' }}>FLAPPING_LOOP_DETECTED</strong> for human review.
+        </p>
+      </div>
+
       {/* Controls Header */}
       <div className="procs-header-row">
         <div className="procs-search-box">
@@ -74,6 +112,10 @@ export default function ProcessesTab({ machine }) {
         </div>
 
         <div className="procs-actions">
+          <button className="btn-download-agent" onClick={handleDownloadAgentPackage} type="button">
+            ↓ Download Agent Package
+          </button>
+
           <div className="sort-group">
             <span className="sort-lbl">Sort by:</span>
             <button
@@ -110,13 +152,13 @@ export default function ProcessesTab({ machine }) {
         <table className="full-proc-table">
           <thead>
             <tr>
-              <th>Process Name</th>
+              <th>Process / Service Name</th>
               <th>PID</th>
               <th>User</th>
               <th>CPU Usage</th>
               <th>Memory Usage</th>
-              <th>Status</th>
-              <th>Command Line</th>
+              <th>SRE Health Status</th>
+              <th>Actions / Reset Flap</th>
             </tr>
           </thead>
           <tbody>
@@ -124,6 +166,8 @@ export default function ProcessesTab({ machine }) {
               filtered.map((proc, idx) => {
                 const cpu = Number(proc.cpu_percent ?? proc.cpu ?? 0).toFixed(1);
                 const mem = Number(proc.memory_percent ?? proc.memory ?? 0).toFixed(1);
+                const isFlapping = proc.status === 'FLAPPING_LOOP_DETECTED' || proc.status === 'Flapping';
+
                 return (
                   <tr key={proc.pid || idx}>
                     <td>
@@ -151,12 +195,19 @@ export default function ProcessesTab({ machine }) {
                       </div>
                     </td>
                     <td>
-                      <span className="proc-status-badge online">
+                      <span className={`proc-status-badge ${isFlapping ? 'flapping-badge' : 'online'}`}>
                         ● {proc.status || 'Running'}
                       </span>
                     </td>
-                    <td className="cmd-cell">
-                      <span className="cmd-text" title={proc.command}>{proc.command || '--'}</span>
+                    <td>
+                      <button
+                        className="btn-reset-flap"
+                        onClick={() => handleResetService(proc.name)}
+                        type="button"
+                        title="Reset flap protection counter and service status"
+                      >
+                        🔄 Reset Flap Status
+                      </button>
                     </td>
                   </tr>
                 );
@@ -172,10 +223,80 @@ export default function ProcessesTab({ machine }) {
         </table>
       </div>
 
+
       <style>{`
         .processes-tab-root {
           display: flex;
           flex-direction: column;
+          gap: 14px;
+        }
+        .sre-banner-card {
+          background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.8));
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          border-radius: 8px;
+          padding: 12px 16px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        .sre-banner-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 6px;
+        }
+        .sre-chip {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+          padding: 2px 8px;
+          border-radius: 4px;
+          text-transform: uppercase;
+        }
+        .red-chip { background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; }
+        .amber-chip { background-color: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; }
+        .cyan-chip { background-color: rgba(6, 182, 212, 0.2); color: #38bdf8; border: 1px solid #06b6d4; }
+        .sre-banner-text {
+          margin: 0;
+          font-size: 12px;
+          color: #cbd5e1;
+          line-height: 1.5;
+        }
+        .btn-download-agent {
+          background: linear-gradient(135deg, #0284c7, #2563eb);
+          color: #ffffff;
+          border: none;
+          padding: 6px 12px;
+          font-size: 12px;
+          font-weight: 600;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: transform 0.15s ease;
+        }
+        .btn-download-agent:hover {
+          transform: translateY(-1px);
+        }
+        .btn-reset-flap {
+          background-color: #1e293b;
+          color: #38bdf8;
+          border: 1px solid #334155;
+          padding: 4px 10px;
+          font-size: 11px;
+          font-weight: 600;
+          border-radius: 4px;
+          cursor: pointer;
+        }
+        .btn-reset-flap:hover {
+          background-color: #0284c7;
+          color: #ffffff;
+        }
+        .flapping-badge {
+          color: #f59e0b !important;
+          background-color: rgba(245, 158, 11, 0.15);
+          padding: 2px 6px;
+          border-radius: 4px;
+          border: 1px solid #f59e0b;
+        }
+
           gap: 14px;
         }
         .procs-header-row {

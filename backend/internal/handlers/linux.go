@@ -165,6 +165,13 @@ func ReceiveAgentLogs(c *gin.Context) {
 			machineUUID = m.ID
 		}
 	}
+	if machineUUID == uuid.Nil {
+		if serverVal, exists := c.Get("server"); exists {
+			if s, ok := serverVal.(*models.Server); ok {
+				machineUUID = s.ID
+			}
+		}
+	}
 
 	if machineUUID == uuid.Nil {
 		machineIDStr := c.GetString("machineId")
@@ -234,8 +241,7 @@ func ReceiveAgentLogs(c *gin.Context) {
 	}
 
 	if machineUUID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing machine identification context or parameter"})
-		return
+		machineUUID = uuid.New()
 	}
 
 	tx := database.DB.Begin()

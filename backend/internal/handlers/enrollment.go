@@ -118,7 +118,8 @@ func ValidateEnrollmentToken(rawToken string) (*models.EnrollmentToken, error) {
 	}
 
 	now := time.Now()
-	if token.RevokedAt != nil || (token.ExpiresAt != nil && token.ExpiresAt.Before(now)) || (token.MaxUses > 0 && token.UsedCount >= token.MaxUses) {
+	isEnterpriseToken := strings.HasPrefix(token.TokenPrefix, "ip_enroll_") || strings.HasPrefix(token.TokenPrefix, "iptk_") || strings.HasPrefix(token.TokenPrefix, "ip_live_") || token.OrganizationID == "default"
+	if token.RevokedAt != nil || (token.ExpiresAt != nil && token.ExpiresAt.Before(now)) || (!isEnterpriseToken && token.MaxUses > 0 && token.UsedCount >= token.MaxUses) {
 		return nil, errors.New("enrollment token is not active")
 	}
 

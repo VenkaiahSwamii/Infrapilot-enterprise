@@ -2,7 +2,10 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -127,8 +130,6 @@ func (s *Scheduler) shouldExecute(job Job) bool {
 		return true
 	}
 
-	// All default registered jobs in this scheduler are daily tasks.
-	// Running once every 23 hours is correct and prevents per-minute loops.
 	return time.Since(last) >= 23*time.Hour
 }
 
@@ -154,7 +155,7 @@ func (s *Scheduler) executeJob(job Job) {
 	}
 }
 
-// CleanupOldMetricsJob removes metrics older than retention period
+// CleanupOldMetricsJob removes raw metrics older than 7 days (SREMonitor retention policy)
 type CleanupOldMetricsJob struct{}
 
 func (j *CleanupOldMetricsJob) Name() string {
@@ -166,19 +167,21 @@ func (j *CleanupOldMetricsJob) Schedule() string {
 }
 
 func (j *CleanupOldMetricsJob) Execute(ctx context.Context) error {
-	// Keep only last 30 days of metrics
-	retentionDate := time.Now().AddDate(0, 0, -30)
+	// SREMonitor policy: Keep only last 7 days of raw metrics
+	retentionDate := time.Now().AddDate(0, 0, -7)
 
-	result := database.DB.Where("created_at < ?", retentionDate).Delete(&models.Metric{})
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete old metrics: %w", result.Error)
+	if database.DB != nil {
+		result := database.DB.Where("created_at < ?", retentionDate).Delete(&models.Metric{})
+		if result.Error != nil {
+			return fmt.Errorf("failed to delete old metrics: %w", result.Error)
+		}
+		fmt.Printf("Deleted %d old raw metrics (older than 7 days)\n", result.RowsAffected)
 	}
 
-	fmt.Printf("Deleted %d old metrics\n", result.RowsAffected)
 	return nil
 }
 
-// CleanupOldLogsJob removes logs older than retention period
+// CleanupOldLogsJob removes logs older than retention period (14 days)
 type CleanupOldLogsJob struct{}
 
 func (j *CleanupOldLogsJob) Name() string {
@@ -190,19 +193,20 @@ func (j *CleanupOldLogsJob) Schedule() string {
 }
 
 func (j *CleanupOldLogsJob) Execute(ctx context.Context) error {
-	// Keep only last 14 days of logs
 	retentionDate := time.Now().AddDate(0, 0, -14)
 
-	result := database.DB.Where("timestamp < ?", retentionDate).Delete(&models.LinuxLog{})
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete old logs: %w", result.Error)
+	if database.DB != nil {
+		result := database.DB.Where("timestamp < ?", retentionDate).Delete(&models.LinuxLog{})
+		if result.Error != nil {
+			return fmt.Errorf("failed to delete old logs: %w", result.Error)
+		}
+		fmt.Printf("Deleted %d old logs\n", result.RowsAffected)
 	}
 
-	fmt.Printf("Deleted %d old logs\n", result.RowsAffected)
 	return nil
 }
 
-// CleanupAuditLogsJob removes old audit logs
+// CleanupAuditLogsJob retains audit logs in DB for 365 days, archiving older entries to cold storage JSONL files
 type CleanupAuditLogsJob struct{}
 
 func (j *CleanupAuditLogsJob) Name() string {
@@ -214,15 +218,40 @@ func (j *CleanupAuditLogsJob) Schedule() string {
 }
 
 func (j *CleanupAuditLogsJob) Execute(ctx context.Context) error {
-	// Keep only last 90 days of audit logs
-	retentionDate := time.Now().AddDate(0, 0, -90)
+	// SREMonitor policy: Keep 365 days of audit events, archive older into JSONL cold storage
+	retentionDate := time.Now().AddDate(0, 0, -365)
 
-	result := database.DB.Where("created_at < ?", retentionDate).Delete(&models.AuditLog{})
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete old audit logs: %w", result.Error)
+	if database.DB == nil {
+		return nil
 	}
 
-	fmt.Printf("Deleted %d old audit logs\n", result.RowsAffected)
+	var oldAudits []models.AuditLog
+	if err := database.DB.Where("created_at < ?", retentionDate).Find(&oldAudits).Error; err != nil {
+		return fmt.Errorf("failed to query old audit logs for cold archiving: %w", err)
+	}
+
+	if len(oldAudits) > 0 {
+		archiveDir := filepath.Join("storage", "archive")
+		_ = os.MkdirAll(archiveDir, 0755)
+
+		archivePath := filepath.Join(archiveDir, fmt.Sprintf("audit_%s.jsonl", time.Now().Format("2006_01")))
+		file, err := os.OpenFile(archivePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			for _, audit := range oldAudits {
+				line, _ := json.Marshal(audit)
+				_, _ = file.Write(append(line, '\n'))
+			}
+			_ = file.Close()
+			fmt.Printf("Archived %d audit events to cold storage: %s\n", len(oldAudits), archivePath)
+		}
+
+		result := database.DB.Where("created_at < ?", retentionDate).Delete(&models.AuditLog{})
+		if result.Error != nil {
+			return fmt.Errorf("failed to delete archived audit logs: %w", result.Error)
+		}
+		fmt.Printf("Deleted %d audit logs older than 365 days from database\n", result.RowsAffected)
+	}
+
 	return nil
 }
 
@@ -241,3 +270,4 @@ func InitScheduler() {
 		fmt.Printf("Failed to start scheduler: %v\n", err)
 	}
 }
+

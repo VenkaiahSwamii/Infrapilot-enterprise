@@ -145,15 +145,15 @@ export default function MachineDetailPage() {
 
           const fallbackMachine = {
             id: machineId,
-            hostname: cleanHost || (isPowerHouse ? 'PowerHouse10' : 'Venkyyy'),
-            ip_address: isPowerHouse ? '192.168.1.133' : '192.168.1.10',
+            hostname: cleanHost || 'Venkyyy',
+            ip_address: isWindows ? '192.168.1.11' : '172.30.120.10',
             os: isWindows ? 'windows' : isUbuntu ? 'ubuntu' : 'linux',
-            platform: isWindows ? 'Microsoft Windows 11 Home' : 'Ubuntu 22.04 LTS (GNU/Linux)',
-            architecture: 'x64',
-            cpu_model: isPowerHouse ? '11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz (1.50 GHz)' : 'Intel(R) Xeon(R) CPU @ 2.60GHz',
-            gpu: isPowerHouse ? 'Intel(R) Iris(R) Xe Graphics (128 MB)' : 'Standard VGA Adapter',
-            total_memory_gb: isPowerHouse ? 16 : 8,
-            total_disk_gb: 477,
+            platform: isWindows ? 'Windows 11' : 'Linux / Ubuntu',
+            architecture: 'x86_64',
+            cpu_model: isWindows ? 'Host System CPU' : 'Linux Virtual CPU',
+            gpu: isWindows ? 'Host Integrated GPU' : 'Virtual Direct3D GPU',
+            total_memory_gb: isWindows ? 16 : 8,
+            total_disk_gb: isWindows ? 512 : 256,
             status: 'ONLINE',
             online: true,
             last_seen: new Date().toISOString(),
@@ -231,24 +231,22 @@ export default function MachineDetailPage() {
   const isOnline = isDBOnline || isRecentTelemetry || liveStatus === 'CONNECTED' || liveMetric !== undefined;
 
   const hostnameStr = String(machine?.hostname || normalizedId || machineId || '').toLowerCase();
-  const isPowerHouse = hostnameStr.includes('powerhouse') || hostnameStr.includes('10');
-  const defaultDeviceId = isPowerHouse
-    ? '93670072-9F91-4AF2-A099-EC85A7CC6511'
-    : '942A2EB7-4D34-4F05-B051-4A66A40C32C5';
-  const defaultIp = isPowerHouse ? '192.168.1.133' : '192.168.1.2';
-  const defaultHostname = isPowerHouse ? 'PowerHouse10' : 'Venkyyy';
+  const isLinux = String(machine?.os || '').toLowerCase() === 'linux' || (hostnameStr.includes('linux') && !hostnameStr.includes('win'));
+  const defaultDeviceId = machine?.id || machineId || (isLinux ? '2e3655d2-d33b-4312-a72f-5a8e2e853b82' : 'e53dee5c-584a-42bd-874d-7ab54da9e8db');
+  const defaultIp = isLinux ? '172.30.120.10' : '192.168.1.11';
+  const defaultHostname = machine?.hostname || 'Venkyyy';
 
   const resolvedMachine = machine || {
     id: defaultDeviceId,
     hostname: defaultHostname,
     ip_address: defaultIp,
-    os: 'windows',
-    platform: 'Microsoft Windows 11 Home',
-    architecture: 'x64',
-    cpu_model: isPowerHouse ? '11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz (1.50 GHz)' : '11th Gen Intel(R) Core(TM) i3-1115G4 @ 3.00GHz (2.90 GHz)',
-    gpu: isPowerHouse ? 'Intel(R) Iris(R) Xe Graphics (128 MB)' : 'Intel(R) UHD Graphics (128 MB)',
-    total_memory_gb: isPowerHouse ? 16 : 8,
-    total_disk_gb: 477,
+    os: isLinux ? 'linux' : 'windows',
+    platform: isLinux ? 'Ubuntu 24.04 LTS (WSL2)' : 'Windows 11 Home Single Language',
+    architecture: 'x86_64',
+    cpu_model: isLinux ? 'WSL2 / Linux Virtual CPU' : '11th Gen Intel(R) Core(TM) i3-1115G4 @ 3.00GHz',
+    gpu: isLinux ? 'Direct3D / Virtual GPU' : 'Intel(R) UHD Graphics',
+    total_memory_gb: isLinux ? 4 : 8,
+    total_disk_gb: isLinux ? 2013 : 512,
     status: 'ONLINE',
     online: true,
     last_seen: new Date().toISOString(),

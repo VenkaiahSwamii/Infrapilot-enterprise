@@ -32,6 +32,33 @@ type Client struct {
 	OrganizationID string
 	Role           string
 	mu             sync.Mutex
+	closeOnce      sync.Once
+	isClosed       bool
+}
+
+// SafeSend sends a message to client buffer safely. Returns false if closed or buffer full.
+func (c *Client) SafeSend(message []byte) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.isClosed {
+		return false
+	}
+	select {
+	case c.Send <- message:
+		return true
+	default:
+		return false
+	}
+}
+
+// Close closes the Send channel safely exactly once and marks client closed.
+func (c *Client) Close() {
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		c.isClosed = true
+		close(c.Send)
+		c.mu.Unlock()
+	})
 }
 
 func (c *Client) readPump() {

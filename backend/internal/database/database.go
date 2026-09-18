@@ -116,6 +116,22 @@ func Connect() {
 		}
 	}
 
+	if db.Migrator().HasTable("servers") {
+		_ = db.Exec("ALTER TABLE servers ALTER COLUMN id DROP DEFAULT;").Error
+		_ = db.Exec(`
+			ALTER TABLE servers 
+			ALTER COLUMN id TYPE uuid 
+			USING (
+				CASE 
+					WHEN id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' 
+					THEN id::text::uuid 
+					ELSE gen_random_uuid() 
+				END
+			);
+		`).Error
+		_ = db.Exec("UPDATE servers SET api_key = NULL WHERE api_key = '';").Error
+	}
+
 	// Ensure incidents table organization_id column exists and handles NULL values before AutoMigrate adds NOT NULL constraint
 	if db.Migrator().HasTable("incidents") {
 		if !db.Migrator().HasColumn("incidents", "organization_id") {
@@ -131,6 +147,70 @@ func Connect() {
 			WHERE organization_id IS NULL;
 		`).Error
 	}
+
+	// Ensure audit_logs table id and machine_id are UUID
+	if db.Migrator().HasTable("audit_logs") {
+		_ = db.Exec("ALTER TABLE audit_logs ALTER COLUMN id DROP DEFAULT;").Error
+		_ = db.Exec(`
+			ALTER TABLE audit_logs 
+			ALTER COLUMN id TYPE uuid 
+			USING (
+				CASE 
+					WHEN id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' 
+					THEN id::text::uuid 
+					ELSE gen_random_uuid() 
+				END
+			);
+		`).Error
+		_ = db.Exec(`
+			ALTER TABLE audit_logs 
+			ALTER COLUMN machine_id TYPE uuid 
+			USING (
+				CASE 
+					WHEN machine_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' 
+					THEN machine_id::text::uuid 
+					ELSE '00000000-0000-0000-0000-000000000000'::uuid 
+				END
+			);
+		`).Error
+	}
+
+	// Ensure users table columns exist and handle NULL values before AutoMigrate adds NOT NULL constraints
+	if db.Migrator().HasTable("users") {
+		_ = db.Exec("ALTER TABLE users ALTER COLUMN id DROP DEFAULT;").Error
+		_ = db.Exec(`
+			ALTER TABLE users 
+			ALTER COLUMN id TYPE uuid 
+			USING (
+				CASE 
+					WHEN id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' 
+					THEN id::text::uuid 
+					ELSE gen_random_uuid() 
+				END
+			);
+		`).Error
+		_ = db.Exec("DROP TABLE IF EXISTS user_host_permissions CASCADE;").Error
+
+		if !db.Migrator().HasColumn("users", "password") {
+			logger.Info("Adding nullable password column to users table...")
+			_ = db.Exec("ALTER TABLE users ADD COLUMN password text;").Error
+		}
+		_ = db.Exec("UPDATE users SET password = '$2a$10$defaultPasswordHashPlaceholder' WHERE password IS NULL OR password = '';").Error
+
+		if !db.Migrator().HasColumn("users", "username") {
+			logger.Info("Adding nullable username column to users table...")
+			_ = db.Exec("ALTER TABLE users ADD COLUMN username varchar(100);").Error
+		}
+		_ = db.Exec("UPDATE users SET username = COALESCE(email, 'user_' || id::text) WHERE username IS NULL OR username = '';").Error
+
+		if !db.Migrator().HasColumn("users", "role") {
+			logger.Info("Adding nullable role column to users table...")
+			_ = db.Exec("ALTER TABLE users ADD COLUMN role varchar(50) DEFAULT 'Viewer';").Error
+		}
+		_ = db.Exec("UPDATE users SET role = 'Viewer' WHERE role IS NULL OR role = '';").Error
+	}
+
+	cleanLegacyUniqueConstraints(db)
 
 	err = db.AutoMigrate(
 		&models.User{},
@@ -251,10 +331,15 @@ func cleanupDuplicateServers(db *gorm.DB) {
 		return
 	}
 
+	_ = db.Exec("ALTER TABLE servers ALTER COLUMN username DROP NOT NULL").Error
+	_ = db.Exec("ALTER TABLE servers ALTER COLUMN username SET DEFAULT ''").Error
+	_ = db.Exec("UPDATE servers SET username = '' WHERE username IS NULL").Error
+
 	type ServerRow struct {
 		ID        uuid.UUID
 		Hostname  string
 		IPAddress string
+		OS        string
 		Status    string
 		LastSeen  time.Time
 	}
@@ -269,8 +354,8 @@ func cleanupDuplicateServers(db *gorm.DB) {
 
 	seen := make(map[string]uuid.UUID)
 	for _, s := range servers {
-		key := strings.ToLower(strings.TrimSpace(s.Hostname))
-		if key == "" {
+		key := strings.ToLower(strings.TrimSpace(s.Hostname)) + "_" + strings.ToLower(strings.TrimSpace(s.IPAddress)) + "_" + strings.ToLower(strings.TrimSpace(s.OS))
+		if strings.TrimSpace(s.Hostname) == "" {
 			continue
 		}
 		if keeperID, exists := seen[key]; exists {
@@ -325,3 +410,26 @@ func seedDefaultAdmin(db *gorm.DB) {
 		_ = db.Model(&models.User{}).Where("email = ?", "admin@infrapilot.com").Update("password", string(hashedPassword)).Error
 	}
 }
+
+func cleanLegacyUniqueConstraints(db *gorm.DB) {
+	type constraintResult struct {
+		TableName      string `gorm:"column:table_name"`
+		ConstraintName string `gorm:"column:constraint_name"`
+	}
+
+	var results []constraintResult
+	query := `
+		SELECT tc.table_name, tc.constraint_name 
+		FROM information_schema.table_constraints tc
+		WHERE tc.constraint_type = 'UNIQUE' 
+		  AND tc.table_schema = CURRENT_SCHEMA()
+		  AND tc.constraint_name NOT LIKE 'uni_%';
+	`
+	if err := db.Raw(query).Scan(&results).Error; err == nil {
+		for _, res := range results {
+			dropSQL := fmt.Sprintf(`ALTER TABLE "%s" DROP CONSTRAINT IF EXISTS "%s";`, res.TableName, res.ConstraintName)
+			_ = db.Exec(dropSQL).Error
+		}
+	}
+}
+

@@ -31,6 +31,10 @@ type MetricUpdatedPayload struct {
 	Type         string    `json:"type"`
 	MachineID    string    `json:"machine_id"`
 	Hostname     string    `json:"hostname"`
+	OS           string    `json:"os,omitempty"`
+	Platform     string    `json:"platform,omitempty"`
+	IPAddress    string    `json:"ip_address,omitempty"`
+	LatencyMs    float64   `json:"latency_ms,omitempty"`
 	CPU          float64   `json:"cpu"`
 	CPUUsage     float64   `json:"cpu_usage"`
 	Memory       float64   `json:"memory"`

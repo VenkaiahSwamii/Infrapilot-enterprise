@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Config holds all configuration for the application
@@ -183,6 +184,53 @@ func Load() {
 		TLSKeyPath:  getEnv("TLS_KEY_PATH", "certs/server.key"),
 		TLSCAPath:   getEnv("TLS_CA_PATH", "certs/ca.crt"),
 		TLSPort:     getEnv("TLS_PORT", "8443"),
+	}
+
+	// Try loading config.toml if available
+	for _, tomlFile := range []string{"config.toml", "backend/config.toml", "../config.toml"} {
+		if data, err := os.ReadFile(tomlFile); err == nil {
+			var tomlCfg struct {
+				Server struct {
+					HTTPPort       int      `toml:"http_port"`
+					GRPCPort       int      `toml:"grpc_port"`
+					AllowedOrigins []string `toml:"allowed_origins"`
+					TLS            struct {
+						Enabled    bool   `toml:"enabled"`
+						CACert     string `toml:"ca_cert"`
+						ServerCert string `toml:"server_cert"`
+						ServerKey  string `toml:"server_key"`
+					} `toml:"tls"`
+					Database struct {
+						Host    string `toml:"host"`
+						Port    int    `toml:"port"`
+						User    string `toml:"user"`
+						DBName  string `toml:"dbname"`
+						SSLMode string `toml:"sslmode"`
+					} `toml:"database"`
+				} `toml:"server"`
+			}
+			if err := toml.Unmarshal(data, &tomlCfg); err == nil {
+				if tomlCfg.Server.HTTPPort != 0 {
+					globalConfig.ServerPort = strconv.Itoa(tomlCfg.Server.HTTPPort)
+				}
+				if tomlCfg.Server.Database.Host != "" {
+					globalConfig.DBHost = tomlCfg.Server.Database.Host
+				}
+				if tomlCfg.Server.Database.Port != 0 {
+					globalConfig.DBPort = strconv.Itoa(tomlCfg.Server.Database.Port)
+				}
+				if tomlCfg.Server.Database.User != "" {
+					globalConfig.DBUser = tomlCfg.Server.Database.User
+				}
+				if tomlCfg.Server.Database.DBName != "" {
+					globalConfig.DBName = tomlCfg.Server.Database.DBName
+				}
+				if len(tomlCfg.Server.AllowedOrigins) > 0 {
+					globalConfig.CORSOrigins = tomlCfg.Server.AllowedOrigins
+				}
+			}
+			break
+		}
 	}
 }
 

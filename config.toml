@@ -1,0 +1,105 @@
+# ===================================================================
+# InfraPilot Enterprise - Global & Fleet Configuration (TOML)
+# ===================================================================
+
+# 1. Telemetry Ingester & REST Server Configuration
+[server]
+http_port = 8080
+grpc_port = 50051
+backend_url = "http://localhost:8080"
+connection_timeout = 10
+retry_attempts = 3
+retry_delay = 5
+allowed_origins = ["http://localhost:5173", "http://localhost:3000", "https://localhost:8080"]
+
+[server.tls]
+enabled = true
+ca_cert = "certs/ca.crt"
+server_cert = "certs/server.crt"
+server_key = "certs/server.key"
+
+[server.database]
+driver = "postgres"
+host = "localhost"
+port = 5432
+user = "postgres"
+dbname = "infrapilot"
+sslmode = "disable"
+
+[server.retention]
+raw_metrics_days = 7
+hourly_rollups_days = 90
+audit_events_days = 365
+
+[server.archival]
+enabled = true
+api_endpoint = "https://ijlkg6lgp3m6lb7ekfhbz2phwe0izzqh.lambda-url.ap-south-1.on.aws/"
+event_retention_minutes = 10
+raw_retention_minutes = 60
+export_events = true
+export_raw_metrics = true
+export_aggregated_metrics = true
+
+# 2. Edge Agent (infrapilot-agent) Configuration
+[agent]
+server_address = "localhost:50051"
+backend_url = "http://localhost:8080"
+machine_id = ""
+api_key = ""
+enrollment_token = ""
+interval = 5
+machine_name = ""
+tags = ["production", "web-server"]
+
+[agent.tls]
+tls_enabled = true
+mtls_enabled = true
+ca_cert = "certs/ca.crt"
+agent_cert = "certs/agent.crt"
+agent_key = "certs/agent.key"
+
+[agent.disk]
+# "auto" automatically selects "C:" on Windows and "/" on Linux / Ubuntu
+target_mount_point = "auto"
+reactive_threshold_percent = 90.0
+predictive_hours = 4.0
+deny_list = [
+    "db",
+    "mysql",
+    "postgres",
+    "data"
+]
+
+[agent.services]
+accept_list = [
+    "ssh.service",
+    "cron.service",
+    "systemd-journald.service"
+]
+
+[agent.latency]
+target_gateway = "8.8.8.8"
+baseline_p95_ms = 40.0
+threshold_multiplier = 3.0
+alert_window_minutes = 5
+accept_list = [
+    "ssh.service",
+    "http.service",
+    "postgresql.service"
+]
+
+[agent.logging]
+log_level = "info"
+log_format = "text"
+log_path = "logs/reports.log"
+daily_rotation = true
+max_age_days = 7
+max_size_mb = 1000
+
+[agent.collectors]
+system = true
+processes = true
+docker = true
+kubernetes = true
+logs = true
+security = true

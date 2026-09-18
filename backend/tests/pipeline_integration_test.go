@@ -61,8 +61,13 @@ func TestPipelineIntegration(t *testing.T) {
 			os TEXT,
 			cpu_temperature REAL,
 			cpu_cores INTEGER,
+			cpu_model TEXT,
 			total_memory INTEGER,
-			free_memory INTEGER
+			free_memory INTEGER,
+			memory_total INTEGER,
+			memory_used INTEGER,
+			disk_total INTEGER,
+			disk_used INTEGER
 		)
 	`).Error
 	if err != nil {

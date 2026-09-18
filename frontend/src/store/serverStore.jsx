@@ -38,37 +38,23 @@ export function ServerStoreProvider({ children }) {
       setError(null);
       const incomingData = await listServers();
 
-      if (!Array.isArray(incomingData) || incomingData.length === 0) {
+      if (!Array.isArray(incomingData)) {
+        return;
+      }
+
+      if (incomingData.length === 0) {
+        setServers([]);
         return;
       }
 
       setServers((prevServers) => {
-        if (!prevServers || prevServers.length === 0) {
-          return deduplicateServers(
-            incomingData.map((s) => ({
-              ...s,
-              _store_id: getMachineId(s),
-              last_seen: s.last_seen
-                ? new Date(s.last_seen).toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: true,
-                  })
-                : 'Just now',
-            }))
-          );
-        }
-
-        // Merge incoming backend servers by robust machine identity
-        const updatedList = prevServers.map((existing) => {
-          const fresh = incomingData.find((inc) => isSameMachine(inc, existing));
-          if (!fresh) return existing;
-
+        const formatted = incomingData.map((fresh) => {
+          const existing = (prevServers || []).find((p) => isSameMachine(p, fresh));
           return {
-            ...existing,
+            ...(existing || {}),
             ...fresh,
-            status: fresh.status || existing.status || 'ONLINE',
+            _store_id: getMachineId(fresh),
+            status: fresh.status || (existing && existing.status) || 'ONLINE',
             last_seen: fresh.last_seen
               ? new Date(fresh.last_seen).toLocaleTimeString('en-US', {
                   hour: '2-digit',
@@ -76,27 +62,10 @@ export function ServerStoreProvider({ children }) {
                   second: '2-digit',
                   hour12: true,
                 })
-              : existing.last_seen,
+              : (existing && existing.last_seen) || 'Just now',
           };
         });
-
-        // Append any newly discovered connected machine
-        const newRealMachines = incomingData
-          .filter((inc) => !prevServers.some((existing) => isSameMachine(existing, inc)))
-          .map((inc) => ({
-            ...inc,
-            _store_id: getMachineId(inc),
-            last_seen: inc.last_seen
-              ? new Date(inc.last_seen).toLocaleTimeString('en-US', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                  hour12: true,
-                })
-              : 'Just now',
-          }));
-
-        return deduplicateServers([...updatedList, ...newRealMachines]);
+        return deduplicateServers(formatted);
       });
     } catch (err) {
       console.error('Failed to query backend servers:', err);

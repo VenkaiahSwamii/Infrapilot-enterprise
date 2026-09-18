@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"net/http"
 	"infrapilot/backend/internal/ai"
 	"infrapilot/backend/internal/analytics"
 	"infrapilot/backend/internal/apm"
@@ -101,14 +100,6 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 	remoteDeployHandler := handlers.NewRemoteDeployHandler(remoteDeployService)
 
 	api := r.Group("/api/v1")
-	api.Use(func(c *gin.Context) {
-		clientIP := c.ClientIP()
-		if clientIP == "192.168.1.41" || clientIP == "192.168.1.18" || clientIP == "172.22.112.255" || clientIP == "192.168.1.133" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "IP blocked by policy"})
-			return
-		}
-		c.Next()
-	})
 	api.Use(apm.APMMiddleware(apmService))
 	{
 		// Platform Self-Monitoring public health routes
@@ -134,6 +125,7 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 		api.POST("/servers/enroll", serverHandler.EnrollServer)
 
 		// Credential-Based Remote Agent Deployment & Connection Testing
+		api.POST("/agent/deploy", handlers.DeployAgentHandler)
 		remoteDeploy := api.Group("/agent/remote-deploy")
 		{
 			remoteDeploy.POST("/test", remoteDeployHandler.TestConnection)
@@ -393,6 +385,11 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 				admin.POST("/backup/run", handlers.RunBackupHandler)
 				admin.GET("/backup/list", handlers.ListBackupsHandler)
 				admin.POST("/backup/restore", handlers.RestoreBackupHandler)
+
+				// AWS Lambda Cold Storage Archival Routes
+				admin.GET("/archival/settings", handlers.GetArchivalSettingsHandler)
+				admin.POST("/archival/run", handlers.TriggerArchivalRunHandler)
+				admin.POST("/benchmark/run", handlers.RunBenchmarkHandler)
 			}
 
 			// Operator Routes
@@ -449,6 +446,8 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.GET("/machines/:id", machineHandler.GetMachineByID)
 			protected.PATCH("/machines/:id", machineHandler.UpdateMachine)
 			protected.DELETE("/machines/:id", machineHandler.DeleteMachine)
+			protected.POST("/machines/:id/block", serverHandler.BlockServer)
+			protected.POST("/machines/:id/unblock", serverHandler.UnblockServer)
 			protected.GET("/machines/:id/metrics", metricHandler.GetMachineMetrics)
 			protected.POST("/machines/:id/key-rotation", machineHandler.RotateMachineKey)
 			protected.GET("/machines/:id/history", handlers.GetMachineHistory)
@@ -459,6 +458,8 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.POST("/servers", serverHandler.RegisterServer)
 			protected.PATCH("/servers/:id", serverHandler.UpdateServer)
 			protected.DELETE("/servers/:id", serverHandler.DeleteServer)
+			protected.POST("/servers/:id/block", serverHandler.BlockServer)
+			protected.POST("/servers/:id/unblock", serverHandler.UnblockServer)
 			protected.GET("/servers/:id/metrics", metricHandler.GetMachineMetrics)
 			protected.POST("/servers/:id/key-rotation", serverHandler.RotateServerKey)
 			protected.GET("/servers/:id/history", handlers.GetMachineHistory)
@@ -489,10 +490,16 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 
 			// Sprint 15 Service Management and Audit Logs
 			protected.GET("/services/:id", handlers.GetMachineServices)
+			protected.GET("/services", handlers.GetMachineServices)
+			protected.POST("/services/reset", handlers.ResetServiceHealth)
 			protected.POST("/services/start", handlers.ServiceStart)
 			protected.POST("/services/stop", handlers.ServiceStop)
 			protected.POST("/services/restart", handlers.ServiceRestart)
+			protected.GET("/events", handlers.GetEvents)
 			protected.GET("/audit-logs", handlers.GetAuditLogs)
+			protected.GET("/agent/package", serverHandler.DownloadAgentPackage)
+			protected.GET("/agent/package/", serverHandler.DownloadAgentPackage)
+
 
 			// Sprint 16 Remote File Manager (RBAC)
 			protected.GET("/files", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator, models.RoleViewer), handlers.ListFiles)

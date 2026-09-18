@@ -451,24 +451,34 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	// Step 4: Daemon Configuration & Service Registration
 	step4Start := time.Now()
 	updateStep(3, "running", "Writing daemon configuration and registering system service...", "", 0)
-	addLog("Writing agent configuration file config.yaml...")
+	addLog("Writing agent configuration file config.toml...")
 
-	configContent := fmt.Sprintf(`server_url: "%s"
-enrollment_token: "%s"
-hostname: "%s"
-metrics_interval: 5s
-log_collection: true
-heartbeat_interval: 15s
+	configContent := fmt.Sprintf(`backend_url = "%s"
+enrollment_token = "%s"
+registered_hostname = "%s"
+interval = 5
+
+[logging]
+log_level = "info"
+log_format = "text"
+
+[collectors]
+system = true
+processes = true
+docker = true
+kubernetes = true
+logs = true
+security = true
 `, serverURL, enrollToken, hostname)
 
 	if client != nil {
 		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
-			writeConfigCmd := fmt.Sprintf(`powershell -Command "Set-Content -Path '$env:ProgramFiles\InfraPilot\config.yaml' -Value @'
+			writeConfigCmd := fmt.Sprintf(`powershell -Command "Set-Content -Path '$env:ProgramFiles\InfraPilot\config.toml' -Value @'
 %s
 '@"`, configContent)
 			_, _ = runSSHCommand(client, writeConfigCmd)
 		} else {
-			writeConfigCmd := fmt.Sprintf(`cat << 'EOF' > ~/.infrapilot/config.yaml
+			writeConfigCmd := fmt.Sprintf(`cat << 'EOF' > ~/.infrapilot/config.toml
 %s
 EOF
 `, configContent)

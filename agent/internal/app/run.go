@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"runtime"
 	"time"
@@ -17,8 +16,9 @@ import (
 	"infrapilot/agent/internal/reconnect"
 	"infrapilot/agent/internal/register"
 	"infrapilot/agent/internal/sender"
-	"infrapilot/agent/internal/state"
+	"infrapilot/agent/internal/sremonitor"
 )
+
 
 func RunAgent() {
 	log.Println("Starting InfraPilot Monitoring Agent...")
@@ -53,8 +53,13 @@ func RunAgent() {
 			backendURL = cfg.Server
 		}
 		enrollmentToken := ""
-		// Check config.yaml to get the server URL if it exists
-		if yamlCfg, yamlErr := config.LoadConfig("config.yaml"); yamlErr == nil {
+		// Check config.toml to get the server URL if it exists
+		if tomlCfg, tomlErr := config.LoadConfig("config.toml"); tomlErr == nil {
+			if tomlCfg.BackendURL != "" {
+				backendURL = tomlCfg.BackendURL
+			}
+			enrollmentToken = tomlCfg.EnrollmentToken
+		} else if yamlCfg, yamlErr := config.LoadConfig("config.yaml"); yamlErr == nil {
 			if yamlCfg.BackendURL != "" {
 				backendURL = yamlCfg.BackendURL
 			}
@@ -95,6 +100,7 @@ func RunAgent() {
 			Organization:      result["organization_id"],
 			MetricsInterval:   5,
 			HeartbeatInterval: 15,
+			OS:                runtime.GOOS,
 		}
 
 		if err := store.Save(cfg); err != nil {
@@ -105,13 +111,34 @@ func RunAgent() {
 		log.Println("Configuration saved in config.json")
 	}
 
-	// Initialize AppConfig in config package
-	config.AppConfig = &config.Config{
-		BackendURL: cfg.Server,
-		MachineID:  cfg.MachineID,
-		APIKey:     cfg.APIKey,
-		KeyVersion: cfg.KeyVersion,
-		Interval:   cfg.MetricsInterval,
+	// Initialize AppConfig in config package, preserving config.toml if present
+	if tomlCfg, err := config.LoadConfig("config.toml"); err == nil && tomlCfg != nil {
+		config.AppConfig = tomlCfg
+		if cfg != nil {
+			if cfg.Server != "" {
+				config.AppConfig.BackendURL = cfg.Server
+			}
+			if cfg.MachineID != "" {
+				config.AppConfig.MachineID = cfg.MachineID
+			}
+			if cfg.APIKey != "" {
+				config.AppConfig.APIKey = cfg.APIKey
+			}
+			if cfg.KeyVersion != 0 {
+				config.AppConfig.KeyVersion = cfg.KeyVersion
+			}
+			if cfg.MetricsInterval != 0 {
+				config.AppConfig.Interval = cfg.MetricsInterval
+			}
+		}
+	} else {
+		config.AppConfig = &config.Config{
+			BackendURL: cfg.Server,
+			MachineID:  cfg.MachineID,
+			APIKey:     cfg.APIKey,
+			KeyVersion: cfg.KeyVersion,
+			Interval:   cfg.MetricsInterval,
+		}
 	}
 
 	// Initialize the shared client
@@ -128,15 +155,9 @@ func RunAgent() {
 	go func() {
 		reconnect.ExecuteWithBackoff(nil, reconnect.DefaultRetryStrategy(), "Heartbeat")
 		for {
-			if state.Connected {
-				fmt.Println("Connected")
-			} else {
-				fmt.Println("Disconnected")
-			}
-
 			err := heartbeat.Send(cfg.Server, cfg.MachineID, cfg.APIKey)
 			if err != nil {
-				log.Printf("Heartbeat Sender Error: %v", err)
+				log.Printf("Heartbeat Error: %v", err)
 			}
 			time.Sleep(time.Duration(cfg.HeartbeatInterval) * time.Second)
 		}
@@ -151,15 +172,70 @@ func RunAgent() {
 	mgr.Register(logscollector.NewCollector(cfg.MachineID, cfg.Server))
 	go mgr.Start(ctx)
 
+	// Start SREMonitor background crash, disk, and latency monitors
+	ctrl := sremonitor.NewAgentController(cfg.Server, cfg.APIKey, cfg.MachineID)
+
+	crashMon := sremonitor.NewMonitor(sremonitor.Config{
+		ServiceName:    "ssh.service",
+		AcceptList:     sremonitor.DefaultAcceptList,
+		MaxRestarts:    2,
+		RestartWindow:  10 * time.Minute,
+		VerifyDuration: 5 * time.Second,
+	}, ctrl)
+
+	diskCfg := config.Get().Disk
+	targetMount := config.AutoDetectMountPoint(diskCfg.TargetMountPoint)
+	reactiveThresh := 90.0
+	if diskCfg.ReactiveThresholdPercent > 0 {
+		reactiveThresh = diskCfg.ReactiveThresholdPercent
+	}
+	predHours := 4.0
+	if diskCfg.PredictiveHours > 0 {
+		predHours = diskCfg.PredictiveHours
+	}
+
+	diskMon := sremonitor.NewDiskMonitor(sremonitor.DiskConfig{
+		TargetMountPoint:  targetMount,
+		ReactiveThreshold: reactiveThresh,
+		PredictiveHours:   predHours,
+		DiskDenyList:      diskCfg.DenyList,
+	}, ctrl)
+
+	latCfg := config.Get().Latency
+	baseP95 := 40.0
+	if latCfg.BaselineP95Ms > 0 {
+		baseP95 = latCfg.BaselineP95Ms
+	}
+	threshMult := 3.0
+	if latCfg.ThresholdMultiplier > 0 {
+		threshMult = latCfg.ThresholdMultiplier
+	}
+	alertWin := 5 * time.Minute
+	if latCfg.AlertWindowMinutes > 0 {
+		alertWin = time.Duration(latCfg.AlertWindowMinutes) * time.Minute
+	}
+
+	latencyMon := sremonitor.NewLatencyMonitor(sremonitor.LatencyConfig{
+		ServiceName:         "ssh.service",
+		AcceptList:          latCfg.AcceptList,
+		BaselineP95:         baseP95,
+		ThresholdMultiplier: threshMult,
+		AlertWindow:         alertWin,
+	}, ctrl)
+
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			_, _ = crashMon.Check()
+			_, _ = diskMon.Check()
+			_ = latencyMon.Check(time.Now())
+		}
+	}()
+
 	// Metrics collection loop with reconnection
 	reconnect.ExecuteWithBackoff(nil, reconnect.DefaultRetryStrategy(), "Metrics")
 	for {
-		if state.Connected {
-			fmt.Println("Connected")
-		} else {
-			fmt.Println("Disconnected")
-		}
-
 		metrics, err := collector.GetMetrics()
 		if err != nil {
 			log.Printf("Metrics Collection Error: %v", err)
@@ -177,3 +253,4 @@ func RunAgent() {
 		time.Sleep(time.Duration(cfg.MetricsInterval) * time.Second)
 	}
 }
+

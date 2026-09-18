@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"infrapilot/backend/internal/database"
@@ -17,45 +18,80 @@ type HeartbeatRequest struct {
 }
 
 func Heartbeat(c *gin.Context) {
-
 	var req HeartbeatRequest
+	_ = c.ShouldBindJSON(&req)
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		return
+	machineIDStr := req.MachineID
+	if machineIDStr == "" {
+		machineIDStr = c.Query("machine_id")
+	}
+	if machineIDStr == "" {
+		machineIDStr = c.Param("id")
 	}
 
-	machineID, err := uuid.Parse(req.MachineID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid machine_id format"})
-		return
+	var machineID uuid.UUID
+	if machineIDStr != "" {
+		machineID, _ = uuid.Parse(machineIDStr)
 	}
 
 	var machine models.Machine
+	found := false
 
-	if err := database.DB.First(&machine, "id = ?", machineID).Error; err != nil {
+	if machineID != uuid.Nil && database.DB != nil {
+		if err := database.DB.First(&machine, "id = ?", machineID).Error; err == nil {
+			found = true
+		}
+	}
 
+	if !found && database.DB != nil {
+		if serverVal, exists := c.Get("server"); exists {
+			if s, ok := serverVal.(*models.Server); ok {
+				machine = *s
+				found = true
+			}
+		}
+	}
+
+	if !found {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Machine not found",
+			"error":  "Machine is deleted or not connected. Please connect the machine manually.",
+			"status": "unregistered",
 		})
-
 		return
 	}
 
-	machine.LastSeen = time.Now().UTC()
+	if machine.IsBlocked || strings.EqualFold(machine.Status, "BLOCKED") {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":  "Machine is blocked by administrator.",
+			"status": "blocked",
+		})
+		return
+	}
+
+	if database.DB != nil && machine.ID != uuid.Nil {
+		var count int64
+		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?)) AND (is_blocked = true OR LOWER(status) = 'blocked')", machine.ID, machine.Hostname).Scan(&count).Error
+		if count > 0 {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":  "Machine is blocked by administrator.",
+				"status": "blocked",
+			})
+			return
+		}
+	}
+
+	now := time.Now().UTC()
+	machine.LastSeen = now
 	machine.Status = "ONLINE"
 	machine.Online = true
 	machine.RetryCount = 0
-
-	if err := database.DB.Save(&machine).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist heartbeat"})
-		return
+	if database.DB != nil {
+		database.DB.Save(&machine)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Heartbeat received",
+		"message":    "Heartbeat received",
+		"machine_id": machine.ID.String(),
 	})
 
 	log.Printf("HEARTBEAT RECEIVED machine_id=%s hostname=%s ip=%s last_seen=%s status=ONLINE",

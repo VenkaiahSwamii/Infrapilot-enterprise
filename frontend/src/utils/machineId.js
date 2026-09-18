@@ -10,7 +10,6 @@ export function getMachineId(machine) {
     return String(machine).toLowerCase().trim();
   }
 
-  // 1. Explicit valid UUID is the highest-fidelity unique machine identity
   const rawId =
     machine.id ||
     machine.ID ||
@@ -21,25 +20,29 @@ export function getMachineId(machine) {
     machine.UUID ||
     '';
 
-  if (rawId && String(rawId).length > 20) {
-    return String(rawId).toLowerCase().trim();
-  }
-
-  // 2. Derive unique key combining Hostname + OS (e.g. 'venkyyy-windows', 'venkyyy-linux')
   const host = String(machine.hostname || machine.Hostname || machine.name || machine.Name || '').toLowerCase().trim();
   const os = String(machine.os || machine.OS || machine.platform || '').toLowerCase().trim();
   const ip = String(machine.ip_address || machine.IPAddress || '').trim();
+
+  // Always distinguish distinct OS environments (e.g. Windows host vs WSL Linux)
+  if (rawId && os) {
+    return `${String(rawId).toLowerCase().trim()}_${os}`;
+  }
 
   if (host && os) {
     return `${host}-${os}`;
   }
 
-  if (host && ip) {
-    return `${host}-${ip}`;
+  if (rawId && host) {
+    return `${String(rawId).toLowerCase().trim()}_${host}`;
   }
 
   if (rawId) {
     return String(rawId).toLowerCase().trim();
+  }
+
+  if (host && ip) {
+    return `${host}-${ip}`;
   }
 
   return host || 'unknown';

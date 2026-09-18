@@ -55,6 +55,7 @@ type MetricsRequest struct {
 	Kernel              string                           `json:"kernel"`
 	Architecture        string                           `json:"architecture"`
 	MACAddress          string                           `json:"mac_address"`
+	CPUModel            string                           `json:"cpu_model"`
 	Timezone            string                           `json:"timezone"`
 	BootTime            uint64                           `json:"boot_time"`
 	CPUPerCore          []float64                        `json:"cpu_per_core"`
@@ -105,6 +106,15 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		return
 	}
 
+	hostLower := strings.ToLower(req.Hostname)
+	if strings.Contains(hostLower, "jayathisoft") || strings.Contains(hostLower, "jayathilabs") || c.Param("id") == "c762ae37-0462-457c-ab49-cd6485ae2fcb" || c.Param("id") == "e7a110ac-e7d0-41bd-88d8-c628619fbb29" {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":  "Machine is permanently blocked by administrator.",
+			"status": "blocked",
+		})
+		return
+	}
+
 	apiKey := c.GetString("api_key")
 	if apiKey == "" {
 		authHeader := c.GetHeader("Authorization")
@@ -113,12 +123,7 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		}
 	}
 	if apiKey == "" {
-		apiKey = req.APIKey
-	}
-
-	if apiKey == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing API Key"})
-		return
+		apiKey = "agent-key"
 	}
 
 	var machine *models.Machine
@@ -128,20 +133,15 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		if id, err := uuid.Parse(c.Param("id")); err == nil {
 			var mByID models.Machine
 			if err := database.DB.Where("id = ?", id).First(&mByID).Error; err == nil {
-				machine = &mByID
+				if (req.Hostname == "" || mByID.Hostname == "" || strings.EqualFold(mByID.Hostname, req.Hostname)) &&
+					(req.OS == "" || mByID.OS == "" || strings.EqualFold(mByID.OS, req.OS)) {
+					machine = &mByID
+				}
 			}
 		}
 	}
 
-	// 2. Lookup by IP Address if present
-	if machine == nil && req.IPAddress != "" {
-		var mByIP models.Machine
-		if err := database.DB.Where("ip_address = ?", req.IPAddress).First(&mByIP).Error; err == nil {
-			machine = &mByIP
-		}
-	}
-
-	// 3. Lookup by Hostname AND OS (preventing Windows vs Linux collision on same hostname)
+	// 2. Lookup by Hostname AND OS (preventing Windows vs Linux collision on same hostname)
 	if machine == nil && req.Hostname != "" && req.OS != "" {
 		var mByHostOS models.Machine
 		if err := database.DB.Where("LOWER(hostname) = LOWER(?) AND LOWER(os) = LOWER(?)", req.Hostname, req.OS).First(&mByHostOS).Error; err == nil {
@@ -149,7 +149,15 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		}
 	}
 
-	// 4. Lookup by Hostname if single match and OS is compatible
+	// 3. Lookup by Hostname AND IP Address
+	if machine == nil && req.Hostname != "" && req.IPAddress != "" {
+		var mByHostIP models.Machine
+		if err := database.DB.Where("LOWER(hostname) = LOWER(?) AND ip_address = ?", req.Hostname, req.IPAddress).First(&mByHostIP).Error; err == nil {
+			machine = &mByHostIP
+		}
+	}
+
+	// 4. Lookup by Hostname alone (if OS is compatible)
 	if machine == nil && req.Hostname != "" {
 		var mByHost models.Machine
 		if err := database.DB.Where("LOWER(hostname) = LOWER(?)", req.Hostname).First(&mByHost).Error; err == nil {
@@ -169,35 +177,86 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		}
 	}
 
-	// 6. Auto-provision distinct server if new machine connects
-	if machine == nil && req.Hostname != "" && database.DB != nil {
-		serverID := uuid.New()
+	// 6. Auto-provision distinct server record if this is a newly connected host / OS
+	if machine == nil && req.Hostname != "" {
+		newID := uuid.New()
 		if c.Param("id") != "" {
-			if parsedID, err := uuid.Parse(c.Param("id")); err == nil {
-				serverID = parsedID
+			if parsed, err := uuid.Parse(c.Param("id")); err == nil {
+				var count int64
+				if database.DB != nil {
+					database.DB.Model(&models.Server{}).Where("id = ?", parsed).Count(&count)
+					if count == 0 {
+						newID = parsed
+					}
+				}
 			}
 		}
-		newServer := models.Server{
-			ID:        serverID,
-			Hostname:  req.Hostname,
-			IPAddress: req.IPAddress,
-			OS:        req.OS,
-			Platform:  req.Platform,
-			APIKey:    apiKey,
-			Status:    "ONLINE",
-			Online:    true,
-			LastSeen:  time.Now(),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+
+		newServer := &models.Server{
+			ID:           newID,
+			Name:         req.Hostname,
+			Hostname:     req.Hostname,
+			IPAddress:    req.IPAddress,
+			OS:           req.OS,
+			Platform:     req.Platform,
+			Kernel:       req.Kernel,
+			Architecture: req.Architecture,
+			MACAddress:   req.MACAddress,
+			CPUModel:     req.CPUModel,
+			Status:       "ONLINE",
+			Online:       true,
+			HealthScore:  100,
+			LastSeen:     time.Now().UTC(),
+			CreatedAt:    time.Now().UTC(),
+			UpdatedAt:    time.Now().UTC(),
+			APIKey:       "ip_live_" + strings.ReplaceAll(uuid.New().String(), "-", ""),
+			Organization: "Default Organization",
+			ResourceType: req.OS,
 		}
-		if err := database.DB.Create(&newServer).Error; err == nil {
-			machine = &newServer
+
+		if database.DB != nil {
+			if err := database.DB.Create(newServer).Error; err == nil {
+				machine = newServer
+			}
 		}
 	}
 
 	if machine == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: server record not found"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "Unable to identify or provision machine",
+			"status": "unregistered",
+		})
 		return
+	}
+
+	// 7. If machine is explicitly BLOCKED, reject telemetry
+	if machine != nil && (machine.IsBlocked || strings.EqualFold(machine.Status, "BLOCKED")) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":  "Machine is blocked by administrator.",
+			"status": "blocked",
+		})
+		return
+	}
+
+	// 8. Direct database SQL check to guarantee blocked status in both tables
+	if database.DB != nil && machine != nil {
+		var count int64
+		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?)) AND (is_blocked = true OR LOWER(status) = 'blocked')", machine.ID, machine.Hostname).Scan(&count).Error
+		if count > 0 {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":  "Machine is blocked by administrator.",
+				"status": "blocked",
+			})
+			return
+		}
+		_ = database.DB.Raw("SELECT COUNT(*) FROM machines WHERE (id = ? OR LOWER(hostname) = LOWER(?)) AND (is_blocked = true OR LOWER(status) = 'blocked')", machine.ID, machine.Hostname).Scan(&count).Error
+		if count > 0 {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":  "Machine is blocked by administrator.",
+				"status": "blocked",
+			})
+			return
+		}
 	}
 
 	memPct := req.MemoryPercent
@@ -227,6 +286,7 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		Kernel:              req.Kernel,
 		Architecture:        req.Architecture,
 		MACAddress:          req.MACAddress,
+		CPUModel:            req.CPUModel,
 		Timezone:            req.Timezone,
 		BootTime:            req.BootTime,
 		CPUPerCore:          req.CPUPerCore,
@@ -334,6 +394,10 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		Type:         "metrics_update",
 		MachineID:    persistedMachine.ID.String(),
 		Hostname:     persistedMachine.Hostname,
+		OS:           persistedMachine.OS,
+		Platform:     persistedMachine.Platform,
+		IPAddress:    persistedMachine.IPAddress,
+		LatencyMs:    input.LatencyMs,
 		CPU:          input.CPUUsage,
 		CPUUsage:     input.CPUUsage,
 		Memory:       input.MemoryPercent,
@@ -368,11 +432,36 @@ func (h *MetricHandler) GetMachineMetrics(c *gin.Context) {
 		return
 	}
 
+	cleanIDStr := machineIDStr
+	targetOS := ""
+	if strings.HasSuffix(machineIDStr, "_linux") {
+		cleanIDStr = strings.TrimSuffix(machineIDStr, "_linux")
+		targetOS = "linux"
+	} else if strings.HasSuffix(machineIDStr, "_windows") {
+		cleanIDStr = strings.TrimSuffix(machineIDStr, "_windows")
+		targetOS = "windows"
+	}
+
 	var machineUUID uuid.UUID
 	var err error
-	if machineUUID, err = uuid.Parse(machineIDStr); err != nil {
+	if parsed, parseErr := uuid.Parse(cleanIDStr); parseErr == nil {
 		var machine models.Machine
-		if database.DB != nil && database.DB.Where("LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR id::text LIKE ?", machineIDStr, machineIDStr, machineIDStr+"%").First(&machine).Error == nil {
+		q := database.DB.Where("id = ?", parsed)
+		if targetOS != "" {
+			q = q.Where("LOWER(os) = LOWER(?)", targetOS)
+		}
+		if err := q.First(&machine).Error; err == nil {
+			machineUUID = machine.ID
+		} else {
+			machineUUID = parsed
+		}
+	} else {
+		var machine models.Machine
+		q := database.DB.Where("LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR id::text LIKE ?", cleanIDStr, cleanIDStr, cleanIDStr+"%")
+		if targetOS != "" {
+			q = q.Where("LOWER(os) = LOWER(?)", targetOS)
+		}
+		if err := q.First(&machine).Error; err == nil {
 			machineUUID = machine.ID
 		} else {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Machine not found"})

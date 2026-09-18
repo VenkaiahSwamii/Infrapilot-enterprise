@@ -93,10 +93,12 @@ func (s *ServerService) PublishEvent(e events.Event) {
 }
 
 func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*models.Server, error) {
-	if strings.Contains(strings.ToLower(input.Hostname), "jayathi") || input.IPAddress == "192.168.1.41" || strings.Contains(strings.ToLower(input.Hostname), "navya") || input.IPAddress == "192.168.1.18" || strings.Contains(strings.ToLower(input.Hostname), "server01") || input.IPAddress == "172.22.112.255" {
-		return nil, errors.New("host registration blocked by policy")
+	hostLower := strings.ToLower(input.Hostname)
+	if strings.Contains(hostLower, "jayathisoft") || strings.Contains(hostLower, "jayathilabs") || input.ID.String() == "c762ae37-0462-457c-ab49-cd6485ae2fcb" || input.ID.String() == "e7a110ac-e7d0-41bd-88d8-c628619fbb29" {
+		return nil, errors.New("server permanently deleted and blocked by policy")
 	}
-	server, err := s.serverRepo.FindExistingServer(input.ID, input.Hostname, input.IPAddress, input.MACAddress)
+
+	server, err := s.serverRepo.FindExistingServer(input.ID, input.Hostname, input.IPAddress, input.MACAddress, input.OS)
 	if err == nil && server != nil {
 		// Update existing server record
 		applyServerRegistration(server, input)
@@ -116,6 +118,12 @@ func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*mode
 	serverID := input.ID
 	if serverID == uuid.Nil {
 		serverID = uuid.New()
+	} else if database.DB != nil {
+		var exists int64
+		database.DB.Model(&models.Server{}).Where("id = ?", serverID).Count(&exists)
+		if exists > 0 {
+			serverID = uuid.New()
+		}
 	}
 	server = &models.Server{
 		ID:        serverID,
@@ -144,6 +152,9 @@ func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*mode
 }
 
 func applyServerRegistration(server *models.Server, input RegisterServerInput) {
+	if server.Name == "" {
+		server.Name = input.Hostname
+	}
 	server.Hostname = input.Hostname
 	server.OS = input.OS
 	server.Platform = input.Platform
@@ -160,6 +171,7 @@ func applyServerRegistration(server *models.Server, input RegisterServerInput) {
 	server.GPU = input.GPU
 	server.Virtualization = input.Virtualization
 	server.CloudProvider = input.CloudProvider
+	server.Online = true
 }
 
 func normalizeServerResourceType(resourceType, osName, platform, virtualization, cloudProvider string) string {
@@ -289,7 +301,7 @@ LEFT JOIN LATERAL (
     ORDER BY created_at DESC
     LIMIT 1
 ) mt ON TRUE
-ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' THEN 1 ELSE 2 END, m.last_seen DESC;
+ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = true THEN 1 ELSE 2 END, m.last_seen DESC NULLS LAST, m.created_at DESC;
 `).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -298,18 +310,16 @@ ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' THEN 1 ELSE 2 END, m.last_seen DES
 	seenHosts := make(map[string]bool)
 
 	for _, row := range rows {
-		dedupKey := strings.TrimSpace(row.IPAddress)
-		if dedupKey == "" {
-			dedupKey = strings.ToLower(strings.TrimSpace(row.Hostname))
-		}
+		dedupKey := row.ID.String()
 		if dedupKey != "" {
 			if seenHosts[dedupKey] {
-				continue // Skip older duplicate on exact same IP
+				continue // Skip duplicate server ID
 			}
 			seenHosts[dedupKey] = true
 		}
 
 		metric := models.Metric{
+			ID:             uuid.New(),
 			MachineID:      row.ID,
 			CPUUsage:       row.CPUUsage,
 			MemoryUsage:    row.MemoryUsage,

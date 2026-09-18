@@ -11,9 +11,12 @@ import {
   Bot,
   Settings,
   Shield,
+  ShieldCheck,
   Database,
   Radio,
   HardDrive,
+  Zap,
+  Terminal,
 } from 'lucide-react';
 
 import { useAlertStore } from '../../store/alertStore.jsx';
@@ -25,6 +28,10 @@ export default function Sidebar({ collapsed }) {
 
   const navItems = [
     { label: 'Overview', icon: Home, path: '/' },
+    { label: 'Fleet Terminal', icon: Terminal, path: '/terminal', badge: 'CLI' },
+    { label: 'SRE Disk Space', icon: HardDrive, path: '/sre-disk', badge: 'DISK' },
+    { label: 'Crash & Service Health', icon: Zap, path: '/sre-crash', badge: 'SRE' },
+    { label: 'Latency & Gateway', icon: Radio, path: '/sre-latency', badge: 'SLO' },
     { label: 'Machines', icon: Server, path: '/infrastructure' },
     { label: 'Metrics', icon: Activity, path: '/live-metrics' },
     {
@@ -33,7 +40,6 @@ export default function Sidebar({ collapsed }) {
       path: '/alerts',
       badge: activeCount > 0 ? (activeCount > 99 ? '99+' : activeCount) : null,
     },
-    { label: 'Logs', icon: FileText, path: '/logs' },
     { label: 'Analytics', icon: TrendingUp, path: '/analytics' },
     { label: 'Reports', icon: Layers, path: '/reports' },
     { label: 'Agents', icon: Bot, path: '/agents' },

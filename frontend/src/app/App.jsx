@@ -21,6 +21,12 @@ import AuditLogsPage from '../pages/AuditLogsPage.jsx';
 import SettingsPage from '../pages/SettingsPage.jsx';
 import AgentsPage from '../pages/AgentsPage.jsx';
 
+import SREOperationsPage from '../features/sre/SREOperationsPage.jsx';
+import SREDiskPage from '../features/sre/SREDiskPage.jsx';
+import SRECrashPage from '../features/sre/SRECrashPage.jsx';
+import SRELatencyPage from '../features/sre/SRELatencyPage.jsx';
+import FleetTerminalPage from '../features/logs/FleetTerminalPage.jsx';
+
 // Analytics & Reports
 import AnalyticsSuite from '../features/analytics/AnalyticsSuite.jsx';
 import Reports from '../features/analytics/Reports.jsx';
@@ -54,6 +60,10 @@ export default function App() {
               >
                 {/* Main Sidebar Pages */}
                 <Route index element={<EnterpriseDashboard />} />
+                <Route path="terminal" element={<FleetTerminalPage />} />
+                <Route path="sre-disk" element={<SREDiskPage />} />
+                <Route path="sre-crash" element={<SRECrashPage />} />
+                <Route path="sre-latency" element={<SRELatencyPage />} />
                 <Route path="infrastructure" element={<InfrastructurePage />} />
                 <Route path="machines" element={<InfrastructurePage />} />
                 <Route path="live-metrics" element={<LiveMetricsPage />} />
@@ -68,6 +78,8 @@ export default function App() {
                 <Route path="analytics" element={<AnalyticsSuite />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="agents" element={<AgentsPage />} />
+                <Route path="sre" element={<SREOperationsPage />} />
+                <Route path="sre-operations" element={<SREOperationsPage />} />
                 <Route path="terminal" element={<TerminalPage />} />
                 <Route path="settings" element={<SettingsPage />} />
 

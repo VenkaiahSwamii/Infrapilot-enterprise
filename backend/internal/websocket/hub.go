@@ -105,10 +105,7 @@ func (h *Hub) HandleClientMessage(c *Client, data []byte) {
 			"timestamp": msg.Timestamp,
 		}
 		pongBytes, _ := json.Marshal(pong)
-		select {
-		case c.Send <- pongBytes:
-		default:
-		}
+		c.SafeSend(pongBytes)
 
 	case "subscribe":
 		if !h.AuthorizeSubscription(c, msg.Room) {
@@ -128,10 +125,7 @@ func (h *Hub) HandleClientMessage(c *Client, data []byte) {
 			"status": "success",
 		}
 		confirmBytes, _ := json.Marshal(confirm)
-		select {
-		case c.Send <- confirmBytes:
-		default:
-		}
+		c.SafeSend(confirmBytes)
 
 	case "unsubscribe":
 		c.mu.Lock()
@@ -154,17 +148,15 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			if _, ok := h.Clients[client]; ok {
 				delete(h.Clients, client)
-				close(client.Send)
+				client.Close()
 			}
 			log.Printf("[WebSocket Hub] Client unregistered. Active clients: %d\n", len(h.Clients))
 			h.mu.Unlock()
 		case message := <-h.BroadcastChan:
 			h.mu.RLock()
 			for client := range h.Clients {
-				select {
-				case client.Send <- message:
-				default:
-					close(client.Send)
+				if !client.SafeSend(message) {
+					client.Close()
 					h.mu.RUnlock()
 					h.mu.Lock()
 					delete(h.Clients, client)
@@ -195,10 +187,8 @@ func (h *Hub) Run() {
 						continue
 					}
 				}
-				select {
-				case client.Send <- eventBytes:
-				default:
-					close(client.Send)
+				if !client.SafeSend(eventBytes) {
+					client.Close()
 					h.mu.RUnlock()
 					h.mu.Lock()
 					delete(h.Clients, client)

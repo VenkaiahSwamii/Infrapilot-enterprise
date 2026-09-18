@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"strings"
+
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 
@@ -19,7 +21,8 @@ func (r *UserRepository) Create(user *models.User) error {
 
 func (r *UserRepository) FindByEmail(email string) (*models.User, error) {
 	var user models.User
-	err := database.DB.Where("email = ?", email).First(&user).Error
+	clean := strings.TrimSpace(email)
+	err := database.DB.Where("LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)", clean, clean).First(&user).Error
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 // ConfigStore persists and loads agent config in JSON format at the agent's config path
@@ -17,13 +19,26 @@ func NewConfigStore(configPath string) *ConfigStore {
 	return &ConfigStore{configPath: configPath}
 }
 
-// DefaultConfigPath returns the default path for config.json
+// DefaultConfigPath returns the default path for config.json, isolating per-OS if needed
 func DefaultConfigPath() string {
 	wd, err := os.Getwd()
 	if err != nil {
 		return "config.json"
 	}
-	return filepath.Join(wd, "config.json")
+	osSpecific := filepath.Join(wd, fmt.Sprintf("config_%s.json", runtime.GOOS))
+	if _, err := os.Stat(osSpecific); err == nil {
+		return osSpecific
+	}
+	baseConfig := filepath.Join(wd, "config.json")
+	if data, err := os.ReadFile(baseConfig); err == nil {
+		var peek struct {
+			OS string `json:"os"`
+		}
+		if err := json.Unmarshal(data, &peek); err == nil && peek.OS != "" && !strings.EqualFold(peek.OS, runtime.GOOS) {
+			return osSpecific
+		}
+	}
+	return baseConfig
 }
 
 // EnterpriseConfig is the runtime configuration for the agent
@@ -35,6 +50,7 @@ type EnterpriseConfig struct {
 	Organization      string `json:"organization"`
 	MetricsInterval   int    `json:"interval"`
 	HeartbeatInterval int    `json:"heartbeat_interval"`
+	OS                string `json:"os,omitempty"`
 }
 
 // Load loads config.json into EnterpriseConfig
@@ -52,6 +68,9 @@ func (s *ConfigStore) Load() (*EnterpriseConfig, error) {
 
 // Save writes EnterpriseConfig to config.json
 func (s *ConfigStore) Save(cfg *EnterpriseConfig) error {
+	if cfg.OS == "" {
+		cfg.OS = runtime.GOOS
+	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)

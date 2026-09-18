@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"infrapilot/backend/internal/archival"
 	"infrapilot/backend/internal/cache"
 	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
@@ -26,6 +28,7 @@ import (
 	"infrapilot/backend/internal/security"
 	"infrapilot/backend/internal/services"
 	"infrapilot/backend/internal/subscribers"
+	transportgrpc "infrapilot/backend/internal/transport/grpc"
 	"infrapilot/backend/internal/websocket"
 	"infrapilot/backend/internal/workers"
 
@@ -220,6 +223,38 @@ func RunAPI() error {
 	logger.Info("Serving agent binary downloads", "dir", activeReleaseDir)
 
 	routes.Setup(router, hub, EventBus)
+
+	// Start enterprise mTLS gRPC Transport Security Server
+	grpcPort := 50051
+	if portStr := os.Getenv("GRPC_PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			grpcPort = p
+		}
+	}
+	certPath := os.Getenv("SERVER_CERT_PATH")
+	keyPath := os.Getenv("SERVER_KEY_PATH")
+	caPath := os.Getenv("CA_CERT_PATH")
+	if certPath == "" {
+		certPath = "certs/server.crt"
+	}
+	if keyPath == "" {
+		keyPath = "certs/server.key"
+	}
+	if caPath == "" {
+		caPath = "certs/ca.crt"
+	}
+	_, _ = transportgrpc.StartGRPCServer(grpcPort, certPath, keyPath, caPath, false)
+
+	// Start periodic AWS Lambda Cold Storage Archival background ticker
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if database.DB != nil {
+				_ = archival.RunArchivalPipeline(database.DB)
+			}
+		}
+	}()
 
 	for _, route := range router.Routes() {
 		logger.Debug("Route registered",

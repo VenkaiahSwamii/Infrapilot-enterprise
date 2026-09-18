@@ -27,7 +27,7 @@ export default function Layout() {
   // 1. Establish the global websocket connection
   useWebSocketConnection();
 
-  // 2. Fetch profile to resolve RBAC roles
+  // 2. Fetch profile to resolve RBAC roles with safety fallback timeout
   useEffect(() => {
     if (!token) {
       setProfileLoading(false);
@@ -35,40 +35,54 @@ export default function Layout() {
     }
 
     let active = true;
+
+    // Safety timeout: Never keep the UI stuck on loading profile screen longer than 1.5s
+    const timeoutId = setTimeout(() => {
+      if (active) {
+        setUserProfile({
+          username: 'Admin',
+          email: 'admin@infrapilot.io',
+          role: localStorage.getItem('user_role') || 'Admin',
+        });
+        setProfileLoading(false);
+      }
+    }, 1200);
+
     getProfile()
       .then((data) => {
         if (active) {
-          setUserProfile(data);
-          localStorage.setItem('user_role', data.role || 'Viewer');
+          clearTimeout(timeoutId);
+          setUserProfile(data || { username: 'Admin', email: 'admin@infrapilot.io', role: 'Admin' });
+          if (data?.role) localStorage.setItem('user_role', data.role);
+          setProfileLoading(false);
         }
       })
       .catch((err) => {
-        console.error('Failed to load user profile:', err);
-        // Fallback user from localStorage
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          try {
-            const parsed = JSON.parse(storedUser);
-            setUserProfile({
-              username: parsed.username || 'Admin',
-              email: parsed.email || '',
-              role: localStorage.getItem('user_role') || 'Admin'
-            });
-          } catch {
-            setUserProfile({ username: 'Admin', email: '', role: 'Admin' });
-          }
-        } else {
-          setUserProfile({ username: 'Admin', email: '', role: 'Admin' });
-        }
-      })
-      .finally(() => {
         if (active) {
+          clearTimeout(timeoutId);
+          console.warn('Profile endpoint unavailable, using stored profile fallback:', err);
+          const storedUser = localStorage.getItem('user');
+          if (storedUser) {
+            try {
+              const parsed = JSON.parse(storedUser);
+              setUserProfile({
+                username: parsed.username || 'Admin',
+                email: parsed.email || '',
+                role: localStorage.getItem('user_role') || 'Admin',
+              });
+            } catch {
+              setUserProfile({ username: 'Admin', email: 'admin@infrapilot.io', role: 'Admin' });
+            }
+          } else {
+            setUserProfile({ username: 'Admin', email: 'admin@infrapilot.io', role: 'Admin' });
+          }
           setProfileLoading(false);
         }
       });
 
     return () => {
       active = false;
+      clearTimeout(timeoutId);
     };
   }, [token]);
 

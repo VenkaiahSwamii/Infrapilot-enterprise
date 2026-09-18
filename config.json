@@ -1,9 +1,0 @@
-{
-  "backend_url": "http://localhost:8080",
-  "machine_id": "e53dee5c-584a-42bd-874d-7ab54da9e8db",
-  "api_key": "ip_live_2eceb16935d9b4a60643cdaa0b88a1aa",
-  "key_version": 0,
-  "organization": "",
-  "interval": 5,
-  "heartbeat_interval": 15
-}

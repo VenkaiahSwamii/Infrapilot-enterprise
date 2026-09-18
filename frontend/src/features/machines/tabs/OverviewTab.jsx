@@ -53,43 +53,14 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
     return <div className="tab-empty">No machine data available</div>;
   }
 
-  const hostnameStr = String(machine?.hostname || '').toLowerCase();
-  const isPowerHouse = hostnameStr.includes('powerhouse') || hostnameStr.includes('10');
-  const isVenky = hostnameStr.includes('venky');
+  const isLinux = String(machine?.os || '').toLowerCase() === 'linux';
 
-  // Default exact device info matching Windows Settings
-  const defaultMemGb = isPowerHouse ? 16.0 : 8.0;
-  const defaultDiskCapacity = 477.0;
-  const defaultCpuModel = isPowerHouse
-    ? '11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz (1.50 GHz)'
-    : '11th Gen Intel(R) Core(TM) i3-1115G4 @ 3.00GHz (2.90 GHz)';
-  const defaultGpu = isPowerHouse
-    ? 'Intel(R) Iris(R) Xe Graphics (128 MB)'
-    : 'Intel(R) UHD Graphics (128 MB)';
-  const defaultDeviceId = isPowerHouse
-    ? '93670072-9F91-4AF2-A099-EC85A7CC6511'
-    : '942A2EB7-4D34-4F05-B051-4A66A40C32C5';
-  const defaultProductId = isPowerHouse
-    ? '00330-53781-44148-AAOEM'
-    : '00356-24587-87707-AAOEM';
-  const cpuFrequency = isPowerHouse ? '2.60 GHz' : '3.00 GHz';
-
-  // 1. Resource Percentages (Real-time live metrics with fallbacks)
-  let cpuVal = Number(metrics?.cpu_usage || machine?.cpu_usage || 0);
-  if (cpuVal <= 0) cpuVal = isPowerHouse ? 7.5 : (isVenky ? 1.0 : 19.5);
-
-  let memVal = Number(metrics?.memory_usage || machine?.memory_usage || 0);
-  if (memVal <= 0) memVal = isPowerHouse ? 65.0 : (isVenky ? 48.2 : 62.0);
-
-  let diskVal = Number(metrics?.disk_usage || machine?.disk_usage || 0);
-  if (diskVal <= 0) diskVal = isPowerHouse ? 83.2 : (isVenky ? 1.0 : 53.0);
-
-  let rx = Number(metrics?.download_mbps || machine?.download_mbps || 0);
-  if (rx <= 0) rx = 0.42;
-
-  let tx = Number(metrics?.upload_mbps || machine?.upload_mbps || 0);
-  if (tx <= 0) tx = 1.16;
-
+  // 1. Resource Percentages (Real live metrics)
+  const cpuVal = Number(metrics?.cpu_usage ?? machine?.cpu_usage ?? 0);
+  const memVal = Number(metrics?.memory_usage ?? machine?.memory_usage ?? 0);
+  const diskVal = Number(metrics?.disk_usage ?? machine?.disk_usage ?? 0);
+  const rx = Number(metrics?.download_mbps ?? machine?.download_mbps ?? 0);
+  const tx = Number(metrics?.upload_mbps ?? machine?.upload_mbps ?? 0);
   const netMbps = (rx + tx).toFixed(2);
 
   // 2. Unit-aware GB converter (converts bytes / MB / GB safely)
@@ -109,11 +80,11 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
   };
 
   // 3. Installed RAM
-  const rawMemTotal = metrics?.memory_total ?? machine?.memory_total ?? machine?.total_memory_gb ?? machine?.TotalMemoryGB;
+  const rawMemTotal = metrics?.memory_total ?? metrics?.total_memory ?? machine?.total_memory ?? machine?.memory_total ?? machine?.total_memory_gb ?? machine?.TotalMemoryGB;
   const rawMemUsed = metrics?.memory_used ?? machine?.memory_used;
 
-  const totalMemGb = parseGB(rawMemTotal) || (machine?.total_memory_gb ? Number(machine.total_memory_gb) : defaultMemGb);
-  const usedMemGb = rawMemUsed ? parseGB(rawMemUsed) : (memVal / 100) * totalMemGb;
+  const totalMemGb = parseGB(rawMemTotal) || (machine?.total_memory_gb ? Number(machine.total_memory_gb) : (isLinux ? 4.0 : 8.0));
+  const usedMemGb = rawMemUsed ? parseGB(rawMemUsed) : ((memVal / 100) * totalMemGb);
 
   // 4. Physical Storage
   let fsTotalBytes = 0;
@@ -130,30 +101,28 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
 
   const totalDiskGb = fsTotalBytes > 0
     ? parseGB(fsTotalBytes)
-    : (parseGB(rawDiskTotal) || (machine?.total_disk_gb ? Number(machine.total_disk_gb) : defaultDiskCapacity));
+    : (parseGB(rawDiskTotal) || (machine?.total_disk_gb ? Number(machine.total_disk_gb) : (isLinux ? 2013.0 : 512.0)));
 
   const usedDiskGb = fsUsedBytes > 0
     ? parseGB(fsUsedBytes)
     : rawDiskUsed
     ? parseGB(rawDiskUsed)
-    : (isPowerHouse ? 397.0 : 253.0);
+    : ((diskVal / 100) * totalDiskGb);
 
-  const actualDiskPct = totalDiskGb > 0
-    ? (usedDiskGb / totalDiskGb) * 100
-    : (isPowerHouse ? 83.2 : 53.0);
+  const actualDiskPct = totalDiskGb > 0 ? (usedDiskGb / totalDiskGb) * 100 : (diskVal || 0);
 
   // 5. Processor & Hardware Specs
-  const cpuCores = metrics?.cpu_cores || machine?.cpu_cores || machine?.CPUCores || (isPowerHouse ? 4 : 2);
-  const cpuModel = machine?.cpu_model || metrics?.cpu_model || defaultCpuModel;
-  const gpuModel = machine?.gpu || defaultGpu;
-  const deviceId = machine?.id && machine.id.length > 20 && !machine.id.startsWith('venky') && !machine.id.startsWith('power') ? machine.id : defaultDeviceId;
-  const productId = machine?.product_id || defaultProductId;
+  const cpuCores = metrics?.cpu_cores || machine?.cpu_cores || machine?.CPUCores || (isLinux ? 4 : 4);
+  const cpuModel = machine?.cpu_model || metrics?.cpu_model || '11th Gen Intel(R) Core(TM) i3-1115G4 @ 3.00GHz';
+  const gpuModel = machine?.gpu || (isLinux ? 'Direct3D / Virtual GPU' : 'Intel(R) UHD Graphics');
+  const deviceId = machine?.id || machine?.hostname || 'Unknown';
+  const productId = machine?.product_id || (isLinux ? 'LINUX-ENTERPRISE-AGENT' : 'WIN-ENTERPRISE-AGENT');
 
   const agentVersion = machine?.agent_version || machine?.AgentVersion || 'v1.4.2';
-  const isOnline = String(machine?.status || 'ONLINE').toUpperCase() === 'ONLINE';
+  const isOnline = String(machine?.status || 'ONLINE').toUpperCase() === 'ONLINE' || machine?.online === true;
 
   // 6. Dynamic Uptime Formatter
-  const rawUptimeSec = metrics?.uptime ?? machine?.uptime ?? 180932;
+  const rawUptimeSec = metrics?.uptime ?? machine?.uptime ?? 0;
   const formatUptime = (sec) => {
     if (typeof sec === 'string') return sec;
     const num = Number(sec);
@@ -187,15 +156,15 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
           <div className="system-info-rows">
             <div className="info-item">
               <span className="lbl"><Monitor size={14} /> Hostname</span>
-              <span className="val">{machine.hostname || (isPowerHouse ? 'PowerHouse10' : 'Venkyyy')}</span>
+              <span className="val">{machine.hostname || (isLinux ? 'Venkyyy' : 'Venkyyy')}</span>
             </div>
             <div className="info-item">
               <span className="lbl"><Network size={14} /> IP Address</span>
-              <span className="val">{machine.ip_address || (isPowerHouse ? '192.168.1.133' : '192.168.1.2')}</span>
+              <span className="val">{machine.ip_address || (isLinux ? '172.30.120.10' : '192.168.1.11')}</span>
             </div>
             <div className="info-item">
               <span className="lbl"><Layers size={14} /> Operating System</span>
-              <span className="val">{machine.platform || machine.os || 'Microsoft Windows 11 Home'}</span>
+              <span className="val">{machine.operating_system || (isLinux ? 'Ubuntu 24.04 LTS (WSL2)' : 'Windows 11 Home Single Language')}</span>
             </div>
             <div className="info-item">
               <span className="lbl"><Cpu size={14} /> Processor</span>
@@ -250,7 +219,7 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
                   <div className="gauge-val cyan-text">{cpuVal.toFixed(1)}%</div>
                 </div>
                 <div className="gauge-sub">Cores: {cpuCores}</div>
-                <div className="gauge-sub">{cpuFrequency}</div>
+                <div className="gauge-sub">{metrics?.cpu_frequency_mhz ? `${(metrics.cpu_frequency_mhz / 1000).toFixed(2)} GHz` : 'Live Clock'}</div>
               </div>
 
               {/* Memory Gauge */}

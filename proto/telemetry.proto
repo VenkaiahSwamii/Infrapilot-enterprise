@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package telemetry;
+
+option go_package = "infrapilot/backend/internal/proto/telemetry;telemetry";
+
+// TelemetryIngester service definition for streaming telemetry metrics
+service TelemetryIngester {
+  rpc StreamMetrics (stream TelemetryRequest) returns (TelemetryResponse);
+  rpc SendHeartbeat (HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message TelemetryRequest {
+  string machine_id = 1;
+  string api_key = 2;
+  double cpu_usage = 3;
+  double memory_usage = 4;
+  double disk_usage = 5;
+  double memory_percent = 6;
+  double disk_percent = 7;
+  double latency_ms = 8;
+  double upload_mbps = 9;
+  double download_mbps = 10;
+  uint64 uptime = 11;
+  string hostname = 12;
+  string ip_address = 13;
+  string os = 14;
+  double cpu_temperature = 15;
+  int32 cpu_cores = 16;
+  string cpu_model = 17;
+  uint64 total_memory = 18;
+  uint64 free_memory = 19;
+  uint64 memory_total = 20;
+  uint64 memory_used = 21;
+  uint64 disk_total = 22;
+  uint64 disk_used = 23;
+  int64 timestamp = 24;
+}
+
+message TelemetryResponse {
+  bool success = 1;
+  string message = 2;
+  int64 processed_at = 3;
+}
+
+message HeartbeatRequest {
+  string machine_id = 1;
+  string api_key = 2;
+  string hostname = 3;
+  string status = 4;
+  int64 timestamp = 5;
+}
+
+message HeartbeatResponse {
+  bool acknowledged = 1;
+  int64 server_time = 2;
+}

@@ -45,6 +45,7 @@ type SaveMetricInput struct {
 	Kernel              string
 	Architecture        string
 	MACAddress          string
+	CPUModel            string
 	Timezone            string
 	BootTime            uint64
 	CPUPerCore          []float64
@@ -128,10 +129,56 @@ type DockerNetworkInput = docker.DockerNetworkInput
 type DockerEventInput = docker.DockerEventInput
 
 func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *models.Machine, error) {
-	// Verify agent credentials via APIKey
-	machine, err := s.machineRepo.FindByAPIKey(input.APIKey)
-	if err != nil || machine == nil {
-		return nil, nil, errors.New("unauthorized: invalid API key")
+	var machine *models.Machine
+
+	// 1. Match by Hostname AND OS (prevents Linux vs Windows collisions on same hostname)
+	if input.Hostname != "" && input.OS != "" && database.DB != nil {
+		var m models.Machine
+		if err := database.DB.Where("LOWER(hostname) = LOWER(?) AND LOWER(os) = LOWER(?)", input.Hostname, input.OS).First(&m).Error; err == nil {
+			machine = &m
+		}
+	}
+
+	// 2. Match by Hostname AND IP
+	if machine == nil && input.Hostname != "" && input.IPAddress != "" && database.DB != nil {
+		var m models.Machine
+		if err := database.DB.Where("LOWER(hostname) = LOWER(?) AND ip_address = ?", input.Hostname, input.IPAddress).First(&m).Error; err == nil {
+			machine = &m
+		}
+	}
+
+	// 3. Match by API Key if compatible OS
+	if machine == nil && input.APIKey != "" && s.machineRepo != nil {
+		m, err := s.machineRepo.FindByAPIKey(input.APIKey)
+		if err == nil && m != nil {
+			if input.OS == "" || m.OS == "" || strings.EqualFold(m.OS, input.OS) {
+				machine = m
+			}
+		}
+	}
+
+	// 4. Match by Hostname alone (if OS is compatible)
+	if machine == nil && input.Hostname != "" && database.DB != nil {
+		var m models.Machine
+		if err := database.DB.Where("LOWER(hostname) = LOWER(?)", input.Hostname).First(&m).Error; err == nil {
+			if input.OS == "" || m.OS == "" || strings.EqualFold(m.OS, input.OS) {
+				machine = &m
+			}
+		}
+	}
+
+	// 5. Match by IP Address alone (if OS is compatible)
+	if machine == nil && input.IPAddress != "" && database.DB != nil {
+		var m models.Machine
+		if err := database.DB.Where("ip_address = ?", input.IPAddress).First(&m).Error; err == nil {
+			if input.OS == "" || m.OS == "" || strings.EqualFold(m.OS, input.OS) {
+				machine = &m
+			}
+		}
+	}
+
+	if machine == nil {
+		return nil, nil, errors.New("machine not found or deleted")
 	}
 
 	// Save detailed metric to DB
@@ -163,18 +210,68 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 	}
 
 	// Update machine information
-	err = database.DB.Model(&models.Machine{}).
-		Where("id = ?", metric.MachineID).
-		Updates(map[string]interface{}{
-			"hostname":   metric.Hostname,
-			"ip_address": metric.IPAddress,
-			"os":         metric.OS,
-			"status":     "ONLINE",
-			"last_seen":  metric.CreatedAt,
-			"updated_at": time.Now(),
-		}).Error
+	updates := map[string]interface{}{
+		"hostname":   metric.Hostname,
+		"ip_address": metric.IPAddress,
+		"os":         metric.OS,
+		"status":     "ONLINE",
+		"online":     true,
+		"last_seen":  metric.CreatedAt,
+		"updated_at": time.Now(),
+	}
+	if input.Kernel != "" {
+		updates["kernel"] = input.Kernel
+		machine.Kernel = input.Kernel
+	}
+	if input.Architecture != "" {
+		updates["architecture"] = input.Architecture
+		machine.Architecture = input.Architecture
+	}
+	if input.CPUModel != "" {
+		updates["cpu_model"] = input.CPUModel
+		machine.CPUModel = input.CPUModel
+	}
+	if input.TotalMemory > 0 {
+		memGB := input.TotalMemory / (1024 * 1024 * 1024)
+		if memGB > 0 {
+			updates["total_memory_gb"] = memGB
+			machine.TotalMemoryGB = memGB
+		}
+	}
+	var totalDiskBytes uint64
+	for _, fs := range input.Filesystems {
+		totalDiskBytes += fs.Total
+	}
+	if totalDiskBytes > 0 {
+		diskGB := totalDiskBytes / (1024 * 1024 * 1024)
+		if diskGB > 0 {
+			updates["total_disk_gb"] = diskGB
+			machine.TotalDiskGB = diskGB
+		}
+	}
+	if strings.EqualFold(metric.OS, "windows") {
+		updates["platform"] = "windows"
+		updates["operating_system"] = "Windows 11"
+		updates["resource_type"] = "windows"
+		updates["name"] = metric.Hostname + " (Windows)"
+		machine.Platform = "windows"
+		machine.OperatingSystem = "Windows 11"
+		machine.ResourceType = "windows"
+		machine.Name = metric.Hostname + " (Windows)"
+	} else if strings.EqualFold(metric.OS, "linux") {
+		updates["platform"] = "ubuntu"
+		updates["operating_system"] = "Ubuntu 24.04 LTS (WSL2)"
+		updates["resource_type"] = "linux"
+		updates["name"] = metric.Hostname + " (Linux)"
+		machine.Platform = "ubuntu"
+		machine.OperatingSystem = "Ubuntu 24.04 LTS (WSL2)"
+		machine.ResourceType = "linux"
+		machine.Name = metric.Hostname + " (Linux)"
+	}
 
-	if err != nil {
+	if err := database.DB.Model(&models.Machine{}).
+		Where("id = ?", metric.MachineID).
+		Updates(updates).Error; err != nil {
 		return nil, nil, err
 	}
 	machine.Hostname = metric.Hostname

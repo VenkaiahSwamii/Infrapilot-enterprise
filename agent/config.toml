@@ -1,0 +1,82 @@
+# ===================================================================
+# InfraPilot Enterprise Agent Configuration (TOML)
+# ===================================================================
+
+server_address = "localhost:50051"
+backend_url = "http://localhost:8080"
+machine_id = ""
+api_key = ""
+enrollment_token = ""
+interval = 5
+machine_name = ""
+
+# -------------------------------------------------------------------
+# Security & TLS Configuration
+# -------------------------------------------------------------------
+[tls]
+tls_enabled = true
+mtls_enabled = true
+ca_cert = "certs/ca.crt"
+agent_cert = "certs/agent.crt"
+agent_key = "certs/agent.key"
+
+# -------------------------------------------------------------------
+# SRE Disk Space & Remediation Engine
+# -------------------------------------------------------------------
+[disk]
+# "auto" automatically detects "C:" on Windows and "/" on Linux / Ubuntu
+target_mount_point = "auto"
+reactive_threshold_percent = 90.0
+predictive_hours = 4.0
+deny_list = [
+    "db",
+    "mysql",
+    "postgres",
+    "data"
+]
+
+# -------------------------------------------------------------------
+# SRE Crash Monitor & Service Health
+# -------------------------------------------------------------------
+[services]
+accept_list = [
+    "ssh.service",
+    "cron.service",
+    "systemd-journald.service"
+]
+
+# -------------------------------------------------------------------
+# SRE Latency Degradation & Gateway Monitor
+# -------------------------------------------------------------------
+[latency]
+target_gateway = "8.8.8.8"
+baseline_p95_ms = 40.0
+threshold_multiplier = 3.0
+alert_window_minutes = 5
+accept_list = [
+    "ssh.service",
+    "http.service",
+    "postgresql.service"
+]
+
+# -------------------------------------------------------------------
+# Agent Logging Configuration
+# -------------------------------------------------------------------
+[logging]
+log_level = "info"
+log_format = "text"
+log_path = "logs/reports.log"
+daily_rotation = true
+max_age_days = 7
+max_size_mb = 1000
+
+# -------------------------------------------------------------------
+# Active Telemetry Collectors
+# -------------------------------------------------------------------
+[collectors]
+system = true
+processes = true
+docker = true
+kubernetes = true
+logs = true
+security = true

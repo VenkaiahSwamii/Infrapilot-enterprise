@@ -832,11 +832,22 @@ export default function AlertsPage() {
                       <div className="alert-title-main">
                         <strong>{a.title || a.message || 'Infrastructure Anomaly Detected'}</strong>
                         {a.category && <span className="category-tag">{a.category}</span>}
+                        {String(a.message || a.title || '').includes('FLAPPING') && (
+                          <span className="category-tag" style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', border: '1px solid #f59e0b' }}>
+                            FLAPPING_LOOP_DETECTED
+                          </span>
+                        )}
+                        {String(a.message || a.title || '').includes('CROSS-COMPONENT') && (
+                          <span className="category-tag" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid #ef4444' }}>
+                            CROSS-COMPONENT ROOT CAUSE
+                          </span>
+                        )}
                       </div>
                       <div className="alert-desc-sub">
                         {a.message || a.description || 'Threshold breached on monitored component.'}
                       </div>
                     </div>
+
 
                     {/* Affected Machine */}
                     <div className="row-cell-machine">

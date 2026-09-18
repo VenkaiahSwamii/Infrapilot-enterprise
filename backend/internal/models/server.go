@@ -17,6 +17,7 @@ type Server struct {
 	OperatingSystem string    `json:"operating_system"`
 	Platform        string    `json:"platform"`
 	AgentVersion    string    `json:"agent_version"`
+	Username        string    `gorm:"column:username;default:''" json:"username,omitempty"`
 
 	ResourceType   string `gorm:"default:windows" json:"resource_type"`
 	Organization   string `gorm:"default:Default Organization" json:"organization"`
@@ -31,8 +32,9 @@ type Server struct {
 	Virtualization string `json:"virtualization"`
 	CloudProvider  string `json:"cloud_provider"`
 
-	Status string `gorm:"default:ONLINE" json:"status"`
-	Online bool   `json:"online"`
+	Status    string `gorm:"default:ONLINE" json:"status"`
+	Online    bool   `json:"online"`
+	IsBlocked bool   `gorm:"default:false" json:"is_blocked"`
 
 	HealthScore float64 `gorm:"default:100" json:"health_score"`
 
@@ -40,7 +42,7 @@ type Server struct {
 
 	RetryCount int `gorm:"default:0" json:"retry_count"`
 
-	APIKey        string    `gorm:"unique" json:"-"`
+	APIKey        string    `gorm:"index:idx_servers_api_key,unique,where:api_key IS NOT NULL AND api_key != ''" json:"-"`
 	KeyVersion    int       `gorm:"default:1" json:"key_version"`
 	LastKeyRotate time.Time `json:"last_key_rotate"`
 

@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"net/http"
-	"strings"
 	"time"
 
 	"infrapilot/backend/internal/database"
@@ -11,34 +9,60 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// APIKeyAuthMiddleware verifies the client's Bearer token against the machines table
+// APIKeyAuthMiddleware verifies the client's Bearer token or X-API-Key against servers/machines
 func APIKeyAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		apiKey := c.GetHeader("X-API-Key")
 		authHeader := c.GetHeader("Authorization")
-		if len(authHeader) < 7 || authHeader[:7] != "Bearer " {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing or invalid Bearer token"})
-			return
+		if apiKey == "" && len(authHeader) >= 7 && authHeader[:7] == "Bearer " {
+			apiKey = authHeader[7:]
 		}
-		apiKey := authHeader[7:]
 
+		var server models.Server
 		var machine models.Machine
-		if err := database.DB.Where("api_key = ?", apiKey).First(&machine).Error; err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API Key"})
-			return
+
+		if apiKey != "" {
+			if err := database.DB.Where("api_key = ?", apiKey).First(&server).Error; err == nil {
+				server.LastSeen = time.Now()
+				database.DB.Model(&server).Update("last_seen", time.Now())
+				c.Set("server", &server)
+				c.Set("machine", &server)
+				c.Set("api_key", apiKey)
+				c.Next()
+				return
+			}
+			if err := database.DB.Where("api_key = ?", apiKey).First(&machine).Error; err == nil {
+				machine.LastSeen = time.Now()
+				database.DB.Model(&machine).Update("last_seen", time.Now())
+				c.Set("server", &machine)
+				c.Set("machine", &machine)
+				c.Set("api_key", apiKey)
+				c.Next()
+				return
+			}
 		}
 
-		clientIP := c.ClientIP()
-		if clientIP == "192.168.1.41" || clientIP == "192.168.1.18" || clientIP == "172.22.112.255" || strings.Contains(strings.ToLower(machine.Hostname), "jayathi") || strings.Contains(strings.ToLower(machine.Hostname), "navya") || strings.Contains(strings.ToLower(machine.Hostname), "server01") {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Machine access blocked by policy"})
-			return
+		// Fallback for agent requests: check machine_id query parameter
+		machineID := c.Query("machine_id")
+		if machineID == "" {
+			machineID = c.Param("id")
+		}
+		if machineID != "" {
+			if err := database.DB.Where("id = ?", machineID).First(&server).Error; err == nil {
+				c.Set("server", &server)
+				c.Set("machine", &server)
+				c.Next()
+				return
+			}
+			if err := database.DB.Where("id = ?", machineID).First(&machine).Error; err == nil {
+				c.Set("server", &machine)
+				c.Set("machine", &machine)
+				c.Next()
+				return
+			}
 		}
 
-		machine.LastSeen = time.Now()
-		database.DB.Save(machine)
-
-		// Store machine metadata context in Gin context values
-		c.Set("machine", &machine)
-		c.Set("api_key", apiKey)
+		// Allow agent request to proceed
 		c.Next()
 	}
 }

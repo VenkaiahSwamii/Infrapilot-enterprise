@@ -18,7 +18,7 @@ const (
 
 type User struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	Username  string    `gorm:"size:100;not null" json:"username"`
+	Username  string    `gorm:"size:100;unique;not null" json:"username"`
 	Email     string    `gorm:"size:255;unique;not null" json:"email"`
 	Password  string    `gorm:"not null" json:"-"`
 	Role      string    `gorm:"size:50;not null;default:'Viewer'" json:"role"`
