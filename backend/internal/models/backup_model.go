@@ -8,7 +8,7 @@ import (
 
 // BackupRecord represents a stored backup database entry
 type BackupRecord struct {
-	ID          uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	Type        string     `gorm:"type:varchar(50);index" json:"type"`   // postgresql, qdrant, kubernetes, config, grafana, full
 	Status      string     `gorm:"type:varchar(50);index" json:"status"` // pending, running, completed, failed, verified
 	Filename    string     `gorm:"type:varchar(255)" json:"filename"`
@@ -34,7 +34,7 @@ func (BackupRecord) TableName() string {
 
 // RestoreRecord represents a disaster recovery restore execution record
 type RestoreRecord struct {
-	ID          uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	BackupID    string     `gorm:"type:varchar(100);index" json:"backup_id"`
 	Type        string     `gorm:"type:varchar(50)" json:"type"`
 	Status      string     `gorm:"type:varchar(50);index" json:"status"` // pending, running, completed, failed
@@ -52,7 +52,7 @@ func (RestoreRecord) TableName() string {
 
 // DRTestRecord represents a Disaster Recovery drill execution record
 type DRTestRecord struct {
-	ID          uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	StartedAt   time.Time  `json:"started_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	Status      string     `gorm:"type:varchar(50);index" json:"status"` // success, failed, degraded

@@ -8,7 +8,7 @@ import (
 
 // AnalyticsSnapshot stores periodic aggregated infrastructure health and metrics
 type AnalyticsSnapshot struct {
-	ID                uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID                uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID    string    `gorm:"index" json:"organization_id"`
 	Timestamp         time.Time `gorm:"index" json:"timestamp"`
 	AvgCPUPercent     float64   `json:"avg_cpu_percent"`
@@ -31,7 +31,7 @@ func (AnalyticsSnapshot) TableName() string {
 
 // CapacityPrediction holds capacity forecasting and saturation projections
 type CapacityPrediction struct {
-	ID                uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID                uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID    string    `gorm:"index" json:"organization_id"`
 	ResourceType      string    `json:"resource_type"` // disk, cpu, memory, node
 	CurrentUsagePct   float64   `json:"current_usage_pct"`
@@ -48,7 +48,7 @@ func (CapacityPrediction) TableName() string {
 
 // SLAReport records uptime, downtime, MTTR, and MTBF tracking per tenant
 type SLAReport struct {
-	ID                uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID                uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID    string    `gorm:"index" json:"organization_id"`
 	Period            string    `json:"period"` // daily, weekly, monthly, quarterly
 	AvailabilityPct   float64   `json:"availability_pct"`
@@ -71,7 +71,7 @@ func (SLAReport) TableName() string {
 
 // ScheduledReport defines recurring automated PDF/Excel/CSV report jobs
 type ScheduledReport struct {
-	ID             uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string     `gorm:"index" json:"organization_id"`
 	Name           string     `json:"name"`
 	ReportType     string     `json:"report_type"` // summary, incident, compliance, k8s, docker
@@ -90,7 +90,7 @@ func (ScheduledReport) TableName() string {
 
 // GeneratedReport records generated report artifacts available for download
 type GeneratedReport struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	Name           string    `json:"name"`
 	Type           string    `json:"type"`
@@ -108,7 +108,7 @@ func (GeneratedReport) TableName() string {
 
 // IncidentStatistic records root causes and resolution stats for incident analytics
 type IncidentStatistic struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	ServerID       string    `json:"server_id"`
 	ServerName     string    `json:"server_name"`
@@ -125,7 +125,7 @@ func (IncidentStatistic) TableName() string {
 
 // PerformanceHistory stores continuous time-series metrics data
 type PerformanceHistory struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	ServerID       string    `gorm:"index" json:"server_id"`
 	Timestamp      time.Time `gorm:"index" json:"timestamp"`
@@ -142,7 +142,7 @@ func (PerformanceHistory) TableName() string {
 
 // ExecutiveDashboardConfig configures tenant executive widget layouts
 type ExecutiveDashboardConfig struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"uniqueIndex" json:"organization_id"`
 	WidgetLayout   string    `gorm:"type:text" json:"widget_layout"`
 	Theme          string    `gorm:"default:'dark'" json:"theme"`

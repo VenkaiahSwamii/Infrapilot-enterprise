@@ -8,7 +8,7 @@ import (
 
 // Trace represents an end-to-end distributed execution context for a request
 type Trace struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID          uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	TraceID     string    `gorm:"index;size:100;not null" json:"trace_id"`
 	Name        string    `gorm:"index;not null" json:"name"` // e.g. POST /api/v1/aiops/analyze
 	ServiceName string    `gorm:"default:'api-server'" json:"service_name"`
@@ -29,7 +29,7 @@ func (Trace) TableName() string {
 
 // Span represents an individual unit of work or operation within a Trace
 type Span struct {
-	ID             uuid.UUID    `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID    `gorm:"type:uuid;primaryKey" json:"id"`
 	TraceID        uuid.UUID    `gorm:"type:uuid;index;not null" json:"trace_id"`
 	SpanID         string       `gorm:"index;size:100;not null" json:"span_id"`
 	ParentSpanID   string       `gorm:"size:100" json:"parent_span_id,omitempty"`
@@ -49,7 +49,7 @@ func (Span) TableName() string {
 
 // TraceEvent represents discrete events or logs emitted within a Span
 type TraceEvent struct {
-	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	SpanID     uuid.UUID `gorm:"type:uuid;index;not null" json:"span_id"`
 	Name       string    `gorm:"not null" json:"name"`
 	FieldsJSON string    `gorm:"type:text" json:"fields_json,omitempty"`

@@ -8,7 +8,7 @@ import (
 
 // APIRequest records every individual HTTP request passing through APM middleware
 type APIRequest struct {
-	ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	TraceID      uuid.UUID `gorm:"type:uuid;index" json:"trace_id,omitempty"`
 	Method       string    `gorm:"size:10;not null;index" json:"method"`
 	Endpoint     string    `gorm:"size:255;not null;index" json:"endpoint"`
@@ -28,7 +28,7 @@ func (APIRequest) TableName() string {
 
 // ServiceMetric holds aggregated APM metrics per microservice
 type ServiceMetric struct {
-	ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	ServiceName  string    `gorm:"size:100;not null;index" json:"service_name"`
 	AvgLatencyMs float64   `gorm:"not null" json:"avg_latency_ms"`
 	P95LatencyMs float64   `gorm:"default:0" json:"p95_latency_ms"`

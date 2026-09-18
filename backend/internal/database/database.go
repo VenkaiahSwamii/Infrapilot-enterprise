@@ -10,6 +10,7 @@ import (
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/search"
 
+	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -30,18 +31,31 @@ func Connect() {
 		"database", cfg.DBName,
 	)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: gormLogger.Default.LogMode(gormLogger.Info),
+	var db *gorm.DB
+	var err error
+
+	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: gormLogger.Default.LogMode(gormLogger.Warn),
 	})
 
 	if err != nil {
-		logger.Fatal("Database connection failed",
+		logger.Warn("PostgreSQL unavailable on port 5432, falling back to local SQLite database (infrapilot.db)...",
 			"error", err,
 		)
+		db, err = gorm.Open(sqlite.Open("infrapilot.db"), &gorm.Config{
+			Logger: gormLogger.Default.LogMode(gormLogger.Warn),
+		})
+		if err != nil {
+			logger.Fatal("Database connection failed",
+				"error", err,
+			)
+		}
+		logger.Info("Successfully connected to local SQLite database (infrapilot.db)")
 	}
 
-	// Pre-create servers table if it doesn't exist
-	if !db.Migrator().HasTable("servers") {
+	if db.Dialector.Name() == "postgres" {
+		// Pre-create servers table if it doesn't exist
+		if !db.Migrator().HasTable("servers") {
 		logger.Info("Creating servers table...")
 		err := db.Exec(`
 			CREATE TABLE servers (
@@ -211,6 +225,7 @@ func Connect() {
 	}
 
 	cleanLegacyUniqueConstraints(db)
+	}
 
 	err = db.AutoMigrate(
 		&models.User{},
@@ -331,8 +346,10 @@ func cleanupDuplicateServers(db *gorm.DB) {
 		return
 	}
 
-	_ = db.Exec("ALTER TABLE servers ALTER COLUMN username DROP NOT NULL").Error
-	_ = db.Exec("ALTER TABLE servers ALTER COLUMN username SET DEFAULT ''").Error
+	if db.Dialector.Name() == "postgres" {
+		_ = db.Exec("ALTER TABLE servers ALTER COLUMN username DROP NOT NULL").Error
+		_ = db.Exec("ALTER TABLE servers ALTER COLUMN username SET DEFAULT ''").Error
+	}
 	_ = db.Exec("UPDATE servers SET username = '' WHERE username IS NULL").Error
 
 	type ServerRow struct {

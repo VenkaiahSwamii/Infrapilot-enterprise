@@ -282,7 +282,8 @@ func (s *ServerService) GetServers() ([]models.ServerSnapshot, error) {
 		return []models.ServerSnapshot{}, nil
 	}
 	var rows []serverWithMetrics
-	if err := database.DB.Raw(`
+	if database.DB.Dialector.Name() == "postgres" {
+		if err := database.DB.Raw(`
 SELECT
 m.*,
 mt.cpu_usage,
@@ -303,7 +304,28 @@ LEFT JOIN LATERAL (
 ) mt ON TRUE
 ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = true THEN 1 ELSE 2 END, m.last_seen DESC NULLS LAST, m.created_at DESC;
 `).Scan(&rows).Error; err != nil {
-		return nil, err
+			return nil, err
+		}
+	} else {
+		if err := database.DB.Raw(`
+SELECT
+m.*,
+mt.cpu_usage,
+mt.memory_usage,
+mt.disk_usage,
+mt.upload_mbps,
+mt.download_mbps,
+mt.uptime,
+mt.cpu_temperature,
+mt.cpu_cores
+FROM servers m
+LEFT JOIN metrics mt ON mt.machine_id = m.id AND mt.id = (
+    SELECT id FROM metrics WHERE metrics.machine_id = m.id ORDER BY created_at DESC LIMIT 1
+)
+ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = 1 THEN 1 ELSE 2 END, m.last_seen DESC, m.created_at DESC;
+`).Scan(&rows).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	result := make([]models.ServerSnapshot, 0, len(rows))

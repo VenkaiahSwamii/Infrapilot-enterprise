@@ -8,7 +8,7 @@ import (
 
 // PolicyRuleRecord defines Attribute-Based Access Control (ABAC) rules
 type PolicyRuleRecord struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	RuleName       string    `gorm:"type:varchar(255);not null" json:"rule_name"`
 	Effect         string    `gorm:"type:varchar(20);default:'ALLOW'" json:"effect"` // ALLOW, DENY
@@ -28,7 +28,7 @@ func (PolicyRuleRecord) TableName() string {
 
 // MFASettingRecord stores user Multi-Factor Authentication TOTP configuration
 type MFASettingRecord struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID          uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	UserID      uuid.UUID `gorm:"type:uuid;uniqueIndex;not null" json:"user_id"`
 	TOTPSecret  string    `gorm:"type:varchar(255)" json:"-"`
 	MFAEnabled  bool      `gorm:"default:false" json:"mfa_enabled"`
@@ -44,7 +44,7 @@ func (MFASettingRecord) TableName() string {
 
 // ImmutableAuditRecord records cryptographically signed audit trail logs
 type ImmutableAuditRecord struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	UserID         string    `gorm:"type:varchar(100);index" json:"user_id"`
 	Username       string    `gorm:"type:varchar(255)" json:"username"`
@@ -65,7 +65,7 @@ func (ImmutableAuditRecord) TableName() string {
 
 // CertificateRecord tracks TLS & Internal CA certificate lifecycles
 type CertificateRecord struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	CommonName     string    `gorm:"type:varchar(255);not null" json:"common_name"`
 	Issuer         string    `gorm:"type:varchar(255)" json:"issuer"`
@@ -84,7 +84,7 @@ func (CertificateRecord) TableName() string {
 
 // ComplianceFrameworkRecord stores ISO 27001, SOC 2, CIS, NIST, HIPAA readiness scores
 type ComplianceFrameworkRecord struct {
-	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID              uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID  string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	FrameworkName   string    `gorm:"type:varchar(100);index" json:"framework_name"` // iso27001, soc2, cis, nist_csf, pci_dss, hipaa
 	ScorePct        float64   `json:"score_pct"`
@@ -101,7 +101,7 @@ func (ComplianceFrameworkRecord) TableName() string {
 
 // SecretVaultRecord handles HashiCorp Vault / Key Vault integration status
 type SecretVaultRecord struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"type:varchar(100);index" json:"organization_id"`
 	Provider       string    `gorm:"type:varchar(50);default:'hashicorp_vault'" json:"provider"` // hashicorp_vault, aws_secrets, azure_keyvault, gcp_secrets
 	VaultURL       string    `gorm:"type:varchar(500)" json:"vault_url"`

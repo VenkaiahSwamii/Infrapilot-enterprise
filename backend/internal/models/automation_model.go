@@ -8,7 +8,7 @@ import (
 
 // AutomationRule defines auto-remediation rules (e.g. IF CPU > 95% for 10m THEN Restart Service)
 type AutomationRule struct {
-	ID               uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID               uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID   string     `gorm:"index" json:"organization_id"`
 	Name             string     `gorm:"not null" json:"name"`
 	Description      string     `json:"description"`
@@ -29,7 +29,7 @@ func (AutomationRule) TableName() string {
 
 // Runbook defines reusable operational procedures (e.g. Restart Nginx, Clear Cache, Rotate Logs)
 type Runbook struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	Name           string    `gorm:"not null" json:"name"`
 	Description    string    `json:"description"`
@@ -48,7 +48,7 @@ func (Runbook) TableName() string {
 
 // AutomationRun tracks an execution instance of a rule or runbook
 type AutomationRun struct {
-	ID             uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string     `gorm:"index" json:"organization_id"`
 	RuleID         *uuid.UUID `gorm:"type:uuid;index" json:"rule_id,omitempty"`
 	RunbookID      *uuid.UUID `gorm:"type:uuid;index" json:"runbook_id,omitempty"`
@@ -69,7 +69,7 @@ func (AutomationRun) TableName() string {
 
 // AutomationHistory maintains audit trail for completed automation executions
 type AutomationHistory struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	RuleName       string    `json:"rule_name"`
 	Trigger        string    `json:"trigger"`
@@ -88,7 +88,7 @@ func (AutomationHistory) TableName() string {
 
 // ApprovalRequest manages pending approval requests for sensitive actions
 type ApprovalRequest struct {
-	ID             uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string     `gorm:"index" json:"organization_id"`
 	RunID          uuid.UUID  `gorm:"type:uuid;index;not null" json:"run_id"`
 	RuleName       string     `json:"rule_name"`
@@ -108,7 +108,7 @@ func (ApprovalRequest) TableName() string {
 
 // NotificationChannel defines webhook/slack/teams/email destinations for automation alerts
 type NotificationChannel struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	Name           string    `json:"name"`
 	Type           string    `json:"type"` // slack, teams, discord, email, webhook

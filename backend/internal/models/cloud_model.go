@@ -8,7 +8,7 @@ import (
 
 // CloudAccount manages connected AWS, Azure, and GCP enterprise cloud accounts
 type CloudAccount struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	Provider       string    `gorm:"index;not null" json:"provider"`   // aws, azure, gcp
 	AccountID      string    `gorm:"index;not null" json:"account_id"` // AWS Account ID, Azure Subscription ID, GCP Project ID
@@ -29,7 +29,7 @@ func (CloudAccount) TableName() string {
 
 // CloudCredential holds encrypted access tokens/keys for cloud APIs
 type CloudCredential struct {
-	ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	AccountID    uuid.UUID `gorm:"type:uuid;index;not null" json:"account_id"`
 	Provider     string    `json:"provider"`
 	AccessKeyEnc string    `json:"-"`
@@ -48,7 +48,7 @@ func (CloudCredential) TableName() string {
 
 // AWSResource stores discovered AWS infrastructure (EC2, EKS, RDS, Lambda, S3, etc.)
 type AWSResource struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	AccountID      uuid.UUID `gorm:"type:uuid;index" json:"account_id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	ResourceID     string    `gorm:"uniqueIndex" json:"resource_id"`
@@ -67,7 +67,7 @@ func (AWSResource) TableName() string {
 
 // AzureResource stores discovered Azure infrastructure (VMs, AKS, Azure SQL, Storage, App Service)
 type AzureResource struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	AccountID      uuid.UUID `gorm:"type:uuid;index" json:"account_id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	ResourceID     string    `gorm:"uniqueIndex" json:"resource_id"`
@@ -87,7 +87,7 @@ func (AzureResource) TableName() string {
 
 // GCPResource stores discovered Google Cloud infrastructure (Compute Engine, GKE, Cloud SQL, Storage, Functions)
 type GCPResource struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	AccountID      uuid.UUID `gorm:"type:uuid;index" json:"account_id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	ResourceID     string    `gorm:"uniqueIndex" json:"resource_id"`
@@ -107,7 +107,7 @@ func (GCPResource) TableName() string {
 
 // CloudCost tracks monthly cost breakdown by provider and category
 type CloudCost struct {
-	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID              uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID  string    `gorm:"index" json:"organization_id"`
 	Provider        string    `gorm:"index" json:"provider"` // aws, azure, gcp
 	Category        string    `json:"category"`              // compute, storage, network, database
@@ -124,7 +124,7 @@ func (CloudCost) TableName() string {
 
 // CloudSecurityFinding records CSPM posture risks (public buckets, open security groups, weak IAM)
 type CloudSecurityFinding struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	Provider       string    `json:"provider"`
 	ResourceID     string    `json:"resource_id"`
@@ -143,7 +143,7 @@ func (CloudSecurityFinding) TableName() string {
 
 // CloudAlert records multi-cloud alert events
 type CloudAlert struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"index" json:"organization_id"`
 	Provider       string    `json:"provider"`
 	ResourceName   string    `json:"resource_name"`
@@ -160,7 +160,7 @@ func (CloudAlert) TableName() string {
 
 // CloudRegion tracks active regions per provider
 type CloudRegion struct {
-	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	Provider   string    `json:"provider"`
 	RegionCode string    `json:"region_code"`
 	RegionName string    `json:"region_name"`
