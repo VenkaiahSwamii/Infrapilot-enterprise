@@ -1,8 +1,11 @@
 import React from 'react';
 import { ShieldCheck, Lock, Key, FileCheck, CheckCircle2, Server } from 'lucide-react';
 import FleetTerminal from '../logs/FleetTerminal.jsx';
+import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
+import { useServerStore } from '../../store/serverStore.jsx';
 
 export default function SecurityTLSPage() {
+  const { selectedServer } = useServerStore();
   const tlsConfig = {
     tls_enabled: true,
     mtls_enabled: true,
@@ -18,20 +21,27 @@ export default function SecurityTLSPage() {
   return (
     <div style={{ padding: '24px 32px', minHeight: '100vh', backgroundColor: '#090d16', color: '#f1f5f9' }}>
       {/* Page Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '24px' }}>
-        <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: 'linear-gradient(135deg, #1d4ed8, #0284c7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <ShieldCheck size={24} color="#ffffff" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: 'linear-gradient(135deg, #1d4ed8, #0284c7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ShieldCheck size={24} color="#ffffff" />
+          </div>
+          <div>
+            <h1 style={{ fontSize: '24px', fontWeight: 800, margin: 0 }}>Security &amp; TLS Configuration</h1>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+              Managed `[tls]` parameters from `config.toml` – Certificate validation, mTLS channel security &amp; agent handshake
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, margin: 0 }}>Security &amp; TLS Configuration</h1>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
-            Managed `[tls]` parameters from `config.toml` – Certificate validation, mTLS channel security &amp; agent handshake
-          </p>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>TARGET NODE:</label>
+          <ServerSelectDropdown />
         </div>
       </div>
 
       {/* Live System & Service Log Terminal */}
-      <FleetTerminal machineName="TLS SECURITY AUDIT STREAM" />
+      <FleetTerminal machine={selectedServer} />
 
       {/* KPI Cards Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>

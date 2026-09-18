@@ -26,10 +26,45 @@ export function ServerStoreProvider({ children }) {
   const [servers, setServers] = useState([]);
   const [liveMetricsMap, setLiveMetricsMap] = useState({});
   const [telemetryHistoryMap, setTelemetryHistoryMap] = useState({});
+  const [selectedServerId, setSelectedServerId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const lastUpdatedRef = useRef({});
+
+  // Auto-select first active or online server if no selection
+  useEffect(() => {
+    if (servers.length > 0) {
+      const exists = servers.some((s) => {
+        const sId = String(s.id || s.ID || s.machine_id || '').toLowerCase();
+        const curId = String(selectedServerId).toLowerCase();
+        return sId === curId || getMachineId(s).toLowerCase() === curId;
+      });
+
+      if (!selectedServerId || !exists) {
+        const onlineServer = servers.find((s) => {
+          const st = String(s.status || s.Status || '').toUpperCase();
+          return st === 'ONLINE' || s.online === true;
+        });
+        const defaultServer = onlineServer || servers[0];
+        const defaultId = defaultServer.id || defaultServer.ID || getMachineId(defaultServer);
+        setSelectedServerId(String(defaultId));
+      }
+    }
+  }, [servers, selectedServerId]);
+
+  // Derived selected server object
+  const selectedServer = React.useMemo(() => {
+    if (!servers || servers.length === 0) return null;
+    if (!selectedServerId) return servers[0] || null;
+    const curId = String(selectedServerId).toLowerCase();
+    return (
+      servers.find((s) => {
+        const sId = String(s.id || s.ID || s.machine_id || '').toLowerCase();
+        return sId === curId || getMachineId(s).toLowerCase() === curId || String(s.hostname || '').toLowerCase() === curId;
+      }) || servers[0] || null
+    );
+  }, [servers, selectedServerId]);
 
   // Fetch real servers strictly from backend DB
   const fetchServers = useCallback(async () => {
@@ -187,6 +222,9 @@ export function ServerStoreProvider({ children }) {
         telemetryHistoryMap,
         loading,
         error,
+        selectedServerId,
+        setSelectedServerId,
+        selectedServer,
         fetchServers,
         updateServerMetrics,
       }}

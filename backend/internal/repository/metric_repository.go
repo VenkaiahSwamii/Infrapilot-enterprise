@@ -41,17 +41,24 @@ func (r *MetricRepository) FindLatestByMachineIDs(machineIDs []uuid.UUID) (map[u
 	}
 
 	var metrics []models.Metric
-	err := database.DB.Raw(`
-		SELECT DISTINCT ON (machine_id) *
-		FROM metrics
-		WHERE machine_id IN ?
-		ORDER BY machine_id, created_at DESC, id DESC
-	`, machineIDs).Scan(&metrics).Error
+	var err error
+	if database.DB.Dialector.Name() == "postgres" {
+		err = database.DB.Raw(`
+			SELECT DISTINCT ON (machine_id) *
+			FROM metrics
+			WHERE machine_id IN ?
+			ORDER BY machine_id, created_at DESC, id DESC
+		`, machineIDs).Scan(&metrics).Error
+	} else {
+		err = database.DB.Where("machine_id IN ?", machineIDs).Order("created_at DESC, id DESC").Find(&metrics).Error
+	}
 	if err != nil {
 		return nil, err
 	}
 	for _, metric := range metrics {
-		result[metric.MachineID] = metric
+		if _, exists := result[metric.MachineID]; !exists {
+			result[metric.MachineID] = metric
+		}
 	}
 	return result, nil
 }
@@ -62,17 +69,24 @@ func (r *MetricRepository) FindLatestRichByMachineIDs(machineIDs []uuid.UUID) (m
 		return result, nil
 	}
 	var metrics []models.LinuxMetric
-	err := database.DB.Raw(`
-		SELECT DISTINCT ON (machine_id) *
-		FROM linux_metrics
-		WHERE machine_id IN ?
-		ORDER BY machine_id, sampled_at DESC, id DESC
-	`, machineIDs).Scan(&metrics).Error
+	var err error
+	if database.DB.Dialector.Name() == "postgres" {
+		err = database.DB.Raw(`
+			SELECT DISTINCT ON (machine_id) *
+			FROM linux_metrics
+			WHERE machine_id IN ?
+			ORDER BY machine_id, sampled_at DESC, id DESC
+		`, machineIDs).Scan(&metrics).Error
+	} else {
+		err = database.DB.Where("machine_id IN ?", machineIDs).Order("sampled_at DESC, id DESC").Find(&metrics).Error
+	}
 	if err != nil {
 		return nil, err
 	}
 	for _, metric := range metrics {
-		result[metric.MachineID] = metric
+		if _, exists := result[metric.MachineID]; !exists {
+			result[metric.MachineID] = metric
+		}
 	}
 	return result, nil
 }

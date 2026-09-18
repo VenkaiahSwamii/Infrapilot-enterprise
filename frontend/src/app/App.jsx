@@ -79,8 +79,7 @@ export default function App() {
                 <Route path="reports" element={<Reports />} />
                 <Route path="agents" element={<AgentsPage />} />
                 <Route path="sre" element={<SREOperationsPage />} />
-                <Route path="sre-operations" element={<SREOperationsPage />} />
-                <Route path="terminal" element={<TerminalPage />} />
+                <Route path="cli" element={<TerminalPage />} />
                 <Route path="settings" element={<SettingsPage />} />
 
                 {/* Administration Section */}

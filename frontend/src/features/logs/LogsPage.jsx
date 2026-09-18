@@ -1,39 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Server, RefreshCw } from 'lucide-react';
+import React from 'react';
+import { FileText, RefreshCw } from 'lucide-react';
 import LogsTab from '../machines/tabs/LogsTab.jsx';
-import { listServers } from '../../api/server.js';
+import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
+import { useServerStore } from '../../store/serverStore.jsx';
 
 export default function LogsPage() {
-  const [servers, setServers] = useState([]);
-  const [selectedServer, setSelectedServer] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { selectedServer, servers, loading } = useServerStore();
 
-  useEffect(() => {
-    listServers()
-      .then((data) => {
-        const list = Array.isArray(data) ? data : [];
-        setServers(list);
-        if (list.length > 0) {
-          setSelectedServer(list[0]);
-        } else {
-          // Synthetic default host if no machines registered yet
-          setSelectedServer({
-            id: 'default',
-            hostname: 'local-node-01',
-            status: 'ONLINE',
-          });
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to load servers for LogsPage:', err);
-        setSelectedServer({
-          id: 'default',
-          hostname: 'local-node-01',
-          status: 'ONLINE',
-        });
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const activeServer = selectedServer || (servers.length > 0 ? servers[0] : {
+    id: 'default',
+    hostname: 'local-node-01',
+    status: 'ONLINE',
+  });
 
   return (
     <div style={{ padding: '24px 32px', minHeight: '100vh', backgroundColor: '#090d16', color: '#f1f5f9' }}>
@@ -49,6 +27,7 @@ export default function LogsPage() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
             }}
           >
             <FileText size={22} color="#ffffff" />
@@ -61,43 +40,24 @@ export default function LogsPage() {
           </div>
         </div>
 
-        {/* Server Selector */}
-        {servers.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Server size={16} color="#94a3b8" />
-            <select
-              value={selectedServer?.id || ''}
-              onChange={(e) => {
-                const s = servers.find((item) => String(item.id) === e.target.value);
-                if (s) setSelectedServer(s);
-              }}
-              style={{
-                background: '#0f172a',
-                color: '#f8fafc',
-                border: '1px solid #1e293b',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                fontSize: '13px',
-                cursor: 'pointer',
-              }}
-            >
-              {servers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.hostname || s.name || s.id} ({s.status || 'ONLINE'})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        {/* Universal Server Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>SELECTED HOST:</label>
+          <ServerSelectDropdown />
+        </div>
       </div>
 
       {/* Render LogsTab for the selected host */}
-      {selectedServer ? (
-        <LogsTab machine={selectedServer} />
-      ) : (
+      {activeServer ? (
+        <LogsTab machine={activeServer} />
+      ) : loading ? (
         <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
           <RefreshCw className="spin" size={24} style={{ marginBottom: '12px' }} />
           <div>Loading fleet telemetry streams...</div>
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
+          <div>No active machines available. Please enroll or connect an agent.</div>
         </div>
       )}
     </div>

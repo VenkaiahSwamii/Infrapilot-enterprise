@@ -35,11 +35,15 @@ func GetStats(c *gin.Context) {
 
 	dockerContainers := 0
 	var dockerRecords []models.LinuxDocker
-	database.DB.Raw(`
-		SELECT DISTINCT ON (machine_id) * 
-		FROM linux_dockers 
-		ORDER BY machine_id, sampled_at DESC
-	`).Scan(&dockerRecords)
+	if database.DB.Dialector.Name() == "postgres" {
+		database.DB.Raw(`
+			SELECT DISTINCT ON (machine_id) * 
+			FROM linux_dockers 
+			ORDER BY machine_id, sampled_at DESC
+		`).Scan(&dockerRecords)
+	} else {
+		database.DB.Order("sampled_at DESC").Find(&dockerRecords)
+	}
 	for _, record := range dockerRecords {
 		var containers []interface{}
 		if record.ContainersJSON != "" {
@@ -51,11 +55,15 @@ func GetStats(c *gin.Context) {
 
 	kubernetesPods := 0
 	var k8sRecords []models.LinuxKubernetes
-	database.DB.Raw(`
-		SELECT DISTINCT ON (machine_id) * 
-		FROM linux_kubernetes 
-		ORDER BY machine_id, sampled_at DESC
-	`).Scan(&k8sRecords)
+	if database.DB.Dialector.Name() == "postgres" {
+		database.DB.Raw(`
+			SELECT DISTINCT ON (machine_id) * 
+			FROM linux_kubernetes 
+			ORDER BY machine_id, sampled_at DESC
+		`).Scan(&k8sRecords)
+	} else {
+		database.DB.Order("sampled_at DESC").Find(&k8sRecords)
+	}
 	for _, record := range k8sRecords {
 		var pods []interface{}
 		if record.PodsJSON != "" {
@@ -97,8 +105,9 @@ func GetHealthScore(c *gin.Context) {
 	score -= offlineCount * 5 // Deduct 5 per offline machine
 
 	var latestMetrics []models.Metric
-
-	err := database.DB.Raw(`
+	var err error
+	if database.DB.Dialector.Name() == "postgres" {
+		err = database.DB.Raw(`
 SELECT DISTINCT ON (machine_id)
        machine_id,
        cpu_usage,
@@ -116,6 +125,9 @@ SELECT DISTINCT ON (machine_id)
 FROM metrics
 ORDER BY machine_id, created_at DESC
 `).Scan(&latestMetrics).Error
+	} else {
+		err = database.DB.Order("created_at DESC").Find(&latestMetrics).Error
+	}
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
