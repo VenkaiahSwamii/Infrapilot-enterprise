@@ -7,14 +7,14 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    strictPort: true,
+    strictPort: false,
     proxy: {
       '/api': {
-        target: 'http://192.168.1.2:8080',
+        target: process.env.VITE_BACKEND_URL || 'http://localhost:8080',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://192.168.1.2:8080',
+        target: process.env.VITE_WS_URL || 'ws://localhost:8080',
         ws: true,
         changeOrigin: true,
       },

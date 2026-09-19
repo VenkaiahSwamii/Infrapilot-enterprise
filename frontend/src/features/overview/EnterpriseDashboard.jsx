@@ -171,6 +171,21 @@ export default function EnterpriseDashboard() {
     }
   };
 
+  const handleReSyncFleet = async () => {
+    try {
+      await apiClient.post('/agent/resync-fleet');
+      if (addToast) {
+        addToast({
+          type: 'success',
+          title: 'Fleet Re-Sync Broadcasted',
+          message: 'UDP LAN auto-discovery broadcast sent to all agents.',
+        });
+      }
+    } catch {
+      // fallback
+    }
+  };
+
   const handleDownloadAgent = () => {
     if (addToast) {
       addToast({
@@ -736,11 +751,7 @@ export default function EnterpriseDashboard() {
               <span>Flap Protection: <strong style={{ color: '#4ade80' }}>ACTIVE</strong></span>
             </div>
             <div className="sre-pill">
-              <Activity size={13} color="#a855f7" />
-              <span>Correlation Engine: <strong style={{ color: '#c084fc' }}>CROSS-COMPONENT</strong></span>
-            </div>
-            <div className="sre-pill">
-              <Cpu size={13} color="#f59e0b" />
+              <Zap size={13} color="#f59e0b" />
               <span>P95 Probe Latency: <strong style={{ color: '#fcd34d' }}>38ms</strong></span>
             </div>
             <div className="sre-pill">
@@ -751,6 +762,15 @@ export default function EnterpriseDashboard() {
         </div>
 
         <div className="sre-banner-actions">
+          <button
+            className="sre-btn reset-btn"
+            onClick={handleReSyncFleet}
+            title="Re-sync all enrolled agent targets over-the-air to current server IP"
+            type="button"
+          >
+            <RefreshCw size={13} />
+            <span>Re-Sync Fleet IP</span>
+          </button>
           <button
             className="sre-btn reset-btn"
             onClick={handleResetFlapStatus}

@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -145,13 +146,18 @@ func RunAPI() error {
 	router.GET("/livez", observability.LivenessHandler)
 	router.GET("/metrics", observability.MetricsHandler)
 
-	// Robustly locate InfraPilot-Release directory across all working directories
+	// Robustly locate InfraPilot-Release, scripts, and installer directories
 	releaseCandidates := []string{
 		"../InfraPilot-Release",
 		"./InfraPilot-Release",
 		"../../InfraPilot-Release",
 		"d:/InfraPilot-Enterprise/InfraPilot-Release",
 		"D:\\InfraPilot-Enterprise\\InfraPilot-Release",
+		"./scripts",
+		"./installer",
+		"../scripts",
+		"../installer",
+		".",
 	}
 	activeReleaseDir := "../InfraPilot-Release"
 	for _, cand := range releaseCandidates {
@@ -169,7 +175,7 @@ func RunAPI() error {
 			}
 			host := c.Request.Host
 			if host == "" {
-				host = "localhost:8080"
+				host = "192.168.1.2:8080"
 			}
 			serverParam = fmt.Sprintf("%s://%s", scheme, host)
 		}
@@ -182,6 +188,7 @@ func RunAPI() error {
 				if err == nil {
 					contentStr := string(contentBytes)
 					// Dynamically template backend URL so piped one-liners execute immediately with target server
+					contentStr = strings.ReplaceAll(contentStr, "http://192.168.1.2:8080", serverParam)
 					contentStr = strings.ReplaceAll(contentStr, "http://localhost:8080", serverParam)
 					c.Header("Content-Type", "text/plain; charset=utf-8")
 					c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -194,16 +201,30 @@ func RunAPI() error {
 	}
 
 	// Dynamic script delivery endpoints
-	router.GET("/api/v1/install.ps1", func(c *gin.Context) { serveDownloadScript(c, "install.ps1") })
-	router.GET("/api/v1/install.sh", func(c *gin.Context) { serveDownloadScript(c, "install.sh") })
-	router.GET("/api/v1/agent/install.ps1", func(c *gin.Context) { serveDownloadScript(c, "install.ps1") })
-	router.GET("/api/v1/agent/install.sh", func(c *gin.Context) { serveDownloadScript(c, "install.sh") })
+	router.GET("/api/v1/install.ps1", func(c *gin.Context) { serveDownloadScript(c, "agent-install.ps1") })
+	router.GET("/api/v1/install.sh", func(c *gin.Context) { serveDownloadScript(c, "agent-install.sh") })
+	router.GET("/api/v1/agent/install.ps1", func(c *gin.Context) { serveDownloadScript(c, "agent-install.ps1") })
+	router.GET("/api/v1/agent/install.sh", func(c *gin.Context) { serveDownloadScript(c, "agent-install.sh") })
 
 	handleDownload := func(c *gin.Context) {
 		relPath := strings.TrimPrefix(c.Param("filepath"), "/")
-		if relPath == "install.ps1" || relPath == "install.sh" {
-			serveDownloadScript(c, relPath)
+		if relPath == "install.ps1" || relPath == "agent-install.ps1" {
+			serveDownloadScript(c, "agent-install.ps1")
 			return
+		}
+		if relPath == "install.sh" || relPath == "agent-install.sh" {
+			serveDownloadScript(c, "agent-install.sh")
+			return
+		}
+		if relPath == "ca.crt" {
+			certPaths := []string{"certs/ca.crt", "../certs/ca.crt", "./certs/ca.crt"}
+			for _, cp := range certPaths {
+				if stat, err := os.Stat(cp); err == nil && !stat.IsDir() {
+					c.Header("Content-Type", "application/x-x509-ca-cert")
+					c.File(cp)
+					return
+				}
+			}
 		}
 		for _, cand := range releaseCandidates {
 			fullPath := filepath.Join(cand, relPath)
@@ -223,6 +244,9 @@ func RunAPI() error {
 	logger.Info("Serving agent binary downloads", "dir", activeReleaseDir)
 
 	routes.Setup(router, hub, EventBus)
+
+	// Start UDP Auto-Discovery Service for self-healing agent reconnects
+	go startUDPDiscoveryListener()
 
 	// Start enterprise mTLS gRPC Transport Security Server
 	grpcPort := 50051
@@ -346,4 +370,51 @@ func parseLogLevel(level string) logger.Level {
 	default:
 		return logger.INFO
 	}
+}
+
+func startUDPDiscoveryListener() {
+	addr, err := net.ResolveUDPAddr("udp4", ":50052")
+	if err != nil {
+		logger.Error("Failed to resolve UDP discovery address", "error", err)
+		return
+	}
+
+	conn, err := net.ListenUDP("udp4", addr)
+	if err != nil {
+		logger.Error("Failed to start UDP discovery listener", "error", err)
+		return
+	}
+	defer conn.Close()
+
+	logger.Info("InfraPilot LAN UDP Auto-Discovery Service active", "port", 50052)
+
+	buf := make([]byte, 1024)
+	for {
+		n, remoteAddr, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			continue
+		}
+
+		reqStr := strings.TrimSpace(string(buf[:n]))
+		if reqStr == "INFRAPILOT_DISCOVERY_PING" {
+			hostIP := getPrimaryHostIP()
+			respStr := fmt.Sprintf("INFRAPILOT_DISCOVERY_PONG:http://%s:8080", hostIP)
+			_, _ = conn.WriteToUDP([]byte(respStr), remoteAddr)
+			logger.Info("Responded to agent UDP auto-discovery ping", "agent_addr", remoteAddr.String(), "served_ip", hostIP)
+		}
+	}
+}
+
+func getPrimaryHostIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, address := range addrs {
+			if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				if ipnet.IP.To4() != nil {
+					return ipnet.IP.String()
+				}
+			}
+		}
+	}
+	return "192.168.1.86"
 }

@@ -128,8 +128,8 @@ export default function AgentsPage() {
     }
   };
 
-  const snippetLinux = `curl -sSL ${installUrlRemote}/downloads/install.sh | bash -s ${installUrlRemote}`;
-  const snippetWindows = `irm ${installUrl}/downloads/install.ps1 | iex`;
+  const snippetLinux = `curl -fsSL ${installUrlRemote}/api/v1/agent/install.sh | sudo bash`;
+  const snippetWindows = `iwr -useb ${installUrlRemote}/api/v1/agent/install.ps1 | iex`;
   const snippetDocker = `docker run -d --name infrapilot-agent --restart always --net=host -e BACKEND_URL=${installUrlRemote} infrapilot/agent:latest`;
 
   const copyDeploySnippet = (text) => {
