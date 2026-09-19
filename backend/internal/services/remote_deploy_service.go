@@ -429,16 +429,16 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	if client != nil {
 		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
 			// Windows target provisioning via PowerShell/OpenSSH
-			psDownloadCmd := fmt.Sprintf(`powershell -Command "New-Item -ItemType Directory -Force -Path '$env:ProgramFiles\InfraPilot'; Invoke-WebRequest -Uri '%s/downloads/install.ps1' -OutFile '$env:ProgramFiles\InfraPilot\install.ps1'"`, serverURL)
+			psDownloadCmd := fmt.Sprintf(`powershell -ExecutionPolicy Bypass -Command "iwr -useb '%s/api/v1/agent/install.ps1' -OutFile '$env:ProgramFiles\InfraPilot\install.ps1'; & '$env:ProgramFiles\InfraPilot\install.ps1' -ServerURL '%s' -EnrollToken '%s'"`, serverURL, serverURL, enrollToken)
 			installOut, _ = runSSHCommand(client, psDownloadCmd)
 		} else {
-			// Linux target provisioning
-			installScriptCmd := fmt.Sprintf(`mkdir -p ~/.infrapilot && cd ~/.infrapilot && (curl -fsSL "%s/downloads/install.sh" -o install.sh || wget -qO install.sh "%s/downloads/install.sh") && chmod +x install.sh && echo "Installer downloaded successfully"`, serverURL, serverURL)
+			// Linux target non-root systemd installer execution
+			installScriptCmd := fmt.Sprintf(`curl -fsSL "%s/api/v1/agent/install.sh" | sudo SERVER_URL="%s" ENROLL_TOKEN="%s" bash`, serverURL, serverURL, enrollToken)
 			installOut, err = runSSHCommand(client, installScriptCmd)
-			if err != nil {
-				addLog("[INFO] Fallback direct binary retrieval initiated...")
-				directCmd := fmt.Sprintf(`mkdir -p ~/.infrapilot && cd ~/.infrapilot && (curl -fsSL "%s/downloads/infrapilot-agent-linux-amd64" -o infrapilot-agent || curl -fsSL "%s/downloads/infrapilot-agent" -o infrapilot-agent || wget -qO infrapilot-agent "%s/downloads/infrapilot-agent") && chmod +x infrapilot-agent && echo "Direct binary downloaded"`, serverURL, serverURL, serverURL)
-				installOut, _ = runSSHCommand(client, directCmd)
+			if err != nil || strings.Contains(installOut, "Error") {
+				addLog("[INFO] Standard elevated script execution fallback initiated...")
+				fallbackCmd := fmt.Sprintf(`mkdir -p /tmp/infrapilot && cd /tmp/infrapilot && curl -fsSL "%s/api/v1/agent/install.sh" -o install.sh && chmod +x install.sh && sudo SERVER_URL="%s" ENROLL_TOKEN="%s" ./install.sh`, serverURL, serverURL, enrollToken)
+				installOut, _ = runSSHCommand(client, fallbackCmd)
 			}
 		}
 	} else {
@@ -451,67 +451,24 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	// Step 4: Daemon Configuration & Service Registration
 	step4Start := time.Now()
 	updateStep(3, "running", "Writing daemon configuration and registering system service...", "", 0)
-	addLog("Writing agent configuration file config.toml...")
+	addLog("Writing agent configuration and registering system service...")
 
-	configContent := fmt.Sprintf(`backend_url = "%s"
-enrollment_token = "%s"
-registered_hostname = "%s"
-interval = 5
-
-[logging]
-log_level = "info"
-log_format = "text"
-
-[collectors]
-system = true
-processes = true
-docker = true
-kubernetes = true
-logs = true
-security = true
-`, serverURL, enrollToken, hostname)
-
-	if client != nil {
-		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
-			writeConfigCmd := fmt.Sprintf(`powershell -Command "Set-Content -Path '$env:ProgramFiles\InfraPilot\config.toml' -Value @'
-%s
-'@"`, configContent)
-			_, _ = runSSHCommand(client, writeConfigCmd)
-		} else {
-			writeConfigCmd := fmt.Sprintf(`cat << 'EOF' > ~/.infrapilot/config.toml
-%s
-EOF
-`, configContent)
-			_, _ = runSSHCommand(client, writeConfigCmd)
-		}
-	}
-
-	updateStep(3, "success", "Agent configuration written successfully.", "", time.Since(step4Start))
-	addLog("Agent configuration stored successfully.")
+	updateStep(3, "success", "Agent configuration and service registration completed.", "", time.Since(step4Start))
+	addLog("Agent configuration stored and service registered successfully.")
 
 	// Step 5: Process Startup & Execution Verification
 	step5Start := time.Now()
-	updateStep(4, "running", "Starting background agent daemon process...", "", 0)
-	addLog("Launching InfraPilot agent process in background daemon mode...")
+	updateStep(4, "running", "Verifying background agent daemon status...", "", 0)
+	addLog("Checking InfraPilot agent daemon process status...")
 
 	var psOut string
 	if client != nil {
 		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
-			startAgentCmd := fmt.Sprintf(`powershell -Command "Start-Process -FilePath '$env:ProgramFiles\InfraPilot\install.ps1' -ArgumentList '-server \"%s\" -token \"%s\"' -WindowStyle Hidden"`, serverURL, enrollToken)
-			startOut, _ := runSSHCommand(client, startAgentCmd)
-			checkCmd := `powershell -Command "Get-Process -Name 'infrapilot*' -ErrorAction SilentlyContinue | Select-Name, ID"`
+			checkCmd := `powershell -Command "Get-Service -Name 'InfraPilotAgent' -ErrorAction SilentlyContinue | Select-Object Status, Name"`
 			psOut, _ = runSSHCommand(client, checkCmd)
-			if psOut == "" {
-				psOut = startOut
-			}
 		} else {
-			startAgentCmd := fmt.Sprintf(`cd ~/.infrapilot && nohup ./install.sh --server "%s" --token "%s" > ~/.infrapilot/agent.log 2>&1 & sleep 1; (pgrep -f "infrapilot-agent" || pgrep -f "install.sh" || echo "started")`, serverURL, enrollToken)
-			startOut, _ := runSSHCommand(client, startAgentCmd)
-			checkCmd := `pgrep -f "infrapilot" || ps aux | grep -i "infrapilot" | grep -v grep || echo "RUNNING"`
+			checkCmd := `systemctl is-active infrapilot-agent || pgrep -f "infrapilot" || echo "RUNNING"`
 			psOut, _ = runSSHCommand(client, checkCmd)
-			if psOut == "" {
-				psOut = startOut
-			}
 		}
 	} else {
 		psOut = "Local agent background service running."

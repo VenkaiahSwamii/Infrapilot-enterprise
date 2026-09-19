@@ -12,6 +12,7 @@ import (
 	logscollector "infrapilot/agent/internal/collector/logs"
 	"infrapilot/agent/internal/commands"
 	"infrapilot/agent/internal/config"
+	"infrapilot/agent/internal/discovery"
 	"infrapilot/agent/internal/heartbeat"
 	"infrapilot/agent/internal/reconnect"
 	"infrapilot/agent/internal/register"
@@ -151,13 +152,25 @@ func RunAgent() {
 	// API key rotation poller
 	go commands.PollKeyRotation(cfg.Server, cfg.MachineID, cfg.APIKey, store)
 
-	// Heartbeat loop with reconnection
+	// Heartbeat loop with reconnection and UDP auto-discovery
 	go func() {
+		consecutiveFailures := 0
 		reconnect.ExecuteWithBackoff(nil, reconnect.DefaultRetryStrategy(), "Heartbeat")
 		for {
 			err := heartbeat.Send(cfg.Server, cfg.MachineID, cfg.APIKey)
 			if err != nil {
-				log.Printf("Heartbeat Error: %v", err)
+				consecutiveFailures++
+				log.Printf("Heartbeat Error (Failure %d): %v", consecutiveFailures, err)
+				if consecutiveFailures >= 2 {
+					newURL := discovery.DiscoverServerURL(config.DefaultConfigPath(), cfg.Server)
+					if newURL != "" {
+						cfg.Server = newURL
+						consecutiveFailures = 0
+						log.Printf("[AutoDiscovery] Switched agent active server URL to: %s", cfg.Server)
+					}
+				}
+			} else {
+				consecutiveFailures = 0
 			}
 			time.Sleep(time.Duration(cfg.HeartbeatInterval) * time.Second)
 		}

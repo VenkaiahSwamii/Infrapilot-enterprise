@@ -106,6 +106,10 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 		// Dynamic Public Config route (single source of truth from config.toml)
 		api.GET("/config/public", configHandler.GetPublicConfig)
 
+		// Fleet Re-Sync endpoints
+		api.POST("/agent/resync-fleet", serverHandler.ReSyncFleet)
+		api.POST("/fleet/resync", serverHandler.ReSyncFleet)
+
 		// Platform Self-Monitoring public health routes
 		api.GET("/platform/health", platformHandler.GetHealth)
 		api.GET("/platform/metrics", platformHandler.GetMetrics)

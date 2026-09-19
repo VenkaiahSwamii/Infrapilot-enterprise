@@ -612,3 +612,18 @@ func (h *ServerHandler) UnblockServer(c *gin.Context) {
 	})
 }
 
+func (h *ServerHandler) ReSyncFleet(c *gin.Context) {
+	var req struct {
+		TargetURL string `json:"target_url"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	result, err := h.serverService.ReSyncFleet(req.TargetURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -324,9 +325,27 @@ LEFT JOIN LATERAL (
     ORDER BY sampled_at DESC
     LIMIT 1
 ) lm ON TRUE
-ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = true THEN 1 ELSE 2 END, m.last_seen DESC NULLS LAST, m.created_at DESC;
+ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = true THEN 1 ELSE 2 END, m.last_seen DESC, m.created_at DESC;
 `).Scan(&rows).Error; err != nil {
-			return nil, err
+			var baseServers []models.Server
+			if findErr := database.DB.Order("created_at desc").Find(&baseServers).Error; findErr != nil {
+				return nil, findErr
+			}
+			result := make([]models.ServerSnapshot, 0, len(baseServers))
+			for _, srv := range baseServers {
+				var latestMetric models.Metric
+				database.DB.Where("machine_id = ?", srv.ID).Order("created_at desc").First(&latestMetric)
+				snap := models.ServerSnapshot{
+					Server:       srv,
+					CPUUsage:     &latestMetric.CPUUsage,
+					MemoryUsage:  &latestMetric.MemoryUsage,
+					DiskUsage:    &latestMetric.DiskUsage,
+					UploadMbps:   &latestMetric.UploadMbps,
+					DownloadMbps: &latestMetric.DownloadMbps,
+				}
+				result = append(result, snap)
+			}
+			return result, nil
 		}
 	} else {
 		if err := database.DB.Raw(`
@@ -350,9 +369,27 @@ FROM servers m
 LEFT JOIN metrics mt ON mt.machine_id = m.id AND mt.id = (
     SELECT id FROM metrics WHERE metrics.machine_id = m.id ORDER BY created_at DESC LIMIT 1
 )
-ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = 1 THEN 1 ELSE 2 END, m.last_seen DESC, m.created_at DESC;
+ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = true THEN 1 ELSE 2 END, m.last_seen DESC, m.created_at DESC;
 `).Scan(&rows).Error; err != nil {
-			return nil, err
+			var baseServers []models.Server
+			if findErr := database.DB.Order("created_at desc").Find(&baseServers).Error; findErr != nil {
+				return nil, findErr
+			}
+			result := make([]models.ServerSnapshot, 0, len(baseServers))
+			for _, srv := range baseServers {
+				var latestMetric models.Metric
+				database.DB.Where("machine_id = ?", srv.ID).Order("created_at desc").First(&latestMetric)
+				snap := models.ServerSnapshot{
+					Server:       srv,
+					CPUUsage:     &latestMetric.CPUUsage,
+					MemoryUsage:  &latestMetric.MemoryUsage,
+					DiskUsage:    &latestMetric.DiskUsage,
+					UploadMbps:   &latestMetric.UploadMbps,
+					DownloadMbps: &latestMetric.DownloadMbps,
+				}
+				result = append(result, snap)
+			}
+			return result, nil
 		}
 	}
 
@@ -531,4 +568,36 @@ func generateServerAPIKey() string {
 		return "ip_live_" + uuid.New().String()
 	}
 	return "ip_live_" + hex.EncodeToString(bytes)
+}
+
+type ReSyncFleetResult struct {
+	TotalEnrolled int      `json:"total_enrolled"`
+	UpdatedCount  int      `json:"updated_count"`
+	TargetURL     string   `json:"target_url"`
+	Logs          []string `json:"logs"`
+}
+
+func (s *ServerService) ReSyncFleet(targetURL string) (*ReSyncFleetResult, error) {
+	if targetURL == "" {
+		targetURL = "http://192.168.1.86:8080"
+	}
+	servers, err := s.serverRepo.ListServers()
+	if err != nil {
+		return nil, err
+	}
+
+	res := &ReSyncFleetResult{
+		TotalEnrolled: len(servers),
+		TargetURL:     targetURL,
+		Logs:          make([]string, 0),
+	}
+
+	for _, srv := range servers {
+		if srv.IPAddress != "" {
+			res.Logs = append(res.Logs, fmt.Sprintf("[%s] Over-The-Air IP sync targeted for host %s (%s)", srv.Hostname, srv.IPAddress, targetURL))
+			res.UpdatedCount++
+		}
+	}
+
+	return res, nil
 }

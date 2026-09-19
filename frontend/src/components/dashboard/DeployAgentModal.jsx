@@ -241,12 +241,12 @@ export default function DeployAgentModal({ isOpen, onClose, onDeployed }) {
       title: 'Linux (Ubuntu, Debian, RHEL, CentOS, Rocky, Fedora)',
       icon: Terminal,
       color: '#22c55e',
-      description: 'Single-line automated native installer (No Docker, No Sudo required).',
-      command: `curl -fsSL ${serverUrl}/downloads/install.sh | bash -s -- --server "${serverUrl}" --token "${currentToken}"`,
+      description: 'Single-line automated non-root systemd installer script.',
+      command: `curl -fsSL ${serverUrl}/api/v1/agent/install.sh | sudo SERVER_URL="${serverUrl}" ENROLL_TOKEN="${currentToken}" bash`,
       steps: [
-        'Run the one-line installer command in any standard user shell (no sudo required).',
-        'Downloads the compiled native binary into ~/.infrapilot (or /opt/infrapilot if root).',
-        'Starts as a background daemon or systemd user service with automatic auto-restart.',
+        'Run the 1-line installer command with sudo to set up the dedicated infrapilot non-root service user.',
+        'Downloads the compiled binary to /usr/local/bin/infrapilot-agent and TLS ca.crt to /etc/infrapilot/certs/.',
+        'Registers and launches the systemd daemon (User=infrapilot) with automatic auto-restart.',
       ],
     },
     windows: {
@@ -254,11 +254,11 @@ export default function DeployAgentModal({ isOpen, onClose, onDeployed }) {
       icon: Monitor,
       color: '#38bdf8',
       description: 'Automated PowerShell script installing the Windows Background Service.',
-      command: `irm ${serverUrl}/downloads/install.ps1 | iex`,
+      command: `iwr -useb ${serverUrl}/api/v1/agent/install.ps1 | iex`,
       steps: [
         'Open PowerShell as Administrator.',
-        'Paste and execute the bootstrap script.',
-        'InfraPilot Windows Service will register and immediately begin telemetry heartbeat.',
+        'Paste and execute the 1-line bootstrap script.',
+        'InfraPilot Windows Service (InfraPilotAgent) will register under LocalService and begin telemetry heartbeat.',
       ],
     },
   };
