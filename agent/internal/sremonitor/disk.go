@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -174,9 +175,17 @@ func (d *DiskMonitor) Check() (bool, error) {
 
 		for _, path := range filesToDelete {
 			denied := false
-			lower := strings.ToLower(path)
+			baseName := strings.ToLower(filepath.Base(path))
+			normalizedPath := strings.ToLower(filepath.ToSlash(path))
+
 			for _, denyWord := range d.config.DiskDenyList {
-				if denyWord != "" && strings.Contains(lower, strings.ToLower(denyWord)) {
+				if denyWord == "" {
+					continue
+				}
+				dLower := strings.ToLower(denyWord)
+				if strings.Contains(baseName, dLower) ||
+					strings.Contains(normalizedPath, "/"+dLower+"/") ||
+					strings.HasSuffix(normalizedPath, "/"+dLower) {
 					denied = true
 					break
 				}

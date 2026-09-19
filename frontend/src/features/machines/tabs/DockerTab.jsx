@@ -25,7 +25,9 @@ import {
   ChevronRight,
   ShieldCheck,
   Zap,
-  Filter
+  Filter,
+  Plus,
+  DownloadCloud
 } from 'lucide-react';
 import { 
   getDockerOverview, 
@@ -38,7 +40,10 @@ import {
   startContainer,
   stopContainer,
   restartContainer,
-  removeContainer
+  removeContainer,
+  runContainer,
+  pullImage,
+  removeImage
 } from '../../../api/docker.js';
 import { useDashboardStore } from '../../../store/dashboardStore.jsx';
 
@@ -76,6 +81,27 @@ export default function DockerTab({ machine }) {
   const [inspectContainer, setInspectContainer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+
+  // Deploy / Run Container Modal State
+  const [showRunModal, setShowRunModal] = useState(false);
+  const [runLoading, setRunLoading] = useState(false);
+  const [runForm, setRunForm] = useState({
+    image: '',
+    name: '',
+    ports: '',
+    env: '',
+    volumes: '',
+    restart: 'unless-stopped',
+    command: ''
+  });
+
+  // Pull Image Modal State
+  const [showPullModal, setShowPullModal] = useState(false);
+  const [pullLoading, setPullLoading] = useState(false);
+  const [pullForm, setPullForm] = useState({
+    image: '',
+    tag: 'latest'
+  });
 
   // Fetch all Docker data for this machine
   const fetchAllData = async (isManualRefresh = false) => {
@@ -146,6 +172,84 @@ export default function DockerTab({ machine }) {
     } finally {
       setActionLoading(prev => ({ ...prev, [cId]: null }));
       setConfirmDelete(null);
+    }
+  };
+
+  // Run/Deploy Container Dispatcher
+  const handleDeployContainer = async (e) => {
+    if (e) e.preventDefault();
+    if (!runForm.image.trim()) {
+      addToast('critical', 'Validation Error', 'Image name is required.');
+      return;
+    }
+
+    setRunLoading(true);
+    try {
+      const payload = {
+        machine_id: machineId,
+        image: runForm.image.trim(),
+        name: runForm.name.trim(),
+        ports: runForm.ports ? runForm.ports.split(',').map(p => p.trim()).filter(Boolean) : [],
+        environment: runForm.env ? runForm.env.split(',').map(e => e.trim()).filter(Boolean) : [],
+        volumes: runForm.volumes ? runForm.volumes.split(',').map(v => v.trim()).filter(Boolean) : [],
+        restart: runForm.restart || 'unless-stopped',
+        command: runForm.command.trim()
+      };
+
+      await runContainer(payload);
+      addToast('success', 'Container Deployment Initiated', `Dispatched docker run for ${payload.image} on ${machine?.hostname || 'this host'}.`);
+      setShowRunModal(false);
+      setRunForm({
+        image: '',
+        name: '',
+        ports: '',
+        env: '',
+        volumes: '',
+        restart: 'unless-stopped',
+        command: ''
+      });
+      setTimeout(() => fetchAllData(true), 1500);
+    } catch (err) {
+      addToast('critical', 'Container Run Failed', err.response?.data?.error || err.message);
+    } finally {
+      setRunLoading(false);
+    }
+  };
+
+  // Pull Image Dispatcher
+  const handlePullImage = async (e) => {
+    if (e) e.preventDefault();
+    if (!pullForm.image.trim()) {
+      addToast('critical', 'Validation Error', 'Image repository is required.');
+      return;
+    }
+
+    setPullLoading(true);
+    try {
+      const fullImage = pullForm.tag ? `${pullForm.image.trim()}:${pullForm.tag.trim()}` : pullForm.image.trim();
+      await pullImage(machineId, fullImage);
+      addToast('success', 'Image Pull Initiated', `Dispatched docker pull for ${fullImage}. Check event logs for progress.`);
+      setShowPullModal(false);
+      setPullForm({ image: '', tag: 'latest' });
+      setTimeout(() => fetchAllData(true), 2500);
+    } catch (err) {
+      addToast('critical', 'Image Pull Failed', err.response?.data?.error || err.message);
+    } finally {
+      setPullLoading(false);
+    }
+  };
+
+  // Remove Image Dispatcher
+  const handleDeleteImage = async (img) => {
+    const fullImg = img.repository ? `${img.repository}:${img.tag || 'latest'}` : (img.name || img.id);
+    if (!confirm(`Are you sure you want to remove image ${fullImg}?`)) return;
+
+    try {
+      await removeImage(machineId, fullImg, false);
+      addToast('success', 'Image Remove Dispatched', `Requested removal of image ${fullImg}.`);
+      setTimeout(() => fetchAllData(true), 1500);
+    } catch (err) {
+      addToast('critical', 'Image Removal Failed', err.response?.data?.error || err.message);
     }
   };
 
@@ -470,6 +574,64 @@ export default function DockerTab({ machine }) {
               </div>
             </>
           )}
+
+          {/* Deploy Container Button */}
+          <button
+            onClick={() => {
+              setRunForm({
+                image: '',
+                name: '',
+                ports: '',
+                env: '',
+                volumes: '',
+                restart: 'unless-stopped',
+                command: ''
+              });
+              setShowRunModal(true);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '0 12px',
+              height: '30px',
+              backgroundColor: '#06b6d4',
+              border: 'none',
+              borderRadius: '6px',
+              color: '#080c14',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            <Plus size={14} />
+            Deploy Container
+          </button>
+
+          {/* Pull Image Button */}
+          <button
+            onClick={() => {
+              setPullForm({ image: '', tag: 'latest' });
+              setShowPullModal(true);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '0 12px',
+              height: '30px',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--border-soft)',
+              borderRadius: '6px',
+              color: 'var(--text)',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            <DownloadCloud size={14} />
+            Pull Image
+          </button>
 
           {/* Refresh Button */}
           <button
@@ -828,37 +990,86 @@ export default function DockerTab({ machine }) {
                   <th style={{ padding: '12px 16px' }}>Image ID</th>
                   <th style={{ padding: '12px 16px' }}>Size</th>
                   <th style={{ padding: '12px 16px' }}>Created</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {images.map((img, idx) => (
-                  <tr key={img.id || idx} style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--text)' }}>
-                    <td style={{ padding: '12px 16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Layers size={16} color="#06b6d4" />
-                        <span style={{ fontWeight: 700, color: '#f1f5f9' }}>{img.repository || img.name || 'Unnamed'}</span>
-                        <span style={{
-                          padding: '1px 6px',
-                          backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          color: '#06b6d4'
-                        }}>
-                          {img.tag || 'latest'}
-                        </span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--muted)' }}>
-                      {(img.id || '').substring(0, 16)}
-                    </td>
-                    <td style={{ padding: '12px 16px', color: '#38bdf8', fontFamily: 'monospace' }}>
-                      {img.size || (img.size_bytes ? formatBytes(img.size_bytes) : '-')}
-                    </td>
-                    <td style={{ padding: '12px 16px', color: 'var(--muted)' }}>
-                      {img.created || img.created_at || '-'}
-                    </td>
-                  </tr>
-                ))}
+                {images.map((img, idx) => {
+                  const fullImg = img.repository ? `${img.repository}:${img.tag || 'latest'}` : (img.name || img.id);
+                  return (
+                    <tr key={img.id || idx} style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--text)' }}>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Layers size={16} color="#06b6d4" />
+                          <span style={{ fontWeight: 700, color: '#f1f5f9' }}>{img.repository || img.name || 'Unnamed'}</span>
+                          <span style={{
+                            padding: '1px 6px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            color: '#06b6d4'
+                          }}>
+                            {img.tag || 'latest'}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--muted)' }}>
+                        {(img.id || '').substring(0, 16)}
+                      </td>
+                      <td style={{ padding: '12px 16px', color: '#38bdf8', fontFamily: 'monospace' }}>
+                        {img.size || (img.size_bytes ? formatBytes(img.size_bytes) : '-')}
+                      </td>
+                      <td style={{ padding: '12px 16px', color: 'var(--muted)' }}>
+                        {img.created || img.created_at || '-'}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <button
+                            onClick={() => {
+                              setRunForm(prev => ({ ...prev, image: fullImg }));
+                              setShowRunModal(true);
+                            }}
+                            style={{
+                              padding: '5px 8px',
+                              backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                              border: '1px solid rgba(6, 182, 212, 0.3)',
+                              borderRadius: '6px',
+                              color: '#06b6d4',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '11px',
+                              fontWeight: 700
+                            }}
+                            title="Launch container from this image"
+                          >
+                            <Play size={12} fill="#06b6d4" />
+                            Run
+                          </button>
+                          <button
+                            onClick={() => handleDeleteImage(img)}
+                            style={{
+                              padding: '5px 8px',
+                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              borderRadius: '6px',
+                              color: '#f87171',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '11px'
+                            }}
+                            title="Remove image from host"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -1295,6 +1506,429 @@ export default function DockerTab({ machine }) {
                 Remove
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 4: DEPLOY CONTAINER MODAL */}
+      {/* ========================================================================= */}
+      {showRunModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: '#0d1220',
+            border: '1px solid var(--border-soft)',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '560px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 20px',
+              backgroundColor: '#111827',
+              borderBottom: '1px solid var(--border-soft)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Plus size={18} color="#06b6d4" />
+                <h3 style={{ margin: 0, fontSize: '15px', color: '#f1f5f9', fontWeight: 700 }}>
+                  Deploy Docker Container on {machine?.hostname || 'Host'}
+                </h3>
+              </div>
+              <button onClick={() => setShowRunModal(false)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleDeployContainer} style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Image Name */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                  Image Name <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. nginx:alpine, redis:7-alpine, postgres:15"
+                  value={runForm.image}
+                  onChange={(e) => setRunForm(prev => ({ ...prev, image: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#070a11',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Quick Picks */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {['nginx:alpine', 'redis:7-alpine', 'postgres:15-alpine', 'node:18-alpine', 'python:3.11-slim', 'rabbitmq:management'].map(tpl => (
+                  <button
+                    key={tpl}
+                    type="button"
+                    onClick={() => setRunForm(prev => ({ ...prev, image: tpl }))}
+                    style={{
+                      padding: '3px 8px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid var(--border-soft)',
+                      borderRadius: '4px',
+                      color: '#06b6d4',
+                      fontSize: '11px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + {tpl}
+                  </button>
+                ))}
+              </div>
+
+              {/* Container Name */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                  Container Name <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. my-nginx-web"
+                  value={runForm.name}
+                  onChange={(e) => setRunForm(prev => ({ ...prev, name: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#070a11',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Port Mappings */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                  Port Mappings <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(host:container, comma separated)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 8080:80, 443:443"
+                  value={runForm.ports}
+                  onChange={(e) => setRunForm(prev => ({ ...prev, ports: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#070a11',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Environment Variables */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                  Environment Variables <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(KEY=VAL, comma separated)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. PORT=3000, NODE_ENV=production"
+                  value={runForm.env}
+                  onChange={(e) => setRunForm(prev => ({ ...prev, env: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#070a11',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Volumes */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                  Volumes <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(host:container, comma separated)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. /var/data:/data"
+                  value={runForm.volumes}
+                  onChange={(e) => setRunForm(prev => ({ ...prev, volumes: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#070a11',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Restart Policy & Command */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                    Restart Policy
+                  </label>
+                  <select
+                    value={runForm.restart}
+                    onChange={(e) => setRunForm(prev => ({ ...prev, restart: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      backgroundColor: '#070a11',
+                      border: '1px solid var(--border-soft)',
+                      borderRadius: '6px',
+                      color: '#f1f5f9',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  >
+                    <option value="unless-stopped">unless-stopped</option>
+                    <option value="always">always</option>
+                    <option value="on-failure">on-failure</option>
+                    <option value="no">no</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                    Custom Command <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. sh -c 'npm start'"
+                    value={runForm.command}
+                    onChange={(e) => setRunForm(prev => ({ ...prev, command: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      backgroundColor: '#070a11',
+                      border: '1px solid var(--border-soft)',
+                      borderRadius: '6px',
+                      color: '#f1f5f9',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowRunModal(false)}
+                  style={{
+                    padding: '0 16px',
+                    height: '36px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: 'var(--text)',
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={runLoading}
+                  style={{
+                    padding: '0 20px',
+                    height: '36px',
+                    backgroundColor: '#06b6d4',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#080c14',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: runLoading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {runLoading && <RefreshCw size={14} className="spin" />}
+                  {runLoading ? 'Deploying...' : 'Deploy Container'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 5: PULL DOCKER IMAGE MODAL */}
+      {/* ========================================================================= */}
+      {showPullModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: '#0d1220',
+            border: '1px solid var(--border-soft)',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '480px',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)'
+          }}>
+            <div style={{
+              padding: '16px 20px',
+              backgroundColor: '#111827',
+              borderBottom: '1px solid var(--border-soft)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <DownloadCloud size={18} color="#06b6d4" />
+                <h3 style={{ margin: 0, fontSize: '15px', color: '#f1f5f9', fontWeight: 700 }}>
+                  Pull Docker Image on {machine?.hostname || 'Host'}
+                </h3>
+              </div>
+              <button onClick={() => setShowPullModal(false)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handlePullImage} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                  Image Repository <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. ubuntu, postgres, nginx, redis"
+                  value={pullForm.image}
+                  onChange={(e) => setPullForm(prev => ({ ...prev, image: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#070a11',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
+                  Tag
+                </label>
+                <input
+                  type="text"
+                  placeholder="latest"
+                  value={pullForm.tag}
+                  onChange={(e) => setPullForm(prev => ({ ...prev, tag: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#070a11',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowPullModal(false)}
+                  style={{
+                    padding: '0 16px',
+                    height: '36px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: 'var(--text)',
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={pullLoading}
+                  style={{
+                    padding: '0 20px',
+                    height: '36px',
+                    backgroundColor: '#06b6d4',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#080c14',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: pullLoading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {pullLoading && <RefreshCw size={14} className="spin" />}
+                  {pullLoading ? 'Pulling Image...' : 'Pull Image'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

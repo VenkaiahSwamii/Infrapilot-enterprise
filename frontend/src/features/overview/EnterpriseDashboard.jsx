@@ -370,7 +370,7 @@ export default function EnterpriseDashboard() {
     if (!machineId) return;
     const hostLabel = hostname || machineId;
     const confirmed = window.confirm(
-      `Are you sure you want to BLOCK "${hostLabel}"?\n\nThis will suspend all incoming telemetry, heartbeats, and commands for this host.`
+      `Are you sure you want to STOP "${hostLabel}"?\n\nThis will suspend all incoming telemetry, heartbeats, and commands for this host.`
     );
     if (!confirmed) return;
 
@@ -381,26 +381,37 @@ export default function EnterpriseDashboard() {
       ]);
       setMachines((prev) =>
         prev.map((m) =>
-          getMachineId(m) === machineId || m.hostname === hostname
+          getMachineId(m) === machineId || m.hostname === hostname || (m.ip_address && m.ip_address === machineId)
             ? { ...m, status: 'BLOCKED', is_blocked: true, online: false }
             : m
         )
       );
+      setLiveMetrics((prev) => {
+        const next = { ...prev };
+        delete next[machineId];
+        if (hostname) {
+          delete next[hostname.toLowerCase()];
+          delete next[`${hostname.toLowerCase()}-windows`];
+          delete next[`${hostname.toLowerCase()}-linux`];
+          delete next[`${hostname.toLowerCase()}-ubuntu`];
+        }
+        return next;
+      });
       setActiveMenuId(null);
       if (addToast) {
         addToast({
           type: 'warning',
-          title: 'Host Blocked',
-          message: `Host ${hostLabel} has been blocked. Incoming telemetry rejected.`,
+          title: 'Machine Stopped',
+          message: `Machine ${hostLabel} is now STOPPED. Telemetry is rejected.`,
         });
       }
     } catch (err) {
-      console.error('Failed to block machine', err);
+      console.error('Failed to stop machine', err);
       if (addToast) {
         addToast({
           type: 'error',
-          title: 'Block Action Failed',
-          message: `Failed to block host ${hostLabel}.`,
+          title: 'Stop Action Failed',
+          message: `Failed to stop machine ${hostLabel}.`,
         });
       }
     }
@@ -416,7 +427,7 @@ export default function EnterpriseDashboard() {
       ]);
       setMachines((prev) =>
         prev.map((m) =>
-          getMachineId(m) === machineId || m.hostname === hostname
+          getMachineId(m) === machineId || m.hostname === hostname || (m.ip_address && m.ip_address === machineId)
             ? { ...m, status: 'ONLINE', is_blocked: false, online: true }
             : m
         )
@@ -425,8 +436,8 @@ export default function EnterpriseDashboard() {
       if (addToast) {
         addToast({
           type: 'success',
-          title: 'Host Unblocked',
-          message: `Host ${hostLabel} is now unblocked and telemetry is accepted.`,
+          title: 'Machine Resumed',
+          message: `Machine ${hostLabel} is resumed and telemetry is accepted.`,
         });
       }
     } catch (err) {
@@ -434,8 +445,8 @@ export default function EnterpriseDashboard() {
       if (addToast) {
         addToast({
           type: 'error',
-          title: 'Unblock Action Failed',
-          message: `Failed to unblock host ${hostLabel}.`,
+          title: 'Resume Action Failed',
+          message: `Failed to resume machine ${hostLabel}.`,
         });
       }
     }
@@ -467,6 +478,7 @@ export default function EnterpriseDashboard() {
       const os = osKey;
 
       const statusUpper = String(m.status || m.Status || '').toUpperCase();
+      const isBlocked = m.is_blocked || m.IsBlocked || statusUpper === 'BLOCKED' || statusUpper === 'STOPPED';
       const lastSeenStr = live.created_at || live.last_seen || live.time || m.last_seen || m.LastSeen;
       let lastSeenDiff = Infinity;
       if (lastSeenStr) {
@@ -474,9 +486,9 @@ export default function EnterpriseDashboard() {
         if (!isNaN(t)) lastSeenDiff = Math.abs(Date.now() - t);
       }
 
-      // Truly ONLINE only if status is ONLINE AND heartbeat seen within 90 seconds
-      const isOnline = (statusUpper === 'ONLINE' || statusUpper === 'CONNECTED' || m.online === true) && lastSeenDiff < 90000;
-      const normalizedStatus = isOnline ? 'online' : 'offline';
+      // Truly ONLINE only if NOT blocked, status is ONLINE, and heartbeat seen within 90 seconds
+      const isOnline = !isBlocked && (statusUpper === 'ONLINE' || statusUpper === 'CONNECTED' || m.online === true) && lastSeenDiff < 90000;
+      const normalizedStatus = isBlocked ? 'blocked' : (isOnline ? 'online' : 'offline');
 
       const rawCpu = isOnline ? (live.cpu_usage !== undefined ? live.cpu_usage : (live.cpu !== undefined ? live.cpu : (live.cpu_percent ?? (m.cpu_usage ?? m.cpu)))) : 0;
       const rawMem = isOnline ? (live.memory_usage !== undefined ? live.memory_usage : (live.memory !== undefined ? live.memory : (live.memory_percent ?? (m.memory_usage ?? m.memory)))) : 0;
@@ -506,7 +518,7 @@ export default function EnterpriseDashboard() {
       const rawMemUsed = isOnline ? (live.memory_used ?? m.memory_used) : 0;
       const totalMemGb = parseGB(rawMemTotal) || (m.total_memory_gb ? Number(m.total_memory_gb) : 0);
       const usedMemGb = (isOnline && rawMemUsed) ? parseGB(rawMemUsed) : ((isOnline && memory > 0 && totalMemGb > 0) ? (memory / 100) * totalMemGb : 0);
-      const memValStr = totalMemGb > 0 ? `${formatGB(usedMemGb)} / ${formatGB(totalMemGb)} GB` : (isOnline ? `${formatGB(usedMemGb)} GB` : '-');
+      const memValStr = isBlocked ? 'Stopped' : (totalMemGb > 0 ? `${formatGB(usedMemGb)} / ${formatGB(totalMemGb)} GB` : (isOnline ? `${formatGB(usedMemGb)} GB` : '-'));
 
       // Real Disk values (Used / Total GB)
       let fsTotalBytes = 0;
@@ -519,40 +531,29 @@ export default function EnterpriseDashboard() {
         const primaryFs = fsList.find((fs) => {
           const mp = String(fs.mount_point || fs.mountPoint || fs.device || '').toLowerCase();
           return mp === '/' || mp === 'c:' || mp === 'c:\\';
-        });
-        if (primaryFs) {
-          fsTotalBytes = Number(primaryFs.total_bytes || primaryFs.total || 0);
-          fsUsedBytes = Number(primaryFs.used_bytes || primaryFs.used || 0);
-        } else {
-          const validFsList = fsList.filter((fs) => {
-            const mp = String(fs.mount_point || fs.mountPoint || fs.device || '').toLowerCase();
-            const fstype = String(fs.fs_type || fs.type || '').toLowerCase();
-            return !mp.includes('/dev/shm') && !mp.includes('/run') && !mp.includes('/boot') && fstype !== 'tmpfs' && fstype !== 'devtmpfs';
-          });
-          validFsList.forEach((fs) => {
-            fsTotalBytes += Number(fs.total_bytes || fs.total || 0);
-            fsUsedBytes += Number(fs.used_bytes || fs.used || 0);
-          });
-        }
+        }) || fsList[0];
+
+        fsTotalBytes = Number(primaryFs.total || primaryFs.total_bytes || primaryFs.size || 0);
+        fsUsedBytes = Number(primaryFs.used || primaryFs.used_bytes || 0);
       }
 
-      const rawDiskTotal = live.disk_total ?? live.total_disk_gb ?? m.disk_total ?? m.total_disk_gb ?? m.TotalDiskGB;
-      const rawDiskUsed = isOnline ? (live.disk_used ?? m.disk_used) : 0;
-      const totalDiskGb = parseGB(rawDiskTotal) || (fsTotalBytes > 0
+      const totalDiskGb = fsTotalBytes > 0
         ? parseGB(fsTotalBytes)
-        : (m.total_disk_gb ? Number(m.total_disk_gb) : 0));
+        : (m.total_disk_gb ? Number(m.total_disk_gb) : (live.disk_total ? parseGB(live.disk_total) : (m.disk_total ? parseGB(m.disk_total) : 0)));
+
+      const rawDiskUsed = live.disk_used ?? m.disk_used;
       const usedDiskGb = (isOnline && fsUsedBytes > 0)
         ? parseGB(fsUsedBytes)
         : (isOnline && rawDiskUsed)
         ? parseGB(rawDiskUsed)
         : ((isOnline && disk > 0 && totalDiskGb > 0) ? (disk / 100) * totalDiskGb : 0);
-      const diskValStr = totalDiskGb > 0 ? `${formatGB(usedDiskGb)} / ${formatGB(totalDiskGb)} GB` : (isOnline ? `${formatGB(usedDiskGb)} GB` : '-');
+      const diskValStr = isBlocked ? 'Stopped' : (totalDiskGb > 0 ? `${formatGB(usedDiskGb)} / ${formatGB(totalDiskGb)} GB` : (isOnline ? `${formatGB(usedDiskGb)} GB` : '-'));
 
       // Real CPU values (Active Cores / Total Cores)
       const rawCores = live.cpu_cores ?? live.cores ?? (Array.isArray(live.cpu_per_core) && live.cpu_per_core.length > 0 ? live.cpu_per_core.length : null) ?? m.cpu_cores ?? m.CPUCores;
       const cores = Number(rawCores) > 0 ? Number(rawCores) : (m.os === 'windows' ? 4 : 2);
       const usedCores = (isOnline && cpu > 0) ? ((cpu / 100) * cores).toFixed(1) : '0.0';
-      const cpuValStr = isOnline ? `${usedCores} / ${cores} Cores` : `0.0 / ${cores} Cores`;
+      const cpuValStr = isBlocked ? `0.0 / ${cores} Cores (Stopped)` : (isOnline ? `${usedCores} / ${cores} Cores` : `0.0 / ${cores} Cores`);
 
       const rawUploadVal = isOnline ? (live.upload_mbps !== undefined ? live.upload_mbps : (live.upload !== undefined ? live.upload : (m.upload_mbps !== undefined ? m.upload_mbps : m.upload))) : 0;
       const rawDownloadVal = isOnline ? (live.download_mbps !== undefined ? live.download_mbps : (live.download !== undefined ? live.download : (m.download_mbps !== undefined ? m.download_mbps : m.download))) : 0;
@@ -561,7 +562,7 @@ export default function EnterpriseDashboard() {
 
       const ipAddress = m.ip_address || m.IPAddress || live.ip_address || '--';
 
-      const latencyStr = isOnline ? (live.latency_ms != null ? `${live.latency_ms} ms` : (m.latency ? `${m.latency} ms` : '--')) : '-';
+      const latencyStr = isBlocked ? 'Stopped' : (isOnline ? (live.latency_ms != null ? `${live.latency_ms} ms` : (m.latency ? `${m.latency} ms` : '--')) : '-');
 
       return {
         id: mId || rawId || `m-${idx}`,
@@ -569,18 +570,19 @@ export default function EnterpriseDashboard() {
         hostname: hostName,
         ip_address: ipAddress,
         os,
+        is_blocked: isBlocked,
         cpu: isOnline ? cpu : 0,
         memory: isOnline ? memory : 0,
         disk: isOnline ? disk : 0,
         cpuValStr,
         memValStr,
         diskValStr,
-        upload: upload < 1 ? upload.toFixed(2) : upload.toFixed(1),
-        download: download < 1 ? download.toFixed(2) : download.toFixed(1),
+        upload: isOnline ? (upload < 1 ? upload.toFixed(2) : upload.toFixed(1)) : '0.00',
+        download: isOnline ? (download < 1 ? download.toFixed(2) : download.toFixed(1)) : '0.00',
         latency: latencyStr,
-        latencyTone: isOnline ? (m.latencyTone || 'green') : 'muted',
+        latencyTone: isBlocked ? 'muted' : (isOnline ? (m.latencyTone || 'green') : 'muted'),
         status: normalizedStatus,
-        last_seen: formatLastSeen(lastSeenStr || m.last_seen || m.LastSeen, normalizedStatus),
+        last_seen: isBlocked ? 'Stopped' : formatLastSeen(lastSeenStr || m.last_seen || m.LastSeen, normalizedStatus),
         rawLastSeen: lastSeenStr || m.last_seen || m.LastSeen || new Date().toISOString(),
       };
     });
@@ -597,9 +599,11 @@ export default function EnterpriseDashboard() {
         dedupMap.set(key, item);
       } else {
         const existing = dedupMap.get(key);
-        if (item.status === 'online' && existing.status !== 'online') {
+        if (item.is_blocked || item.status === 'blocked') {
           dedupMap.set(key, item);
-        } else if (item.status === 'online' && existing.status === 'online') {
+        } else if (!existing.is_blocked && item.status === 'online' && existing.status !== 'online') {
+          dedupMap.set(key, item);
+        } else if (!existing.is_blocked && item.status === 'online' && existing.status === 'online') {
           if ((item.cpu !== null ? 1 : 0) > (existing.cpu !== null ? 1 : 0)) {
             dedupMap.set(key, item);
           }
@@ -1337,7 +1341,7 @@ export default function EnterpriseDashboard() {
             <ExternalLink size={13} color="#a855f7" />
             <span>Full Host Details</span>
           </button>
-          {selectedMachineForMenu.is_blocked || String(selectedMachineForMenu.status).toUpperCase() === 'BLOCKED' ? (
+          {selectedMachineForMenu.is_blocked || String(selectedMachineForMenu.status).toUpperCase() === 'BLOCKED' || String(selectedMachineForMenu.status).toUpperCase() === 'STOPPED' || selectedMachineForMenu.rawMachine?.is_blocked || String(selectedMachineForMenu.rawMachine?.status).toUpperCase() === 'BLOCKED' ? (
             <button
               className="popover-btn"
               onClick={(e) => {
@@ -1351,7 +1355,7 @@ export default function EnterpriseDashboard() {
               style={{ color: '#38bdf8' }}
             >
               <Unlock size={13} color="#38bdf8" />
-              <span>Unblock Host</span>
+              <span>Start / Resume Machine</span>
             </button>
           ) : (
             <button
@@ -1364,10 +1368,10 @@ export default function EnterpriseDashboard() {
                 handleBlockMachine(target.id, target.hostname);
               }}
               type="button"
-              style={{ color: '#f97316' }}
+              style={{ color: '#ef4444' }}
             >
-              <Lock size={13} color="#f97316" />
-              <span>Block Host</span>
+              <Lock size={13} color="#ef4444" />
+              <span>Stop / Block Machine</span>
             </button>
           )}
           <button

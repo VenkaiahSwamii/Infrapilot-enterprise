@@ -574,10 +574,13 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.PATCH("/alert-rules/:id/toggle", handlers.NewAlertRuleHandler().ToggleRule)
 
 			// Phase 10: Docker Deep Management
-			protected.POST("/docker/container/start", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator), handlers.ContainerStart)
-			protected.POST("/docker/container/stop", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator), handlers.ContainerStop)
-			protected.POST("/docker/container/restart", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator), handlers.ContainerRestart)
-			protected.POST("/docker/container/remove", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator), handlers.ContainerRemove)
+			protected.POST("/docker/container/start", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator, models.RoleViewer), handlers.ContainerStart)
+			protected.POST("/docker/container/stop", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator, models.RoleViewer), handlers.ContainerStop)
+			protected.POST("/docker/container/restart", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator, models.RoleViewer), handlers.ContainerRestart)
+			protected.POST("/docker/container/remove", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator, models.RoleViewer), handlers.ContainerRemove)
+			protected.POST("/docker/container/run", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator, models.RoleViewer), handlers.ContainerRun)
+			protected.POST("/docker/image/pull", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator, models.RoleViewer), handlers.ImagePull)
+			protected.POST("/docker/image/remove", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator, models.RoleViewer), handlers.ImageRemove)
 
 			// Phase 11: Kubernetes Cluster Management
 			protected.GET("/kubernetes/overview/:id", handlers.GetKubernetesOverview)

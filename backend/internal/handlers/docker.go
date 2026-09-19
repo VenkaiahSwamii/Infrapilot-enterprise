@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"infrapilot/backend/internal/database"
@@ -196,6 +197,256 @@ func GetDockerVolumes(c *gin.Context) {
 	c.JSON(http.StatusOK, volumes)
 }
 
+type ContainerRunRequest struct {
+	MachineID     string   `json:"machine_id" binding:"required"`
+	Image         string   `json:"image" binding:"required"`
+	Name          string   `json:"name"`
+	Ports         []string `json:"ports"`
+	Environment   []string `json:"environment"`
+	Volumes       []string `json:"volumes"`
+	RestartPolicy string   `json:"restart_policy"`
+	Network       string   `json:"network"`
+	Command       string   `json:"command"`
+}
+
+type ImagePullRequest struct {
+	MachineID string `json:"machine_id" binding:"required"`
+	Image     string `json:"image" binding:"required"`
+}
+
+type ImageRemoveRequest struct {
+	MachineID string `json:"machine_id" binding:"required"`
+	Image     string `json:"image" binding:"required"`
+	Force     bool   `json:"force"`
+}
+
+func ContainerRun(c *gin.Context) {
+	var req ContainerRunRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var machineUUID uuid.UUID
+	var err error
+	if machineUUID, err = uuid.Parse(req.MachineID); err != nil {
+		var machine models.Machine
+		if database.DB != nil && database.DB.Where("id::text LIKE ? OR hostname = ?", req.MachineID+"%", req.MachineID).First(&machine).Error == nil {
+			machineUUID = machine.ID
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid machine ID"})
+			return
+		}
+	}
+
+	var args []string
+	args = append(args, "docker", "run", "-d")
+	if req.Name != "" {
+		args = append(args, "--name", req.Name)
+	}
+	if req.RestartPolicy != "" && req.RestartPolicy != "no" {
+		args = append(args, "--restart", req.RestartPolicy)
+	}
+	for _, p := range req.Ports {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			args = append(args, "-p", p)
+		}
+	}
+	for _, e := range req.Environment {
+		e = strings.TrimSpace(e)
+		if e != "" {
+			args = append(args, "-e", e)
+		}
+	}
+	for _, v := range req.Volumes {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			args = append(args, "-v", v)
+		}
+	}
+	if req.Network != "" {
+		args = append(args, "--network", req.Network)
+	}
+	args = append(args, req.Image)
+	if req.Command != "" {
+		args = append(args, req.Command)
+	}
+
+	shellCmd := strings.Join(args, " ")
+
+	cmd := models.Command{
+		ID:        uuid.New(),
+		MachineID: machineUUID,
+		Command:   shellCmd,
+		Status:    "Pending",
+		CreatedAt: time.Now(),
+	}
+
+	if database.DB != nil {
+		if err := database.DB.Create(&cmd).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue container execution"})
+			return
+		}
+
+		// Optimistic record creation for immediate UI response
+		cName := req.Name
+		if cName == "" {
+			cName = req.Image + "-app"
+		}
+		newC := models.DockerContainer{
+			ID:          "run-" + strings.ReplaceAll(uuid.New().String()[:12], "-", ""),
+			ServerID:    machineUUID,
+			Name:        cName,
+			Image:       req.Image,
+			Status:      "Up Less than a second (Starting)",
+			State:       "running",
+			Uptime:      "Just now",
+			CreatedTime: time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		_ = database.DB.Create(&newC)
+	}
+
+	usernameVal, exists := c.Get("username")
+	username := "admin"
+	if exists {
+		username = fmt.Sprintf("%v", usernameVal)
+	}
+
+	utils.LogAudit(username, machineUUID, fmt.Sprintf("Run Docker container image %s as %s", req.Image, req.Name), "Success")
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    fmt.Sprintf("Docker run command enqueued for image %s", req.Image),
+		"command_id": cmd.ID,
+		"status":     "queued",
+		"command":    shellCmd,
+	})
+}
+
+func ImagePull(c *gin.Context) {
+	var req ImagePullRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var machineUUID uuid.UUID
+	var err error
+	if machineUUID, err = uuid.Parse(req.MachineID); err != nil {
+		var machine models.Machine
+		if database.DB != nil && database.DB.Where("id::text LIKE ? OR hostname = ?", req.MachineID+"%", req.MachineID).First(&machine).Error == nil {
+			machineUUID = machine.ID
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid machine ID"})
+			return
+		}
+	}
+
+	shellCmd := fmt.Sprintf("docker pull %s", req.Image)
+
+	cmd := models.Command{
+		ID:        uuid.New(),
+		MachineID: machineUUID,
+		Command:   shellCmd,
+		Status:    "Pending",
+		CreatedAt: time.Now(),
+	}
+
+	if database.DB != nil {
+		if err := database.DB.Create(&cmd).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue image pull"})
+			return
+		}
+
+		parts := strings.Split(req.Image, ":")
+		imgName := parts[0]
+		imgTag := "latest"
+		if len(parts) > 1 {
+			imgTag = parts[1]
+		}
+		_ = database.DB.Create(&models.DockerImage{
+			ID:          "sha256:pulling-" + uuid.New().String()[:10],
+			ServerID:    machineUUID,
+			Name:        imgName,
+			Tag:         imgTag,
+			Size:        0,
+			CreatedTime: time.Now(),
+			UpdatedAt:   time.Now(),
+		})
+	}
+
+	usernameVal, exists := c.Get("username")
+	username := "admin"
+	if exists {
+		username = fmt.Sprintf("%v", usernameVal)
+	}
+
+	utils.LogAudit(username, machineUUID, fmt.Sprintf("Pull Docker image %s", req.Image), "Success")
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    fmt.Sprintf("Docker pull enqueued for image %s", req.Image),
+		"command_id": cmd.ID,
+		"status":     "queued",
+	})
+}
+
+func ImageRemove(c *gin.Context) {
+	var req ImageRemoveRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var machineUUID uuid.UUID
+	var err error
+	if machineUUID, err = uuid.Parse(req.MachineID); err != nil {
+		var machine models.Machine
+		if database.DB != nil && database.DB.Where("id::text LIKE ? OR hostname = ?", req.MachineID+"%", req.MachineID).First(&machine).Error == nil {
+			machineUUID = machine.ID
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid machine ID"})
+			return
+		}
+	}
+
+	shellCmd := fmt.Sprintf("docker rmi %s", req.Image)
+	if req.Force {
+		shellCmd = fmt.Sprintf("docker rmi -f %s", req.Image)
+	}
+
+	cmd := models.Command{
+		ID:        uuid.New(),
+		MachineID: machineUUID,
+		Command:   shellCmd,
+		Status:    "Pending",
+		CreatedAt: time.Now(),
+	}
+
+	if database.DB != nil {
+		if err := database.DB.Create(&cmd).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue image removal"})
+			return
+		}
+
+		_ = database.DB.Where("server_id = ? AND (id = ? OR name = ? OR (name || ':' || tag) = ?)", machineUUID, req.Image, req.Image, req.Image).Delete(&models.DockerImage{})
+	}
+
+	usernameVal, exists := c.Get("username")
+	username := "admin"
+	if exists {
+		username = fmt.Sprintf("%v", usernameVal)
+	}
+
+	utils.LogAudit(username, machineUUID, fmt.Sprintf("Remove Docker image %s", req.Image), "Success")
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    fmt.Sprintf("Docker image %s removal request enqueued", req.Image),
+		"command_id": cmd.ID,
+		"status":     "queued",
+	})
+}
+
 func handleContainerAction(c *gin.Context, action string) {
 	var req ContainerActionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -237,6 +488,29 @@ func handleContainerAction(c *gin.Context, action string) {
 		if err := database.DB.Create(&cmd).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue container execution"})
 			return
+		}
+
+		// Optimistic database updates so the UI responds instantaneously
+		if action == "stop" {
+			_ = database.DB.Model(&models.DockerContainer{}).
+				Where("server_id = ? AND (id = ? OR name = ?)", machineUUID, req.Container, req.Container).
+				Updates(map[string]interface{}{
+					"status":      "Exited (0) Just now",
+					"state":       "exited",
+					"cpu_percent": 0,
+					"updated_at":  time.Now(),
+				})
+		} else if action == "start" || action == "restart" {
+			_ = database.DB.Model(&models.DockerContainer{}).
+				Where("server_id = ? AND (id = ? OR name = ?)", machineUUID, req.Container, req.Container).
+				Updates(map[string]interface{}{
+					"status":     "Up Less than a second",
+					"state":      "running",
+					"updated_at": time.Now(),
+				})
+		} else if strings.Contains(action, "rm") {
+			_ = database.DB.Where("server_id = ? AND (id = ? OR name = ?)", machineUUID, req.Container, req.Container).
+				Delete(&models.DockerContainer{})
 		}
 	}
 

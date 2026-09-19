@@ -57,11 +57,16 @@ func NewServerService(serverRepo *repository.ServerRepository, metricRepo *repos
 	return svc
 }
 
+func (s *ServerService) BroadcastStatusUpdate(m *models.Server) {
+	s.broadcastStatusUpdate(m)
+}
+
 func (s *ServerService) broadcastStatusUpdate(m *models.Server) {
 	payload := map[string]interface{}{
 		"machine_id":    m.ID,
 		"hostname":      m.Hostname,
 		"status":        m.Status,
+		"is_blocked":    m.IsBlocked,
 		"ip_address":    m.IPAddress,
 		"os":            m.OS,
 		"platform":      m.Platform,
@@ -75,6 +80,9 @@ func (s *ServerService) broadcastStatusUpdate(m *models.Server) {
 	if m.Status == "ONLINE" {
 		websocket.PublishEvent("server.online", m.ID.String(), payload)
 	} else if m.Status == "OFFLINE" {
+		websocket.PublishEvent("server.offline", m.ID.String(), payload)
+	} else if m.Status == "BLOCKED" || m.Status == "STOPPED" || m.IsBlocked {
+		websocket.PublishEvent("server.blocked", m.ID.String(), payload)
 		websocket.PublishEvent("server.offline", m.ID.String(), payload)
 	}
 	websocket.PublishEvent("heartbeat.received", m.ID.String(), map[string]interface{}{
@@ -93,17 +101,28 @@ func (s *ServerService) PublishEvent(e events.Event) {
 }
 
 func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*models.Server, error) {
-
-
 	server, err := s.serverRepo.FindExistingServer(input.ID, input.Hostname, input.IPAddress, input.MACAddress, input.OS)
 	if err == nil && server != nil {
+		isBlocked := server.IsBlocked || strings.ToUpper(server.Status) == "BLOCKED" || strings.ToUpper(server.Status) == "STOPPED"
 		// Update existing server record
 		applyServerRegistration(server, input)
-		server.Status = "ONLINE"
-		server.LastSeen = time.Now().UTC()
+		if isBlocked {
+			server.Status = "BLOCKED"
+			server.IsBlocked = true
+			server.Online = false
+		} else {
+			server.Status = "ONLINE"
+			server.IsBlocked = false
+			server.Online = true
+			server.LastSeen = time.Now().UTC()
+		}
 
 		if err := s.serverRepo.UpdateServer(server); err != nil {
 			return nil, err
+		}
+
+		if isBlocked {
+			return server, errors.New("machine is stopped or blocked by administrator")
 		}
 
 		s.broadcastStatusUpdate(server)
@@ -168,7 +187,11 @@ func applyServerRegistration(server *models.Server, input RegisterServerInput) {
 	server.GPU = input.GPU
 	server.Virtualization = input.Virtualization
 	server.CloudProvider = input.CloudProvider
-	server.Online = true
+	if !server.IsBlocked && strings.ToUpper(server.Status) != "BLOCKED" && strings.ToUpper(server.Status) != "STOPPED" {
+		server.Online = true
+	} else {
+		server.Online = false
+	}
 }
 
 func normalizeServerResourceType(resourceType, osName, platform, virtualization, cloudProvider string) string {
@@ -239,6 +262,10 @@ func (s *ServerService) Heartbeat(id uuid.UUID) error {
 			return nil
 		}
 		return errors.New("server not found")
+	}
+
+	if server.IsBlocked || strings.ToUpper(server.Status) == "BLOCKED" || strings.ToUpper(server.Status) == "STOPPED" {
+		return errors.New("machine is stopped or blocked by administrator")
 	}
 
 	server.LastSeen = time.Now().UTC()
@@ -417,8 +444,13 @@ func (s *ServerService) GetServerSnapshotByID(id uuid.UUID) (*models.ServerSnaps
 }
 
 func buildServerSnapshot(server models.Server, metric models.Metric, rich models.LinuxMetric) models.ServerSnapshot {
-	isOffline := time.Since(server.LastSeen) > 90*time.Second || strings.ToUpper(server.Status) == "OFFLINE"
-	if isOffline {
+	isBlocked := server.IsBlocked || strings.ToUpper(server.Status) == "BLOCKED" || strings.ToUpper(server.Status) == "STOPPED"
+	isOffline := isBlocked || time.Since(server.LastSeen) > 90*time.Second || strings.ToUpper(server.Status) == "OFFLINE"
+	if isBlocked {
+		server.Status = "BLOCKED"
+		server.Online = false
+		server.IsBlocked = true
+	} else if isOffline {
 		server.Status = "OFFLINE"
 		server.Online = false
 	} else {
@@ -433,7 +465,7 @@ func buildServerSnapshot(server models.Server, metric models.Metric, rich models
 
 	zero := 0.0
 	zeroUint := uint64(0)
-	if isOffline {
+	if isOffline || isBlocked {
 		snapshot.CPUUsage = &zero
 		snapshot.MemoryUsage = &zero
 		snapshot.DiskUsage = &zero

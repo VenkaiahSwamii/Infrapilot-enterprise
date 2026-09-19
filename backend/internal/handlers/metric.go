@@ -170,7 +170,20 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		}
 	}
 
-	// 6. Auto-provision distinct server record if this is a newly connected host / OS
+	// 6. Before auto-provisioning, verify host is not blocked in servers registry
+	if machine == nil && database.DB != nil && (req.Hostname != "" || req.IPAddress != "") {
+		var count int64
+		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (LOWER(hostname) = LOWER(?) OR ip_address = ?) AND (is_blocked = true OR LOWER(status) = 'blocked' OR LOWER(status) = 'stopped')", req.Hostname, req.IPAddress).Scan(&count).Error
+		if count > 0 {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":  "Machine is stopped or blocked by administrator.",
+				"status": "blocked",
+			})
+			return
+		}
+	}
+
+	// 7. Auto-provision distinct server record if this is a newly connected host / OS
 	if machine == nil && req.Hostname != "" {
 		newID := uuid.New()
 		if c.Param("id") != "" {
@@ -222,22 +235,22 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		return
 	}
 
-	// 7. If machine is explicitly BLOCKED, reject telemetry
-	if machine != nil && (machine.IsBlocked || strings.EqualFold(machine.Status, "BLOCKED")) {
+	// 8. If machine is explicitly BLOCKED or STOPPED, reject telemetry
+	if machine != nil && (machine.IsBlocked || strings.EqualFold(machine.Status, "BLOCKED") || strings.EqualFold(machine.Status, "STOPPED")) {
 		c.JSON(http.StatusForbidden, gin.H{
-			"error":  "Machine is blocked by administrator.",
+			"error":  "Machine is stopped or blocked by administrator.",
 			"status": "blocked",
 		})
 		return
 	}
 
-	// 8. Direct database SQL check to guarantee blocked status in servers table
+	// 9. Direct database SQL check to guarantee blocked status in servers table
 	if database.DB != nil && machine != nil {
 		var count int64
-		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?)) AND (is_blocked = true OR LOWER(status) = 'blocked')", machine.ID, machine.Hostname).Scan(&count).Error
+		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?) AND (is_blocked = true OR LOWER(status) = 'blocked' OR LOWER(status) = 'stopped')", machine.ID, machine.Hostname, machine.IPAddress).Scan(&count).Error
 		if count > 0 {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error":  "Machine is blocked by administrator.",
+				"error":  "Machine is stopped or blocked by administrator.",
 				"status": "blocked",
 			})
 			return

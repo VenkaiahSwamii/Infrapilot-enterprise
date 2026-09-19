@@ -59,7 +59,7 @@ func normalizeRole(r string) string {
 		return "DEVOPS"
 	case "OPERATOR":
 		return "OPERATOR"
-	case "VIEWER", "READONLY", "READONLYUSER":
+	case "VIEWER", "READONLY", "READONLYUSER", "USER", "MEMBER", "STANDARD", "STAFF":
 		return "VIEWER"
 	default:
 		return r

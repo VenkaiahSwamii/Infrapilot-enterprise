@@ -182,6 +182,18 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 		return nil, nil, errors.New("machine not found or deleted")
 	}
 
+	// Reject if machine is blocked or stopped
+	if machine.IsBlocked || strings.ToUpper(machine.Status) == "BLOCKED" || strings.ToUpper(machine.Status) == "STOPPED" {
+		return nil, nil, errors.New("machine is stopped or blocked by administrator")
+	}
+	if database.DB != nil {
+		var count int64
+		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?)) AND (is_blocked = true OR LOWER(status) = 'blocked' OR LOWER(status) = 'stopped')", machine.ID, machine.Hostname).Scan(&count).Error
+		if count > 0 {
+			return nil, nil, errors.New("machine is stopped or blocked by administrator")
+		}
+	}
+
 	// Save detailed metric to DB
 	metric := &models.Metric{
 		ID:             uuid.New(),

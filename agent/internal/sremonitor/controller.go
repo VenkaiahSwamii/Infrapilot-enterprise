@@ -128,42 +128,49 @@ func (a *AgentController) GetDiskUsage(mountPoint string) (usedPercent float64, 
 	}
 
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command("powershell", "-Command", "Get-PSDrive C | Select-Object Used, Free")
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		if err := cmd.Run(); err == nil {
-			return 45.0, 100000.0, 55000.0, nil
+		if usage, err := disk.Usage("C:"); err == nil && usage.Total > 0 {
+			return usage.UsedPercent, float64(usage.Total) / 1024 / 1024, float64(usage.Free) / 1024 / 1024, nil
 		}
 	}
 
 	cmd := exec.Command("df", "-m", target)
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return 50.0, 100000.0, 50000.0, nil
-	}
+	if err := cmd.Run(); err == nil {
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		if len(lines) >= 2 {
+			fields := strings.Fields(lines[1])
+			if len(fields) >= 4 {
+				var total, used, free int64
+				fmt.Sscanf(fields[1], "%d", &total)
+				fmt.Sscanf(fields[2], "%d", &used)
+				fmt.Sscanf(fields[3], "%d", &free)
 
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) >= 2 {
-		fields := strings.Fields(lines[1])
-		if len(fields) >= 4 {
-			var total, used, free int64
-			fmt.Sscanf(fields[1], "%d", &total)
-			fmt.Sscanf(fields[2], "%d", &used)
-			fmt.Sscanf(fields[3], "%d", &free)
-
-			if total > 0 {
-				pct := float64(used) / float64(total) * 100.0
-				return pct, float64(total), float64(free), nil
+				if total > 0 {
+					pct := float64(used) / float64(total) * 100.0
+					return pct, float64(total), float64(free), nil
+				}
 			}
 		}
 	}
+
 	return 50.0, 100000.0, 50000.0, nil
 }
 
 func (a *AgentController) GetAllDiskUsage() map[string]float64 {
-	pct, _, _, _ := a.GetDiskUsage("/")
-	return map[string]float64{"/": pct}
+	usageMap := make(map[string]float64)
+	if parts, err := disk.Partitions(false); err == nil && len(parts) > 0 {
+		for _, p := range parts {
+			if u, err := disk.Usage(p.Mountpoint); err == nil && u.Total > 0 {
+				usageMap[p.Mountpoint] = u.UsedPercent
+			}
+		}
+	}
+	if len(usageMap) == 0 {
+		pct, _, _, _ := a.GetDiskUsage("/")
+		usageMap["/"] = pct
+	}
+	return usageMap
 }
 
 func (a *AgentController) GetDiskIOStats() (map[string]DiskIOStat, error) {
@@ -173,6 +180,29 @@ func (a *AgentController) GetDiskIOStats() (map[string]DiskIOStat, error) {
 }
 
 func (a *AgentController) GetDfOutput() string {
+	if runtime.GOOS == "windows" {
+		parts, err := disk.Partitions(false)
+		if err == nil && len(parts) > 0 {
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("%-12s %-12s %-12s %-12s %-8s %s\n", "Filesystem", "Size(MB)", "Used(MB)", "Avail(MB)", "Use%", "Mounted on"))
+			for _, p := range parts {
+				if usage, err := disk.Usage(p.Mountpoint); err == nil && usage.Total > 0 {
+					totalMB := float64(usage.Total) / 1024 / 1024
+					usedMB := float64(usage.Used) / 1024 / 1024
+					freeMB := float64(usage.Free) / 1024 / 1024
+					sb.WriteString(fmt.Sprintf("%-12s %-12.0f %-12.0f %-12.0f %-7.1f%% %s\n",
+						p.Device, totalMB, usedMB, freeMB, usage.UsedPercent, p.Mountpoint))
+				}
+			}
+			return sb.String()
+		}
+		cmd := exec.Command("powershell", "-Command", "Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free | Format-Table -AutoSize")
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		_ = cmd.Run()
+		return out.String()
+	}
+
 	cmd := exec.Command("df", "-h")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -183,7 +213,21 @@ func (a *AgentController) GetDfOutput() string {
 func (a *AgentController) FindAllowlistedFiles() ([]string, error) {
 	var files []string
 	cacheDirs := []string{"/tmp", "/var/tmp", "/var/cache"}
+	if runtime.GOOS == "windows" {
+		tempDir := os.TempDir()
+		cacheDirs = []string{tempDir}
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			cacheDirs = append(cacheDirs, filepath.Join(localAppData, "Temp"))
+		}
+		if winDir := os.Getenv("SystemRoot"); winDir != "" {
+			cacheDirs = append(cacheDirs, filepath.Join(winDir, "Temp"))
+		}
+	}
+
 	for _, d := range cacheDirs {
+		if _, err := os.Stat(d); err != nil {
+			continue
+		}
 		entries, err := filepath.Glob(filepath.Join(d, "*"))
 		if err == nil {
 			files = append(files, entries...)
@@ -193,6 +237,14 @@ func (a *AgentController) FindAllowlistedFiles() ([]string, error) {
 }
 
 func (a *AgentController) IsFileInUse(path string) bool {
+	if runtime.GOOS == "windows" {
+		file, err := os.OpenFile(path, os.O_RDWR, 0)
+		if err != nil {
+			return true // In use or locked
+		}
+		_ = file.Close()
+		return false
+	}
 	cmd := exec.Command("lsof", path)
 	return cmd.Run() == nil
 }

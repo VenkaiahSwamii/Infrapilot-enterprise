@@ -567,9 +567,11 @@ func (h *ServerHandler) BlockServer(c *gin.Context) {
 	}
 
 	if database.DB != nil {
-		_ = database.DB.Exec("UPDATE servers SET status = 'BLOCKED', is_blocked = true, online = false WHERE id::text = ? OR LOWER(hostname) = LOWER(?)", sID, hostname)
-		_ = database.DB.Exec("UPDATE machines SET status = 'BLOCKED', is_blocked = true, online = false WHERE id::text = ? OR LOWER(hostname) = LOWER(?)", sID, hostname)
+		_ = database.DB.Exec("UPDATE servers SET status = 'BLOCKED', is_blocked = true, online = false WHERE id::text = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?", sID, hostname, idStr)
+		_ = database.DB.Exec("UPDATE machines SET status = 'BLOCKED', is_blocked = true, online = false WHERE id::text = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?", sID, hostname, idStr)
 	}
+
+	h.serverService.BroadcastStatusUpdate(server)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Host blocked successfully",
@@ -602,9 +604,11 @@ func (h *ServerHandler) UnblockServer(c *gin.Context) {
 	}
 
 	if database.DB != nil {
-		_ = database.DB.Exec("UPDATE servers SET status = 'ONLINE', is_blocked = false, online = true, last_seen = ? WHERE id::text = ? OR LOWER(hostname) = LOWER(?)", now, sID, hostname)
-		_ = database.DB.Exec("UPDATE machines SET status = 'ONLINE', is_blocked = false, online = true, last_seen = ? WHERE id::text = ? OR LOWER(hostname) = LOWER(?)", now, sID, hostname)
+		_ = database.DB.Exec("UPDATE servers SET status = 'ONLINE', is_blocked = false, online = true, last_seen = ? WHERE id::text = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?", now, sID, hostname, idStr)
+		_ = database.DB.Exec("UPDATE machines SET status = 'ONLINE', is_blocked = false, online = true, last_seen = ? WHERE id::text = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?", now, sID, hostname, idStr)
 	}
+
+	h.serverService.BroadcastStatusUpdate(server)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Host unblocked successfully",

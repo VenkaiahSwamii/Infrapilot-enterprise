@@ -43,3 +43,15 @@ export function restartContainer(machineId, container) {
 export function removeContainer(machineId, container) {
   return apiPost('/docker/container/remove', { machine_id: machineId, container });
 }
+
+export function runContainer(data) {
+  return apiPost('/docker/container/run', data);
+}
+
+export function pullImage(machineId, image) {
+  return apiPost('/docker/image/pull', { machine_id: machineId, image });
+}
+
+export function removeImage(machineId, image, force = false) {
+  return apiPost('/docker/image/remove', { machine_id: machineId, image, force });
+}

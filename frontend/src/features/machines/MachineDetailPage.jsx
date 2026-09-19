@@ -27,8 +27,11 @@ import {
   Terminal,
   FileText,
   Trash2,
-  ExternalLink
+  ExternalLink,
+  Lock,
+  Unlock
 } from 'lucide-react';
+import apiClient from '../../api/client.js';
 import { wsClientInstance } from '../../websocket/client.js';
 import { useServerStore } from '../../store/serverStore.jsx';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
@@ -210,10 +213,45 @@ export default function MachineDetailPage() {
     addToast('info', 'Agent Command', 'Restart signal sent to agent.');
   };
 
+  const handleStopMachine = async () => {
+    const hostLabel = resolvedMachine?.hostname || machineId;
+    const confirmed = window.confirm(
+      `Are you sure you want to STOP "${hostLabel}"?\n\nThis will immediately suspend all incoming telemetry, heartbeats, and commands for this machine.`
+    );
+    if (!confirmed) return;
+    try {
+      await Promise.allSettled([
+        apiClient.post(`/machines/${machineId}/block`),
+        apiClient.post(`/servers/${machineId}/block`),
+      ]);
+      setMachine((prev) => prev ? { ...prev, status: 'BLOCKED', is_blocked: true, online: false } : null);
+      setShowMoreMenu(false);
+      addToast('warning', 'Machine Stopped', `Machine ${hostLabel} is now STOPPED.`);
+    } catch (err) {
+      addToast('error', 'Stop Failed', `Failed to stop machine ${hostLabel}.`);
+    }
+  };
+
+  const handleResumeMachine = async () => {
+    const hostLabel = resolvedMachine?.hostname || machineId;
+    try {
+      await Promise.allSettled([
+        apiClient.post(`/machines/${machineId}/unblock`),
+        apiClient.post(`/servers/${machineId}/unblock`),
+      ]);
+      setMachine((prev) => prev ? { ...prev, status: 'ONLINE', is_blocked: false, online: true } : null);
+      setShowMoreMenu(false);
+      addToast('success', 'Machine Resumed', `Machine ${hostLabel} is resumed.`);
+    } catch (err) {
+      addToast('error', 'Resume Failed', `Failed to resume machine ${hostLabel}.`);
+    }
+  };
+
   const ActiveComponent = TABS.find((t) => t.id === activeTab)?.component;
 
   const rawStatusUpper = String(machine?.status || '').toUpperCase();
-  const isDBOnline = rawStatusUpper === 'ONLINE' || machine?.online === true;
+  const isBlocked = machine?.is_blocked || machine?.IsBlocked || rawStatusUpper === 'BLOCKED' || rawStatusUpper === 'STOPPED';
+  const isDBOnline = !isBlocked && (rawStatusUpper === 'ONLINE' || machine?.online === true);
 
   let lastSeenDiff = Infinity;
   const lastSeenVal = liveMetric?.created_at || machine?.last_seen || machine?.LastSeen;
@@ -223,7 +261,7 @@ export default function MachineDetailPage() {
   }
   const isRecentTelemetry = lastSeenDiff < 120000; // 2 minutes
 
-  const isOnline = isDBOnline && (isRecentTelemetry || liveMetric !== undefined);
+  const isOnline = !isBlocked && isDBOnline && (isRecentTelemetry || liveMetric !== undefined);
 
   const resolvedMachine = machine || {
     id: machineId,
@@ -328,6 +366,30 @@ export default function MachineDetailPage() {
                   <Terminal size={14} color="#a855f7" />
                   <span>Switch to Terminal Tab</span>
                 </button>
+
+                <div className="menu-divider" />
+
+                {isBlocked ? (
+                  <button
+                    className="menu-item"
+                    type="button"
+                    onClick={handleResumeMachine}
+                    style={{ color: '#38bdf8' }}
+                  >
+                    <Unlock size={14} color="#38bdf8" />
+                    <span>Start / Resume Machine</span>
+                  </button>
+                ) : (
+                  <button
+                    className="menu-item"
+                    type="button"
+                    onClick={handleStopMachine}
+                    style={{ color: '#ef4444' }}
+                  >
+                    <Lock size={14} color="#ef4444" />
+                    <span>Stop / Block Machine</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -338,9 +400,15 @@ export default function MachineDetailPage() {
       <div className="host-title-bar">
         <div className="host-title-left">
           <h1 className="host-name">{resolvedMachine?.hostname || machineId}</h1>
-          <span className={`status-badge ${isOnline ? 'online' : 'offline'}`}>
-            <span className="dot" /> {isOnline ? 'ONLINE' : 'OFFLINE'}
-          </span>
+          {isBlocked ? (
+            <span className="status-badge stopped" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.35)', fontWeight: 700, gap: '4px', display: 'inline-flex', alignItems: 'center' }}>
+              <Lock size={12} color="#ef4444" /> STOPPED
+            </span>
+          ) : (
+            <span className={`status-badge ${isOnline ? 'online' : 'offline'}`}>
+              <span className="dot" /> {isOnline ? 'ONLINE' : 'OFFLINE'}
+            </span>
+          )}
         </div>
 
         <div className="host-status-right">

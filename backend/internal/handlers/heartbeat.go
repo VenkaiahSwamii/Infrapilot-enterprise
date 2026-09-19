@@ -60,9 +60,9 @@ func Heartbeat(c *gin.Context) {
 		return
 	}
 
-	if machine.IsBlocked || strings.EqualFold(machine.Status, "BLOCKED") {
+	if machine.IsBlocked || strings.EqualFold(machine.Status, "BLOCKED") || strings.EqualFold(machine.Status, "STOPPED") {
 		c.JSON(http.StatusForbidden, gin.H{
-			"error":  "Machine is blocked by administrator.",
+			"error":  "Machine is stopped or blocked by administrator.",
 			"status": "blocked",
 		})
 		return
@@ -70,10 +70,10 @@ func Heartbeat(c *gin.Context) {
 
 	if database.DB != nil && machine.ID != uuid.Nil {
 		var count int64
-		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?)) AND (is_blocked = true OR LOWER(status) = 'blocked')", machine.ID, machine.Hostname).Scan(&count).Error
+		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?) AND (is_blocked = true OR LOWER(status) = 'blocked' OR LOWER(status) = 'stopped')", machine.ID, machine.Hostname, machine.IPAddress).Scan(&count).Error
 		if count > 0 {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error":  "Machine is blocked by administrator.",
+				"error":  "Machine is stopped or blocked by administrator.",
 				"status": "blocked",
 			})
 			return
