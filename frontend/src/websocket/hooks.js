@@ -84,8 +84,18 @@ export function useWebSocketConnection() {
         } else if (message.type === 'alert') {
           if (message.status === 'RESOLVED') {
             resolveAlert(message.id);
+            addToast(
+              'success',
+              `✅ Resolved: ${message.title || 'System Alert'}`,
+              `Server: ${message.hostname || 'Unknown'} has returned to normal.`
+            );
           } else {
             addAlert(message);
+            addToast(
+              message.severity === 'Critical' ? 'critical' : 'warning',
+              `🚨 Alert: ${message.title || 'System Alert'}`,
+              `Server: ${message.hostname || 'Unknown'} - ${message.description || message.message || 'Alert threshold triggered.'}`
+            );
           }
         } else if (message.type === 'machine_status_changed' || message.type === 'machine_status') {
           fetchServers();

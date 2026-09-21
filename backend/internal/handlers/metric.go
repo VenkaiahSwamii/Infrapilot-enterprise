@@ -416,7 +416,11 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		Upload:       input.UploadMbps,
 		UploadMbps:   input.UploadMbps,
 		Download:     input.DownloadMbps,
-		DownloadMbps: input.DownloadMbps,
+		MemoryTotal:  input.TotalMemory,
+		MemoryUsed:   func() uint64 { if input.TotalMemory > input.FreeMemory { return input.TotalMemory - input.FreeMemory }; return 0 }(),
+		DiskTotal:    metric.DiskTotal,
+		DiskUsed:     metric.DiskUsed,
+		CPUCores:     input.CPUCores,
 		Time:         metric.CreatedAt,
 	}
 

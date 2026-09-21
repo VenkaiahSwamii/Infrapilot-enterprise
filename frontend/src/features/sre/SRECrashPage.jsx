@@ -46,16 +46,18 @@ export default function SRECrashPage() {
         setMachines(raw);
       }
 
+      const isNonRunning = (st) => ['stopped', 'failed', 'inactive', 'dead', 'exited', 'tripped'].includes(String(st || '').toLowerCase());
+
       if (svcRes && Array.isArray(svcRes.data) && svcRes.data.length > 0) {
         const mapped = svcRes.data.map((s, idx) => ({
           id: `svc-${idx}`,
           name: s.name ? (s.name.includes('.') ? s.name : `${s.name}.service`) : `service-${idx}`,
           type: String(s.name || '').toLowerCase().includes('ssh') ? 'DAEMON / SYSTEMD' : String(s.name || '').toLowerCase().includes('journal') ? 'DAEMON / LOGGING' : 'DAEMON / SYSTEM',
-          status: String(s.status || '').toLowerCase() === 'stopped' ? 'TRIPPED' : 'HEALTHY',
-          restarts: 0,
+          status: isNonRunning(s.status) ? 'TRIPPED' : 'HEALTHY',
+          restarts: typeof s.restart_count === 'number' ? s.restart_count : (typeof s.restarts === 'number' ? s.restarts : (isNonRunning(s.status) ? 3 : 0)),
           maxRestarts: 3,
           windowSec: 60,
-          circuitBreaker: String(s.status || '').toLowerCase() === 'stopped' ? 'TRIPPED' : 'ARMED',
+          circuitBreaker: isNonRunning(s.status) ? 'TRIPPED' : 'ARMED',
           description: `Managed service runtime daemon for ${s.name || 'system'}.`,
         }));
         setLiveServices(mapped);
@@ -72,12 +74,20 @@ export default function SRECrashPage() {
 
   useEffect(() => {
     fetchServicesData();
+    const interval = setInterval(fetchServicesData, 5000);
+    return () => clearInterval(interval);
   }, [machineId]);
 
   const handleResetFlap = async () => {
     setIsResetting(true);
     try {
-      await apiClient.post('/services/reset');
+      if (machineId) {
+        await apiClient.post('/services/action', {
+          machine_id: String(machineId),
+          service: 'ssh',
+          target: 'restart'
+        }).catch(() => null);
+      }
     } catch {}
     setTimeout(() => {
       setIsResetting(false);
@@ -120,6 +130,7 @@ export default function SRECrashPage() {
   ];
 
   const servicesList = useMemo(() => {
+    const isNonRunning = (st) => ['stopped', 'failed', 'inactive', 'dead', 'exited', 'tripped'].includes(String(st || '').toLowerCase());
     return CONFIG_TOML_SERVICES.map((cfgSvc) => {
       // Find if live service status was reported for this config.toml entry
       const found = liveServices.find((ls) => {
@@ -127,12 +138,15 @@ export default function SRECrashPage() {
         return nameLower.includes(cfgSvc.matchKey) || nameLower === cfgSvc.name.toLowerCase();
       });
 
-      const isTripped = found && String(found.status || '').toLowerCase() === 'stopped';
+      const actualRestarts = found ? (found.restarts ?? found.restart_count ?? 0) : 0;
+      const isStopped = found && isNonRunning(found.status);
+      const isTripped = isStopped || actualRestarts >= cfgSvc.maxRestarts;
+      const count = isTripped ? Math.max(actualRestarts, 3) : actualRestarts;
 
       return {
         ...cfgSvc,
         status: isTripped ? 'TRIPPED' : 'HEALTHY',
-        restarts: isTripped ? 3 : 0,
+        restarts: count,
         circuitBreaker: isTripped ? 'TRIPPED' : cfgSvc.circuitBreaker,
       };
     });

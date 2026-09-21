@@ -176,6 +176,12 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 				"priority":     alert.Priority,
 				"updated_at":   now,
 			})
+			existing.MetricValue = alert.MetricValue
+			existing.Message = alert.Message
+			existing.Severity = alert.Severity
+			existing.Priority = alert.Priority
+			existing.UpdatedAt = now
+			BroadcastAlertPayload(existing, hostname)
 			return nil
 		}
 	}
@@ -227,17 +233,24 @@ func BroadcastAlertPayload(alert models.LinuxAlert, hostname string) {
 	if websocket.WS != nil {
 		websocket.WS.Broadcast(payload)
 
-		// Publish structured event
+		// Publish structured event to global room (serverID: "")
 		if alert.Status == "RESOLVED" {
-			websocket.PublishEvent("alert.resolved", alert.MachineID.String(), payload)
+			websocket.PublishEvent("alert.resolved", "", payload)
 		} else {
-			websocket.PublishEvent("alert.created", alert.MachineID.String(), payload)
+			websocket.PublishEvent("alert.created", "", payload)
 		}
 	}
 
 	// 2. Broadcast via injected Hub if available
 	if hubInstance != nil {
-		jsonData, err := json.Marshal(payload)
+		eventObj := map[string]interface{}{
+			"event":   "alert.created",
+			"payload": payload,
+		}
+		if alert.Status == "RESOLVED" {
+			eventObj["event"] = "alert.resolved"
+		}
+		jsonData, err := json.Marshal(eventObj)
 		if err == nil {
 			hubInstance.Broadcast(jsonData)
 		}

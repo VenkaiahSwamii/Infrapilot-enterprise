@@ -146,13 +146,21 @@ export function ServerStoreProvider({ children }) {
       upload_mbps: Number(rawMetrics.upload_mbps ?? rawMetrics.upload ?? 0),
       download_mbps: Number(rawMetrics.download_mbps ?? rawMetrics.download ?? 0),
       latency_ms: Number(rawMetrics.latency_ms ?? rawMetrics.latency ?? 12),
+      memory_total: rawMetrics.memory_total ? Number(rawMetrics.memory_total) : undefined,
+      memory_used: rawMetrics.memory_used ? Number(rawMetrics.memory_used) : undefined,
+      disk_total: rawMetrics.disk_total ? Number(rawMetrics.disk_total) : undefined,
+      disk_used: rawMetrics.disk_used ? Number(rawMetrics.disk_used) : undefined,
+      cpu_cores: rawMetrics.cpu_cores ? Number(rawMetrics.cpu_cores) : undefined,
       created_at: timestamp,
       formatted_time: formattedTime,
     };
 
     setLiveMetricsMap((prev) => ({
       ...prev,
-      [normalizedId]: normalizedMetric,
+      [normalizedId]: {
+        ...(prev[normalizedId] || {}),
+        ...normalizedMetric,
+      },
     }));
 
     setTelemetryHistoryMap((prev) => {
@@ -186,6 +194,9 @@ export function ServerStoreProvider({ children }) {
               upload_mbps: normalizedMetric.upload_mbps,
               download_mbps: normalizedMetric.download_mbps,
               latency_ms: normalizedMetric.latency_ms,
+              memory_total: normalizedMetric.memory_total || s.memory_total,
+              disk_total: normalizedMetric.disk_total || s.disk_total,
+              cpu_cores: normalizedMetric.cpu_cores || s.cpu_cores,
               last_seen: formattedTime,
               status: 'ONLINE',
             };
@@ -207,6 +218,9 @@ export function ServerStoreProvider({ children }) {
         upload_mbps: normalizedMetric.upload_mbps,
         download_mbps: normalizedMetric.download_mbps,
         latency_ms: normalizedMetric.latency_ms,
+        memory_total: normalizedMetric.memory_total,
+        disk_total: normalizedMetric.disk_total,
+        cpu_cores: normalizedMetric.cpu_cores,
         last_seen: formattedTime,
       };
 

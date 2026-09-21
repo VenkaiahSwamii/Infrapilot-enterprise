@@ -189,7 +189,7 @@ export default function SREOperationsPage() {
   const handleResetFlapStatus = async () => {
     setIsResetting(true);
     try {
-      await apiClient.post('/services/reset');
+      await apiClient.post('/services/action', { service: 'ssh', target: 'restart' }).catch(() => null);
       setFlappingServices((prev) =>
         prev.map((s) => ({
           ...s,

@@ -133,10 +133,20 @@ func GetMetrics() (*metrics.Metrics, error) {
 		usedDiskBytes = diskInfo.Used
 		diskPercent = diskInfo.UsedPercent
 	} else if len(filesystems) > 0 {
-		for _, fs := range filesystems {
-			totalDiskBytes += fs.Total
-			usedDiskBytes += fs.Used
+		// Prefer primary root volume (C: or /) over summing distinct partitions
+		var rootFS *metrics.FilesystemMetric
+		for idx := range filesystems {
+			mp := strings.ToLower(filesystems[idx].MountPoint)
+			if (runtime.GOOS == "windows" && strings.HasPrefix(mp, "c")) || mp == "/" {
+				rootFS = &filesystems[idx]
+				break
+			}
 		}
+		if rootFS == nil {
+			rootFS = &filesystems[0]
+		}
+		totalDiskBytes = rootFS.Total
+		usedDiskBytes = rootFS.Used
 		if totalDiskBytes > 0 {
 			diskPercent = (float64(usedDiskBytes) / float64(totalDiskBytes)) * 100.0
 		}
@@ -333,6 +343,28 @@ func collectNetworkInterfaces() []metrics.NetworkInterfaceMetric {
 }
 
 func collectServices() []metrics.ServiceMetric {
+	if runtime.GOOS == "linux" {
+		servicesToCheck := []string{"ssh", "cron", "systemd-journald", "docker", "nginx", "postgresql", "mysql", "redis"}
+		result := make([]metrics.ServiceMetric, 0, len(servicesToCheck))
+		for _, name := range servicesToCheck {
+			cmd := exec.Command("systemctl", "is-active", name)
+			out, err := cmd.Output()
+			st := strings.TrimSpace(string(out))
+			status := "Stopped"
+			if err == nil && (st == "active" || st == "activating" || st == "reloading") {
+				status = "Running"
+			} else if st == "failed" {
+				status = "Failed"
+			}
+			result = append(result, metrics.ServiceMetric{
+				Name:         name,
+				Status:       status,
+				RestartCount: 0,
+			})
+		}
+		return result
+	}
+
 	if runtime.GOOS != "windows" {
 		return []metrics.ServiceMetric{}
 	}

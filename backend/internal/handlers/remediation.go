@@ -303,7 +303,15 @@ func TestRemediationHandler(c *gin.Context) {
 		return
 	}
 
-	mUUID, _ := uuid.Parse(req.MachineID)
+	var mUUID uuid.UUID
+	if parsed, err := uuid.Parse(req.MachineID); err == nil {
+		mUUID = parsed
+	} else if database.DB != nil {
+		var m models.Machine
+		if err := database.DB.Where("id::text LIKE ? OR LOWER(hostname) = LOWER(?)", req.MachineID+"%", req.MachineID).First(&m).Error; err == nil {
+			mUUID = m.ID
+		}
+	}
 	testAlert := models.LinuxAlert{
 		ID:        uuid.New(),
 		MachineID: mUUID,

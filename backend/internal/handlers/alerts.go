@@ -92,12 +92,26 @@ func ListAlerts(c *gin.Context) {
 		return
 	}
 
-	// Fetch servers to enrich alerts with hostnames
+	// Fetch servers and machines to enrich alerts with hostnames
 	var servers []models.Server
 	database.DB.Select("id, name, hostname, ip_address, os").Find(&servers)
 	serverMap := make(map[uuid.UUID]models.Server)
 	for _, s := range servers {
 		serverMap[s.ID] = s
+	}
+
+	var machines []models.Machine
+	database.DB.Select("id, name, hostname, ip_address, os").Find(&machines)
+	for _, m := range machines {
+		if _, exists := serverMap[m.ID]; !exists {
+			serverMap[m.ID] = models.Server{
+				ID:        m.ID,
+				Name:      m.Name,
+				Hostname:  m.Hostname,
+				IPAddress: m.IPAddress,
+				OS:        m.OS,
+			}
+		}
 	}
 
 	enriched := make([]EnrichedAlert, len(alerts))
