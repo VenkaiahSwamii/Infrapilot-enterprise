@@ -48,34 +48,39 @@ func CheckNetworkHealth(machine models.Machine, metric models.Metric, input serv
 	}
 
 	// 2. Latency Check
-	if input.LatencyMs > 300.0 {
+	latencyVal := input.LatencyMs
+	if latencyVal == 0 {
+		latencyVal = metric.LatencyMs
+	}
+
+	if latencyVal > 300.0 {
 		alerts = append(alerts, models.LinuxAlert{
 			Title:              "High Network Latency Critical",
-			Description:        fmt.Sprintf("Network round-trip latency critical: %.1f ms", input.LatencyMs),
+			Description:        fmt.Sprintf("Network round-trip latency critical: %.1f ms", latencyVal),
 			Category:           "Network",
 			Component:          "network_stack",
 			Source:             "NetworkChecker",
 			Type:               "latency_ms",
 			Severity:           "Critical",
 			Priority:           models.MapSeverityToPriority("Critical"),
-			Message:            fmt.Sprintf("Latency Critical: %.1f ms > 300.0 ms", input.LatencyMs),
-			MetricValue:        input.LatencyMs,
+			Message:            fmt.Sprintf("Latency Critical: %.1f ms > 300.0 ms", latencyVal),
+			MetricValue:        latencyVal,
 			Threshold:          300.0,
 			Status:             "OPEN",
 			RecoverySuggestion: "Check network congestion, DNS resolution performance, or upstream ISP routing degradation.",
 		})
-	} else if input.LatencyMs > 100.0 {
+	} else if latencyVal > 100.0 {
 		alerts = append(alerts, models.LinuxAlert{
 			Title:              "High Network Latency Warning",
-			Description:        fmt.Sprintf("Network round-trip latency elevated: %.1f ms", input.LatencyMs),
+			Description:        fmt.Sprintf("Network round-trip latency elevated: %.1f ms", latencyVal),
 			Category:           "Network",
 			Component:          "network_stack",
 			Source:             "NetworkChecker",
 			Type:               "latency_ms",
 			Severity:           "Warning",
 			Priority:           models.MapSeverityToPriority("Warning"),
-			Message:            fmt.Sprintf("Latency Warning: %.1f ms > 100.0 ms", input.LatencyMs),
-			MetricValue:        input.LatencyMs,
+			Message:            fmt.Sprintf("Latency Warning: %.1f ms > 100.0 ms", latencyVal),
+			MetricValue:        latencyVal,
 			Threshold:          100.0,
 			Status:             "OPEN",
 			RecoverySuggestion: "Monitor network traffic bandwidth utilization.",

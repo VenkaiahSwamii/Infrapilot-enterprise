@@ -343,6 +343,28 @@ func collectNetworkInterfaces() []metrics.NetworkInterfaceMetric {
 }
 
 func collectServices() []metrics.ServiceMetric {
+	if runtime.GOOS == "linux" {
+		servicesToCheck := []string{"ssh", "cron", "systemd-journald", "docker", "nginx", "postgresql", "mysql", "redis"}
+		result := make([]metrics.ServiceMetric, 0, len(servicesToCheck))
+		for _, name := range servicesToCheck {
+			cmd := exec.Command("systemctl", "is-active", name)
+			out, err := cmd.Output()
+			st := strings.TrimSpace(string(out))
+			status := "Stopped"
+			if err == nil && (st == "active" || st == "activating" || st == "reloading") {
+				status = "Running"
+			} else if st == "failed" {
+				status = "Failed"
+			}
+			result = append(result, metrics.ServiceMetric{
+				Name:         name,
+				Status:       status,
+				RestartCount: 0,
+			})
+		}
+		return result
+	}
+
 	if runtime.GOOS != "windows" {
 		return []metrics.ServiceMetric{}
 	}

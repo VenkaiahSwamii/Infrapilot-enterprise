@@ -54,15 +54,19 @@ func GetMachineServices(c *gin.Context) {
 	}
 
 	type ServiceItem struct {
-		Name   string `json:"name"`
-		Status string `json:"status"`
+		Name         string `json:"name"`
+		Status       string `json:"status"`
+		RestartCount int    `json:"restart_count"`
+		Restarts     int    `json:"restarts"`
 	}
 
 	response := make([]ServiceItem, 0, len(servicesList))
 	for _, s := range servicesList {
 		response = append(response, ServiceItem{
-			Name:   s.Name,
-			Status: s.Status,
+			Name:         s.Name,
+			Status:       s.Status,
+			RestartCount: s.RestartCount,
+			Restarts:     s.RestartCount,
 		})
 	}
 

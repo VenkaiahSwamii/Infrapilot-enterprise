@@ -12,34 +12,39 @@ func CheckCPUHealth(machine models.Machine, metric models.Metric, input services
 	var alerts []models.LinuxAlert
 
 	// 1. CPU Usage Check
-	if input.CPUUsage > 95.0 {
+	cpuVal := input.CPUUsage
+	if cpuVal == 0 {
+		cpuVal = metric.CPUUsage
+	}
+
+	if cpuVal > 95.0 {
 		alerts = append(alerts, models.LinuxAlert{
 			Title:              "High CPU Usage",
-			Description:        fmt.Sprintf("CPU usage reached critical level: %.1f%%", input.CPUUsage),
+			Description:        fmt.Sprintf("CPU usage reached critical level: %.1f%%", cpuVal),
 			Category:           "CPU",
 			Component:          "processor",
 			Source:             "CPUChecker",
 			Type:               "cpu_usage",
 			Severity:           "Critical",
 			Priority:           models.MapSeverityToPriority("Critical"),
-			Message:            fmt.Sprintf("CPU Usage Critical: %.1f%% > 95.0%%", input.CPUUsage),
-			MetricValue:        input.CPUUsage,
+			Message:            fmt.Sprintf("CPU Usage Critical: %.1f%% > 95.0%%", cpuVal),
+			MetricValue:        cpuVal,
 			Threshold:          95.0,
 			Status:             "OPEN",
 			RecoverySuggestion: "Identify top CPU-consuming processes (`top` or `htop`). Scale workloads or restart high-usage background services.",
 		})
-	} else if input.CPUUsage > 90.0 {
+	} else if cpuVal > 90.0 {
 		alerts = append(alerts, models.LinuxAlert{
 			Title:              "High CPU Usage",
-			Description:        fmt.Sprintf("CPU usage reached warning level: %.1f%%", input.CPUUsage),
+			Description:        fmt.Sprintf("CPU usage reached warning level: %.1f%%", cpuVal),
 			Category:           "CPU",
 			Component:          "processor",
 			Source:             "CPUChecker",
 			Type:               "cpu_usage",
 			Severity:           "Warning",
 			Priority:           models.MapSeverityToPriority("Warning"),
-			Message:            fmt.Sprintf("CPU Usage Warning: %.1f%% > 90.0%%", input.CPUUsage),
-			MetricValue:        input.CPUUsage,
+			Message:            fmt.Sprintf("CPU Usage Warning: %.1f%% > 90.0%%", cpuVal),
+			MetricValue:        cpuVal,
 			Threshold:          90.0,
 			Status:             "OPEN",
 			RecoverySuggestion: "Monitor CPU trend. Check for runaway loops or unoptimized worker threads.",

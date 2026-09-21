@@ -84,6 +84,7 @@ export default function SRELatencyPage() {
 
   useEffect(() => {
     fetchLatencyData();
+    const interval = setInterval(fetchLatencyData, 5000);
 
     let socket = null;
     try {
@@ -103,6 +104,7 @@ export default function SRELatencyPage() {
     }
 
     return () => {
+      clearInterval(interval);
       if (socket && typeof socket.close === 'function') {
         try { socket.close(); } catch {}
       }
@@ -117,19 +119,21 @@ export default function SRELatencyPage() {
   const live = (machineId && liveMetrics[machineId]) ? liveMetrics[machineId] : {};
 
   // Real or derived live latency ms
-  const realLatency = live.latency_ms !== undefined
-    ? Number(live.latency_ms).toFixed(1)
-    : '17.7';
+  const rawLat = live.latency_ms ?? primaryMachine.latency_ms ?? 17.7;
+  const realLatency = Number(rawLat).toFixed(1);
+
+  const numLat = Number(realLatency);
+  const latencyStatus = numLat >= 120 ? 'CRITICAL' : numLat >= 50 ? 'WARNING' : 'EXCELLENT';
 
   const endpoints = [
     {
       id: 'end-gateway',
       name: 'gateway',
       type: 'ENDPOINT',
-      status: 'EXCELLENT',
-      latencyMs: Number(realLatency),
+      status: latencyStatus,
+      latencyMs: numLat,
       gatewayIp: '8.8.8.8',
-      history: [17.2, 17.5, 17.8, 17.4, 17.7, 17.6, 17.9, Number(realLatency)],
+      history: [17.2, 17.5, 17.8, 17.4, 17.7, 17.6, 17.9, numLat],
     },
   ];
 

@@ -75,8 +75,12 @@ func CheckMemoryHealth(machine models.Machine, metric models.Metric, input servi
 
 	// 3. Low Free Memory Check (<500MB free)
 	const minFreeBytes uint64 = 500 * 1024 * 1024 // 500MB
-	if input.FreeMemory > 0 && input.FreeMemory < minFreeBytes {
-		freeMB := float64(input.FreeMemory) / (1024 * 1024)
+	freeRam := input.FreeMemory
+	if freeRam == 0 {
+		freeRam = metric.FreeMemory
+	}
+	if freeRam > 0 && freeRam < minFreeBytes {
+		freeMB := float64(freeRam) / (1024 * 1024)
 		alerts = append(alerts, models.LinuxAlert{
 			Title:              "Low Free Memory",
 			Description:        fmt.Sprintf("Available free memory dangerously low: %.0f MB remaining", freeMB),
