@@ -16,6 +16,7 @@ import { apiClient } from '../../api/client.js';
 import { getMachineId } from '../../utils/machineId.js';
 import { useServerStore } from '../../store/serverStore.jsx';
 import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
+import AdminSREPolicyControl from '../../components/sre/AdminSREPolicyControl.jsx';
 
 export default function SRECrashPage() {
   const [machines, setMachines] = useState([]);
@@ -319,6 +320,8 @@ export default function SRECrashPage() {
               <CheckCircle2 size={14} className="footer-icon green" />
               <span>Service daemon is running healthy. No crash events detected.</span>
             </div>
+
+            <AdminSREPolicyControl category="Service" component={svc.matchKey || svc.name} compact />
           </div>
         ))}
       </div>

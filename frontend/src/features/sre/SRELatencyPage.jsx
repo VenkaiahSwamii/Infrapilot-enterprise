@@ -18,6 +18,7 @@ import { createLiveEventsSocket } from '../../websocket/liveEvents.js';
 import { getMachineId } from '../../utils/machineId.js';
 import { useServerStore } from '../../store/serverStore.jsx';
 import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
+import AdminSREPolicyControl from '../../components/sre/AdminSREPolicyControl.jsx';
 
 // SVG Sparkline component
 function LatencySparkline({ data = [17.2, 17.5, 17.8, 17.4, 17.7, 17.6, 17.9, 17.7], color = '#22c55e' }) {
@@ -283,6 +284,8 @@ export default function SRELatencyPage() {
             </div>
 
             <LatencySparkline data={ep.history} color="#22c55e" />
+
+            <AdminSREPolicyControl category="Network" component={ep.name.toLowerCase().includes('gateway') ? 'gateway' : 'dns_latency'} compact />
           </div>
         ))}
       </div>

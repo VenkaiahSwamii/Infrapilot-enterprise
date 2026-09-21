@@ -101,6 +101,66 @@ func (s *RemediationService) EvaluateAndRemediate(alert models.LinuxAlert, incid
 	}
 
 	now := time.Now()
+
+	// Check Admin SRE Action Policy overrides (AUTO_REMEDIATE vs NOTIFY_EMAIL)
+	var srePolicy models.SREActionPolicy
+	isNotifyEmail := false
+	if database.DB != nil {
+		targetComp := strings.TrimSpace(alert.Component)
+		targetCat := strings.TrimSpace(alert.Category)
+
+		var err error
+		if targetComp != "" {
+			err = database.DB.Where("enabled = ? AND LOWER(component) = LOWER(?)", true, targetComp).Order("created_at desc").First(&srePolicy).Error
+		}
+		if (err != nil || targetComp == "") && targetCat != "" {
+			err = database.DB.Where("enabled = ? AND LOWER(category) = LOWER(?) AND (component = '' OR component IS NULL)", true, targetCat).Order("created_at desc").First(&srePolicy).Error
+		}
+
+		if err == nil && strings.ToUpper(srePolicy.Mode) == "NOTIFY_EMAIL" {
+			isNotifyEmail = true
+		}
+	}
+
+	if isNotifyEmail {
+		// Fetch machine hostname
+		hostname := alert.MachineID.String()
+		if database.DB != nil {
+			var m models.Machine
+			if err := database.DB.Where("id = ?", alert.MachineID).First(&m).Error; err == nil && m.Hostname != "" {
+				hostname = m.Hostname
+			}
+		}
+
+		// Dispatch instant Email Notification to recipient
+		emailSvc := NewEmailService()
+		_ = emailSvc.SendPolicyAlertEmail(&srePolicy, alert, hostname)
+
+		// Record remediation job with NOTIFY_EMAIL_SENT status
+		compTime := time.Now()
+		job := &models.RemediationJob{
+			ID:          uuid.New(),
+			IncidentID:  incidentID,
+			MachineID:   alert.MachineID,
+			PolicyID:    srePolicy.ID,
+			ActionType:  "notify_email",
+			Command:     "N/A (Admin Mode: NOTIFY_EMAIL)",
+			Status:      "NOTIFY_EMAIL_SENT",
+			Output:      fmt.Sprintf("Auto-remediation bypassed by Admin SRE Policy (Mode: NOTIFY_EMAIL). Email dispatched to %s.", srePolicy.RecipientEmail),
+			StartedAt:   now,
+			CompletedAt: &compTime,
+			CreatedAt:   now,
+			UpdatedAt:   compTime,
+		}
+
+		if database.DB != nil {
+			_ = database.DB.Create(job)
+		}
+		s.broadcastRemediationEvent("remediation_bypassed", *job)
+		utils.LogAudit("RemediationEngine", alert.MachineID, fmt.Sprintf("Auto-remediation bypassed by SRE Policy for %s - Email sent to %s", alert.Title, srePolicy.RecipientEmail), "Success")
+		return job, nil
+	}
+
 	status := "PENDING"
 	if policy.RequiresApproval {
 		status = "WAITING_APPROVAL"

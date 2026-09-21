@@ -279,6 +279,7 @@ func Connect() {
 		&models.DockerEvent{},
 		&models.Notification{},
 		&models.NotificationPolicy{},
+		&models.SREActionPolicy{},
 		&models.Incident{},
 		&models.IncidentTimeline{},
 		&models.IncidentAlert{},

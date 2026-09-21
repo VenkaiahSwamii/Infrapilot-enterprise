@@ -27,6 +27,7 @@ import { useServerStore } from '../../store/serverStore.jsx';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
 import { apiClient } from '../../api/client.js';
 import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
+import AdminSREPolicyControl from '../../components/sre/AdminSREPolicyControl.jsx';
 
 export default function SREDiskPage() {
   const { addToast } = useDashboardStore();
@@ -585,6 +586,8 @@ export default function SREDiskPage() {
                 <CheckCircle2 size={14} className="footer-icon green" />
                 <span>Auto-Remediation armed (Reactive threshold: {diskPolicy.reactiveThreshold}%)</span>
               </div>
+
+              <AdminSREPolicyControl category="Storage" component={vol.mountPoint === '/' ? 'root_disk' : vol.mountPoint === '/var/log' || String(vol.name).includes('var') ? 'var_log_disk' : 'root_disk'} compact />
             </div>
           );
         })}

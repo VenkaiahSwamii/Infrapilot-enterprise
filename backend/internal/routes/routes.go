@@ -490,6 +490,12 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.DELETE("/alerts/purge-resolved", handlers.PurgeResolvedAlerts)
 			protected.POST("/alerts/:alertId/ai-analyze", handlers.AIAnalyzeAlert)
 			protected.POST("/alerts/:alertId/remediate", handlers.RemediateAlert)
+
+			// Admin SRE Action Policy Management
+			protected.GET("/sre/policies", handlers.GetSREActionPolicies)
+			protected.POST("/sre/policies", handlers.SaveSREActionPolicy)
+			protected.PUT("/sre/policies/:id", handlers.UpdateSREActionPolicy)
+			protected.DELETE("/sre/policies/:id", handlers.DeleteSREActionPolicy)
 			protected.GET("/linux/servers", handlers.ListLinuxServers)
 			protected.GET("/linux/servers/:id", handlers.GetLinuxServer)
 			protected.GET("/linux/servers/:id/metrics", handlers.GetLinuxMetrics)
