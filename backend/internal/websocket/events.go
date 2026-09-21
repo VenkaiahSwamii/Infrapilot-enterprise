@@ -45,6 +45,11 @@ type MetricUpdatedPayload struct {
 	UploadMbps   float64   `json:"upload_mbps"`
 	Download     float64   `json:"download"`
 	DownloadMbps float64   `json:"download_mbps"`
+	MemoryTotal  uint64    `json:"memory_total,omitempty"`
+	MemoryUsed   uint64    `json:"memory_used,omitempty"`
+	DiskTotal    uint64    `json:"disk_total,omitempty"`
+	DiskUsed     uint64    `json:"disk_used,omitempty"`
+	CPUCores     int       `json:"cpu_cores,omitempty"`
 	Time         time.Time `json:"time"`
 }
 

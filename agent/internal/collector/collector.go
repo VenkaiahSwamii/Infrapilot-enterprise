@@ -133,10 +133,20 @@ func GetMetrics() (*metrics.Metrics, error) {
 		usedDiskBytes = diskInfo.Used
 		diskPercent = diskInfo.UsedPercent
 	} else if len(filesystems) > 0 {
-		for _, fs := range filesystems {
-			totalDiskBytes += fs.Total
-			usedDiskBytes += fs.Used
+		// Prefer primary root volume (C: or /) over summing distinct partitions
+		var rootFS *metrics.FilesystemMetric
+		for idx := range filesystems {
+			mp := strings.ToLower(filesystems[idx].MountPoint)
+			if (runtime.GOOS == "windows" && strings.HasPrefix(mp, "c")) || mp == "/" {
+				rootFS = &filesystems[idx]
+				break
+			}
 		}
+		if rootFS == nil {
+			rootFS = &filesystems[0]
+		}
+		totalDiskBytes = rootFS.Total
+		usedDiskBytes = rootFS.Used
 		if totalDiskBytes > 0 {
 			diskPercent = (float64(usedDiskBytes) / float64(totalDiskBytes)) * 100.0
 		}
