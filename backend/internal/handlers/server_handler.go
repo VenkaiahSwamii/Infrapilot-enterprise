@@ -332,12 +332,20 @@ func (h *ServerHandler) DeleteServer(c *gin.Context) {
 		return
 	}
 
+	usernameVal, _ := c.Get("username")
+	username := "admin"
+	if usernameVal != nil {
+		username = fmt.Sprintf("%v", usernameVal)
+	}
+
 	server, err := h.serverService.GetServerByIDOrHostname(idStr)
 	var sUUID uuid.UUID
 	var hostname string
+	var ipAddress string
 	if err == nil && server != nil {
 		sUUID = server.ID
 		hostname = server.Hostname
+		ipAddress = server.IPAddress
 	} else if parsed, parseErr := uuid.Parse(idStr); parseErr == nil {
 		sUUID = parsed
 		hostname = idStr
@@ -345,6 +353,11 @@ func (h *ServerHandler) DeleteServer(c *gin.Context) {
 
 	if database.DB != nil {
 		txErr := database.DB.Transaction(func(tx *gorm.DB) error {
+			// 1. Record permanent decommission tombstone so agent cannot auto-resurrect or revert
+			if sUUID != uuid.Nil || hostname != "" || ipAddress != "" {
+				_ = utils.DecommissionHost(tx, sUUID, hostname, ipAddress, username, "Permanently deleted and decommissioned by administrator")
+			}
+
 			if sUUID != uuid.Nil {
 				strID := sUUID.String()
 				// Child tables referencing machine_id / server_id
@@ -391,6 +404,9 @@ func (h *ServerHandler) DeleteServer(c *gin.Context) {
 			if hostname != "" {
 				tx.Exec("DELETE FROM servers WHERE LOWER(hostname) = LOWER(?)", hostname)
 			}
+			if ipAddress != "" && ipAddress != "127.0.0.1" && ipAddress != "localhost" {
+				tx.Exec("DELETE FROM servers WHERE ip_address = ?", ipAddress)
+			}
 			return nil
 		})
 		if txErr != nil {
@@ -399,7 +415,8 @@ func (h *ServerHandler) DeleteServer(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Server deleted successfully"})
+	utils.LogAudit(username, sUUID, fmt.Sprintf("Permanently deleted and decommissioned machine %s (%s)", hostname, idStr), "Success")
+	c.JSON(http.StatusOK, gin.H{"message": "Server permanently deleted and decommissioned successfully"})
 }
 
 func (h *ServerHandler) ServerHeartbeat(c *gin.Context) {
@@ -409,9 +426,18 @@ func (h *ServerHandler) ServerHeartbeat(c *gin.Context) {
 		return
 	}
 
+	parsedID, _ := uuid.Parse(idStr)
+	if utils.IsHostDecommissioned(database.DB, parsedID, idStr, "") {
+		c.JSON(http.StatusGone, gin.H{
+			"error":  "Machine has been permanently deleted and decommissioned by administrator. Telemetry transmission halted.",
+			"status": "decommissioned",
+		})
+		return
+	}
+
 	server, err := h.serverService.GetServerByIDOrHostname(idStr)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Server not found"})
+		c.JSON(http.StatusGone, gin.H{"error": "Server not found or decommissioned"})
 		return
 	}
 

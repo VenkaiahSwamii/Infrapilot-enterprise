@@ -4,44 +4,39 @@ import {
   Activity, 
   RefreshCw, 
   Server, 
-  AlertTriangle, 
-  ShieldCheck, 
-  Play, 
-  Square, 
-  RotateCw, 
-  Trash2, 
   FileText, 
   Copy, 
   Check, 
   Terminal, 
-  Plus, 
-  Download, 
   Box, 
   Globe, 
   HardDrive, 
   Zap, 
   X, 
   Search, 
-  Info,
+  Eye,
+  Radio,
+  Download,
+  AlertTriangle,
+  ShieldCheck,
+  Cpu,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  HelpCircle,
+  Clock,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Sliders,
+  Filter
 } from 'lucide-react';
 import { listServers } from '../api/server.js';
 import { 
   getDockerContainers, 
-  getDockerOverview, 
   getDockerImages, 
   getDockerNetworks, 
   getDockerVolumes, 
-  getDockerEvents,
-  getContainerLogs,
-  startContainer,
-  stopContainer,
-  restartContainer,
-  removeContainer,
-  runContainer,
-  pullImage,
-  removeImage
+  getDockerEvents, 
+  getContainerLogs
 } from '../api/docker.js';
 import { useDashboardStore } from '../store/dashboardStore.jsx';
 import ServerSelectDropdown from '../components/common/ServerSelectDropdown.jsx';
@@ -59,36 +54,22 @@ export default function DockerPage() {
   const [error, setError] = useState('');
   const [selectedServerId, setSelectedServerId] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'running' | 'high-load' | 'restarting' | 'error' | 'stopped'
   const [activeTab, setActiveTab] = useState('containers'); // 'containers' | 'images' | 'networks' | 'volumes' | 'events'
-  const [actionLoading, setActionLoading] = useState({});
   const [copiedCmd, setCopiedCmd] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
 
-  // Modals
-  const [showRunModal, setShowRunModal] = useState(false);
-  const [showPullModal, setShowPullModal] = useState(false);
+  // Deep Dive Inspector Modal
+  const [inspectContainer, setInspectContainer] = useState(null);
+  const [inspectTab, setInspectTab] = useState('telemetry'); // 'telemetry' | 'diagnostics' | 'ports' | 'mounts' | 'security' | 'raw'
+
+  // Live Logs Modal
   const [activeLogContainer, setActiveLogContainer] = useState(null);
   const [containerLogs, setContainerLogs] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
-
-  // Run Container Form State
-  const [runForm, setRunForm] = useState({
-    serverId: '',
-    image: 'nginx:alpine',
-    name: '',
-    ports: '8080:80',
-    environment: '',
-    volumes: '',
-    restartPolicy: 'unless-stopped',
-    command: '',
-    network: '',
-  });
-
-  // Pull Image Form State
-  const [pullForm, setPullForm] = useState({
-    serverId: '',
-    image: 'redis:alpine',
-  });
+  const [logSearch, setLogSearch] = useState('');
+  const [logSeverity, setLogSeverity] = useState('all'); // 'all' | 'error' | 'warn-error'
+  const [autoScrollLogs, setAutoScrollLogs] = useState(true);
 
   const { addToast } = useDashboardStore();
 
@@ -99,29 +80,21 @@ export default function DockerPage() {
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(dockerCmd);
       setCopiedCmd(true);
-      setTimeout(() => setCopiedCmd(false), 2000);
-      addToast('success', 'Copied', 'Docker 1-line run command copied to clipboard.');
+      setTimeout(() => setCopiedCmd(false), 2500);
+      addToast('success', 'Command Copied', 'Docker agent run command copied to clipboard.');
     }
   };
 
-  const fetchDockerData = async (isManual = false) => {
-    if (isManual) setRefreshing(true);
+  // Fetch servers & Docker telemetry across all connected nodes
+  const fetchDockerData = async (isManualRefresh = false) => {
+    if (isManualRefresh) setRefreshing(true);
     else setLoading(true);
     setError('');
+
     try {
       const serverList = await listServers();
-      setServers(serverList);
-
-      const onlineServers = serverList.filter(
-        s => String(s.status || '').toUpperCase() === 'ONLINE' && !s.is_blocked
-      );
-
-      // Default runForm serverId if empty
-      if (!runForm.serverId && onlineServers.length > 0) {
-        const firstId = onlineServers[0].id || onlineServers[0].ID || onlineServers[0].machine_id;
-        setRunForm(prev => ({ ...prev, serverId: firstId }));
-        setPullForm(prev => ({ ...prev, serverId: firstId }));
-      }
+      const activeServers = Array.isArray(serverList) ? serverList : [];
+      setServers(activeServers);
 
       const allContainers = [];
       const allImages = [];
@@ -129,14 +102,13 @@ export default function DockerPage() {
       const allVolumes = [];
       const allEvents = [];
 
-      // Fetch docker telemetry in parallel for all online servers
       await Promise.allSettled(
-        onlineServers.map(async (server) => {
-          const sId = server.id || server.ID || server.Id || server.machine_id;
-          const hostName = server.hostname || server.name || 'Host';
+        activeServers.map(async (srv) => {
+          const sId = srv.id || srv.ID;
+          const sName = srv.hostname || srv.name || srv.Hostname || 'Node';
 
           try {
-            const [cData, iData, nData, vData, eData] = await Promise.allSettled([
+            const [cRes, iRes, nRes, vRes, eRes] = await Promise.allSettled([
               getDockerContainers(sId),
               getDockerImages(sId),
               getDockerNetworks(sId),
@@ -144,23 +116,58 @@ export default function DockerPage() {
               getDockerEvents(sId)
             ]);
 
-            if (cData.status === 'fulfilled' && Array.isArray(cData.value)) {
-              allContainers.push(...cData.value.map(c => ({ ...c, hostServerName: hostName, hostServerId: sId })));
+            if (cRes.status === 'fulfilled' && Array.isArray(cRes.value)) {
+              cRes.value.forEach(c => {
+                allContainers.push({
+                  ...c,
+                  hostServerId: sId,
+                  hostServerName: sName,
+                  hostPlatform: srv.platform || srv.os || 'linux',
+                });
+              });
             }
-            if (iData.status === 'fulfilled' && Array.isArray(iData.value)) {
-              allImages.push(...iData.value.map(i => ({ ...i, hostServerName: hostName, hostServerId: sId })));
+
+            if (iRes.status === 'fulfilled' && Array.isArray(iRes.value)) {
+              iRes.value.forEach(img => {
+                allImages.push({
+                  ...img,
+                  hostServerId: sId,
+                  hostServerName: sName,
+                });
+              });
             }
-            if (nData.status === 'fulfilled' && Array.isArray(nData.value)) {
-              allNetworks.push(...nData.value.map(n => ({ ...n, hostServerName: hostName, hostServerId: sId })));
+
+            if (nRes.status === 'fulfilled' && Array.isArray(nRes.value)) {
+              nRes.value.forEach(net => {
+                allNetworks.push({
+                  ...net,
+                  hostServerId: sId,
+                  hostServerName: sName,
+                });
+              });
             }
-            if (vData.status === 'fulfilled' && Array.isArray(vData.value)) {
-              allVolumes.push(...vData.value.map(v => ({ ...v, hostServerName: hostName, hostServerId: sId })));
+
+            if (vRes.status === 'fulfilled' && Array.isArray(vRes.value)) {
+              vRes.value.forEach(vol => {
+                allVolumes.push({
+                  ...vol,
+                  hostServerId: sId,
+                  hostServerName: sName,
+                });
+              });
             }
-            if (eData.status === 'fulfilled' && Array.isArray(eData.value)) {
-              allEvents.push(...eData.value.map(e => ({ ...e, hostServerName: hostName, hostServerId: sId })));
+
+            if (eRes.status === 'fulfilled' && Array.isArray(eRes.value)) {
+              eRes.value.forEach(evt => {
+                allEvents.push({
+                  ...evt,
+                  hostServerId: sId,
+                  hostServerName: sName,
+                });
+              });
             }
           } catch (err) {
-            console.log(`No Docker daemon response for server ${hostName}`);
+            console.error(`Error querying Docker telemetry for host ${sName}:`, err);
           }
         })
       );
@@ -169,10 +176,10 @@ export default function DockerPage() {
       setImages(allImages);
       setNetworks(allNetworks);
       setVolumes(allVolumes);
-      setEvents(allEvents);
+      setEvents(allEvents.sort((a, b) => new Date(b.time || b.timestamp || 0) - new Date(a.time || a.timestamp || 0)));
     } catch (err) {
-      setError(err.message || 'Failed to retrieve Docker information.');
-      addToast('critical', 'Docker Sync Failed', err.message || 'Unable to contact docker nodes.');
+      console.error('Failed to load fleet Docker telemetry:', err);
+      setError('Failed to fetch Docker fleet telemetry. Please check server connections.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -180,115 +187,12 @@ export default function DockerPage() {
   };
 
   useEffect(() => {
-    fetchDockerData();
+    fetchDockerData(false);
     const interval = setInterval(() => {
-      fetchDockerData(true);
-    }, 12000);
+      fetchDockerData(false);
+    }, 15000);
     return () => clearInterval(interval);
   }, []);
-
-  // Container Actions (Start, Stop, Restart, Remove)
-  const handleContainerAction = async (container, action) => {
-    const sId = container.hostServerId;
-    const cId = container.id || container.ID || container.name || container.Name;
-    if (!sId || !cId) return;
-
-    setActionLoading(prev => ({ ...prev, [cId]: action }));
-    try {
-      if (action === 'start') await startContainer(sId, cId);
-      else if (action === 'stop') await stopContainer(sId, cId);
-      else if (action === 'restart') await restartContainer(sId, cId);
-      else if (action === 'remove') await removeContainer(sId, cId);
-
-      // Optimistic update locally
-      setContainers(prev => prev.map(c => {
-        if ((c.id === cId || c.name === cId) && c.hostServerId === sId) {
-          if (action === 'start' || action === 'restart') {
-            return { ...c, state: 'running', status: 'Up Less than a second' };
-          }
-          if (action === 'stop') {
-            return { ...c, state: 'exited', status: 'Exited (0) Just now', cpu_percent: 0 };
-          }
-        }
-        return c;
-      }).filter(c => action !== 'remove' || !((c.id === cId || c.name === cId) && c.hostServerId === sId)));
-
-      addToast('success', `Container ${action.toUpperCase()}`, `Dispatched ${action} signal for container ${container.name || cId} on ${container.hostServerName}.`);
-      setTimeout(() => fetchDockerData(true), 1500);
-    } catch (err) {
-      addToast('critical', `Action Failed: ${action}`, err.response?.data?.error || err.message);
-    } finally {
-      setActionLoading(prev => ({ ...prev, [cId]: null }));
-    }
-  };
-
-  // Run Container Form Submit
-  const handleRunSubmit = async (e) => {
-    e.preventDefault();
-    if (!runForm.serverId || !runForm.image) {
-      addToast('warning', 'Validation Error', 'Please select a host machine and specify a Docker image.');
-      return;
-    }
-
-    const payload = {
-      machine_id: runForm.serverId,
-      image: runForm.image.trim(),
-      name: runForm.name.trim(),
-      restart_policy: runForm.restartPolicy,
-      ports: runForm.ports ? runForm.ports.split(',').map(p => p.trim()).filter(Boolean) : [],
-      environment: runForm.environment ? runForm.environment.split(',').map(e => e.trim()).filter(Boolean) : [],
-      volumes: runForm.volumes ? runForm.volumes.split(',').map(v => v.trim()).filter(Boolean) : [],
-      command: runForm.command.trim(),
-      network: runForm.network.trim(),
-    };
-
-    try {
-      await runContainer(payload);
-      addToast('success', 'Container Run Enqueued', `Dispatched run request for image "${payload.image}" to target machine.`);
-      setShowRunModal(false);
-      setTimeout(() => fetchDockerData(true), 1200);
-    } catch (err) {
-      addToast('critical', 'Run Failed', err.response?.data?.error || err.message);
-    }
-  };
-
-  // Pull Image Form Submit
-  const handlePullSubmit = async (e) => {
-    e.preventDefault();
-    if (!pullForm.serverId || !pullForm.image) {
-      addToast('warning', 'Validation Error', 'Please select a host machine and enter image name.');
-      return;
-    }
-
-    try {
-      await pullImage(pullForm.serverId, pullForm.image.trim());
-      addToast('success', 'Image Pull Enqueued', `Pull request for image "${pullForm.image}" sent to agent.`);
-      setShowPullModal(false);
-      setTimeout(() => fetchDockerData(true), 1500);
-    } catch (err) {
-      addToast('critical', 'Pull Failed', err.response?.data?.error || err.message);
-    }
-  };
-
-  // Remove Image
-  const handleRemoveImage = async (img) => {
-    const sId = img.hostServerId;
-    const imgName = img.id || img.name || img.repository;
-    if (!sId || !imgName) return;
-
-    if (!window.confirm(`Are you sure you want to remove image "${img.name || imgName}" from ${img.hostServerName}?`)) {
-      return;
-    }
-
-    try {
-      await removeImage(sId, imgName, true);
-      setImages(prev => prev.filter(i => !(i.id === img.id && i.hostServerId === sId)));
-      addToast('success', 'Image Removed', `Image ${img.name || imgName} removed from ${img.hostServerName}.`);
-      setTimeout(() => fetchDockerData(true), 1500);
-    } catch (err) {
-      addToast('critical', 'Remove Image Failed', err.response?.data?.error || err.message);
-    }
-  };
 
   // Open Log Viewer
   const handleOpenLogs = async (container) => {
@@ -296,15 +200,60 @@ export default function DockerPage() {
     setActiveLogContainer(container);
     setLogsLoading(true);
     setContainerLogs('');
+    setLogSearch('');
+    setLogSeverity('all');
 
     try {
       const data = await getContainerLogs(cId);
-      setContainerLogs(data.logs || 'No logs generated by container yet.');
+      setContainerLogs(data.logs || 'No log output emitted by container yet.');
     } catch (err) {
       setContainerLogs(`Error loading container logs: ${err.response?.data?.error || err.message}`);
     } finally {
       setLogsLoading(false);
     }
+  };
+
+  const handleDownloadLogs = () => {
+    if (!containerLogs) return;
+    const blob = new Blob([containerLogs], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `docker-${activeLogContainer?.name || 'container'}-logs.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    addToast('success', 'Logs Downloaded', 'Container log file saved to your device.');
+  };
+
+  const handleExportCSV = () => {
+    if (containers.length === 0) {
+      addToast('warning', 'Export Empty', 'No container telemetry available to export.');
+      return;
+    }
+
+    const headers = ['Container Name', 'Container ID', 'Image', 'Host Machine', 'Status', 'CPU %', 'Memory Used Bytes', 'Memory Limit Bytes', 'Restarts', 'Ports'];
+    const rows = containers.map(c => [
+      `"${c.name || c.names || ''}"`,
+      `"${c.id || ''}"`,
+      `"${c.image || ''}"`,
+      `"${c.hostServerName || ''}"`,
+      `"${c.status || c.state || ''}"`,
+      (c.cpu_percent || 0).toFixed(2),
+      c.memory_used_bytes || c.memory_used || 0,
+      c.memory_limit_bytes || c.memory_limit || 0,
+      c.restart_count || 0,
+      `"${c.ports || ''}"`
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `docker-fleet-telemetry-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    addToast('success', 'Telemetry Exported', 'Fleet Docker telemetry exported to CSV successfully.');
   };
 
   const handleCopyId = (id) => {
@@ -321,43 +270,84 @@ export default function DockerPage() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  // Fleet Statistics Calculation
   const stats = useMemo(() => {
     const total = containers.length;
-    const running = containers.filter(c => {
+    let running = 0;
+    let highLoad = 0;
+    let restarting = 0;
+    let failed = 0;
+    let stopped = 0;
+    let totalCpu = 0;
+    let totalMem = 0;
+
+    containers.forEach(c => {
       const state = String(c.state || c.State || c.status || '').toLowerCase();
-      return state === 'running' || state.includes('up');
-    }).length;
-    const restarting = containers.filter(c => {
-      const state = String(c.state || c.State || c.status || '').toLowerCase();
-      return state.includes('restarting');
-    }).length;
-    const stopped = total - running - restarting;
+      const isUp = state === 'running' || state.includes('up');
+      const isRest = state.includes('restarting') || (c.restart_count && c.restart_count > 5);
+      const isErr = state.includes('exit (1') || state.includes('dead') || state.includes('failed') || state.includes('137');
+      const cpu = c.cpu_percent || 0;
+      const memUsed = c.memory_used_bytes || c.memory_used || 0;
+      const memLimit = c.memory_limit_bytes || c.memory_limit || 0;
+      const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
 
-    const failed = containers.filter(c => {
-      const status = String(c.status || '').toLowerCase();
-      return status.includes('exit (1') || status.includes('dead') || status.includes('failed');
-    }).length;
+      totalCpu += cpu;
+      totalMem += memUsed;
 
-    const totalCpu = containers.reduce((acc, c) => acc + (c.cpu_percent || 0), 0);
-    const totalMem = containers.reduce((acc, c) => acc + (c.memory_used_bytes || c.memory_used || 0), 0);
+      if (isErr) failed++;
+      else if (isRest) restarting++;
+      else if (isUp) {
+        running++;
+        if (cpu > 75 || memPct > 80) highLoad++;
+      } else {
+        stopped++;
+      }
+    });
 
-    return { total, running, stopped, restarting, failed, totalCpu, totalMem };
-  }, [containers]);
+    // Reclaimable storage from unused images
+    let reclaimableBytes = 0;
+    images.forEach(img => {
+      const fullImg = img.repository ? `${img.repository}:${img.tag || 'latest'}` : (img.name || img.id);
+      const inUse = containers.some(c => c.image === fullImg || c.image === img.name || c.image === img.repository);
+      if (!inUse && img.size_bytes) {
+        reclaimableBytes += img.size_bytes;
+      }
+    });
 
-  // Filtered lists
+    return { total, running, highLoad, restarting, failed, stopped, totalCpu, totalMem, reclaimableBytes };
+  }, [containers, images]);
+
+  // Filtered containers
   const filteredContainers = useMemo(() => {
     return containers.filter(c => {
       if (selectedServerId !== 'all' && String(c.hostServerId) !== String(selectedServerId)) {
         return false;
       }
+      const state = String(c.state || c.State || c.status || '').toLowerCase();
+      const isUp = state === 'running' || state.includes('up');
+      const isRest = state.includes('restarting') || (c.restart_count && c.restart_count > 5);
+      const isErr = state.includes('exit (1') || state.includes('dead') || state.includes('failed') || state.includes('137');
+      const cpu = c.cpu_percent || 0;
+      const memUsed = c.memory_used_bytes || c.memory_used || 0;
+      const memLimit = c.memory_limit_bytes || c.memory_limit || 0;
+      const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
+      const isHighLoad = cpu > 75 || memPct > 80;
+
+      if (statusFilter === 'running' && (!isUp || isHighLoad || isRest)) return false;
+      if (statusFilter === 'high-load' && (!isUp || !isHighLoad)) return false;
+      if (statusFilter === 'restarting' && !isRest) return false;
+      if (statusFilter === 'error' && !isErr) return false;
+      if (statusFilter === 'stopped' && (isUp || isRest || isErr)) return false;
+
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
       const name = String(c.names || c.Names || c.name || '').toLowerCase();
       const image = String(c.image || c.Image || '').toLowerCase();
       const server = String(c.hostServerName || '').toLowerCase();
-      return name.includes(q) || image.includes(q) || server.includes(q);
+      const id = String(c.id || c.ID || '').toLowerCase();
+      return name.includes(q) || image.includes(q) || server.includes(q) || id.includes(q);
     });
-  }, [containers, selectedServerId, searchQuery]);
+  }, [containers, selectedServerId, searchQuery, statusFilter]);
 
   const filteredImages = useMemo(() => {
     return images.filter(img => {
@@ -373,96 +363,179 @@ export default function DockerPage() {
     });
   }, [images, selectedServerId, searchQuery]);
 
-  const onlineServersList = useMemo(() => {
-    return servers.filter(s => String(s.status || '').toUpperCase() === 'ONLINE' && !s.is_blocked);
-  }, [servers]);
+  // Log line colorizer & filter
+  const parsedLogLines = useMemo(() => {
+    if (!containerLogs) return [];
+    const lines = containerLogs.split('\n');
+    return lines
+      .map((line, idx) => {
+        const lower = line.toLowerCase();
+        let level = 'info';
+        if (lower.includes('error') || lower.includes('err') || lower.includes('fatal') || lower.includes('panic') || lower.includes('exception') || lower.includes('fail')) {
+          level = 'error';
+        } else if (lower.includes('warn') || lower.includes('warning')) {
+          level = 'warn';
+        } else if (lower.includes('debug') || lower.includes('trace')) {
+          level = 'debug';
+        }
+        return { index: idx + 1, text: line, level };
+      })
+      .filter(item => {
+        if (logSeverity === 'error' && item.level !== 'error') return false;
+        if (logSeverity === 'warn-error' && item.level !== 'error' && item.level !== 'warn') return false;
+        if (logSearch.trim() && !item.text.toLowerCase().includes(logSearch.toLowerCase())) return false;
+        return true;
+      });
+  }, [containerLogs, logSearch, logSeverity]);
+
+  // Automated Container Health Analyzer for Inspector
+  const getContainerDiagnostic = (c) => {
+    if (!c) return [];
+    const diags = [];
+    const state = String(c.state || c.State || c.status || '').toLowerCase();
+    const isUp = state === 'running' || state.includes('up');
+    const cpu = c.cpu_percent || 0;
+    const memUsed = c.memory_used_bytes || c.memory_used || 0;
+    const memLimit = c.memory_limit_bytes || c.memory_limit || 0;
+    const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
+    const restarts = c.restart_count || 0;
+
+    if (isUp) {
+      if (cpu > 85) {
+        diags.push({ type: 'danger', title: 'High CPU Saturation', msg: `Container is using ${cpu.toFixed(1)}% CPU, which exceeds the 85% recommended threshold.` });
+      } else if (cpu > 60) {
+        diags.push({ type: 'warning', title: 'Moderate CPU Load', msg: `Container CPU is at ${cpu.toFixed(1)}%. Monitor for throttling spikes.` });
+      } else {
+        diags.push({ type: 'success', title: 'CPU Health Nominal', msg: `Current CPU utilization (${cpu.toFixed(1)}%) is well within steady-state limits.` });
+      }
+
+      if (memPct > 88) {
+        diags.push({ type: 'danger', title: 'Critical OOM-Kill Risk', msg: `Memory usage (${memPct.toFixed(1)}%) is dangerously close to limit (${formatBytes(memLimit)}). Risk of OOM killer.` });
+      } else if (memPct > 70) {
+        diags.push({ type: 'warning', title: 'Elevated Memory Utilization', msg: `Memory usage is at ${memPct.toFixed(1)}% of allocated limit.` });
+      } else {
+        diags.push({ type: 'success', title: 'Memory Allocation Stable', msg: `RAM utilization is healthy at ${formatBytes(memUsed)} (${memPct.toFixed(1)}%).` });
+      }
+    } else {
+      if (state.includes('137')) {
+        diags.push({ type: 'danger', title: 'Terminated by OOM Killer (Exit 137)', msg: 'Container was killed by Linux Kernel Out-Of-Memory (OOM) killer due to exceeding memory cgroup limits.' });
+      } else if (state.includes('1')) {
+        diags.push({ type: 'danger', title: 'Application Runtime Crash (Exit 1)', msg: 'Container process exited with error code 1. Inspect live stdout/stderr logs for stack traces.' });
+      } else {
+        diags.push({ type: 'info', title: 'Graceful Termination / Standby', msg: 'Container was stopped cleanly (Exit 0) and is ready to start on demand.' });
+      }
+    }
+
+    if (restarts > 5) {
+      diags.push({ type: 'danger', title: 'Crash-Looping Detected', msg: `Container has restarted ${restarts} times. Check configuration or dependency health.` });
+    } else if (restarts > 0) {
+      diags.push({ type: 'warning', title: 'Restart History', msg: `Container has restarted ${restarts} time(s) since host boot.` });
+    }
+
+    return diags;
+  };
 
   return (
-    <div className="docker-page" style={{ padding: '24px', maxWidth: '1440px', margin: '0 auto' }}>
-      {/* ── Page Header ── */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+    <div className="docker-page" style={{ padding: '24px', maxWidth: '1480px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      
+      {/* ========================================================================= */}
+      {/* 1. ENTERPRISE OBSERVABILITY HEADER */}
+      {/* ========================================================================= */}
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '10px', margin: 0 }}>
-            <Layers size={28} color="#06b6d4" />
-            Central Docker Management & Fleet Control
-          </h1>
-          <p style={{ fontSize: '13px', color: '#94a3b8', marginTop: '4px', marginBottom: 0 }}>
-            Full multi-node container lifecycle control: run images, start/stop containers, pull images, and monitor real-time telemetry across connected hosts.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ padding: '10px', backgroundColor: 'rgba(6, 182, 212, 0.15)', borderRadius: '12px', border: '1px solid rgba(6, 182, 212, 0.35)', boxShadow: '0 0 20px rgba(6, 182, 212, 0.2)' }}>
+              <Layers size={28} color="#06b6d4" />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h1 style={{ fontSize: '24px', fontWeight: 800, color: '#f1f5f9', margin: 0, letterSpacing: '-0.02em' }}>
+                  Enterprise Docker Observability & Telemetry
+                </h1>
+                <span style={{
+                  padding: '2px 8px',
+                  backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                  border: '1px solid rgba(6, 182, 212, 0.4)',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: '#38bdf8'
+                }}>
+                  Fleet Matrix
+                </span>
+              </div>
+              <p style={{ fontSize: '13px', color: '#94a3b8', margin: '4px 0 0' }}>
+                Multi-cluster container health monitoring, live CPU/RAM load metrics, OOM risk analytics, and automated diagnostics.
+              </p>
+            </div>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {/* Live Sync Status */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '7px 14px',
+            backgroundColor: '#0a101d',
+            border: '1px solid #1f2e44',
+            borderRadius: '8px',
+            fontSize: '12px',
+            color: '#22c55e',
+            fontWeight: 600
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#22c55e', boxShadow: '0 0 8px #22c55e' }} />
+            Live Sync Active (15s)
+          </div>
+
+          {/* Export CSV Button */}
           <button
-            onClick={() => {
-              if (selectedServerId !== 'all') {
-                setRunForm(prev => ({ ...prev, serverId: selectedServerId }));
-              }
-              setShowRunModal(true);
-            }}
+            onClick={handleExportCSV}
             type="button"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '8px 16px',
-              backgroundColor: '#0284c7',
-              color: '#ffffff',
-              border: 'none',
+              padding: '8px 14px',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              color: '#f1f5f9',
+              border: '1px solid #1f2e44',
               borderRadius: '8px',
               cursor: 'pointer',
               fontSize: '13px',
-              fontWeight: 700,
-              boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)',
+              fontWeight: 600,
               transition: 'all 0.15s'
             }}
+            title="Export full fleet container telemetry to CSV"
           >
-            <Plus size={16} />
-            Deploy Container
+            <Download size={14} color="#38bdf8" />
+            Export CSV
           </button>
 
+          {/* Sync Fleet Button */}
           <button
-            onClick={() => {
-              if (selectedServerId !== 'all') {
-                setPullForm(prev => ({ ...prev, serverId: selectedServerId }));
-              }
-              setShowPullModal(true);
-            }}
-            type="button"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              backgroundColor: 'rgba(6, 182, 212, 0.12)',
-              color: '#06b6d4',
-              border: '1px solid rgba(6, 182, 212, 0.35)',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 600,
-            }}
-          >
-            <Download size={14} />
-            Pull Image
-          </button>
-
-          <button
-            className="refresh-btn"
             onClick={() => fetchDockerData(true)}
-            disabled={loading || refreshing}
+            disabled={refreshing}
             type="button"
             style={{
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '6px',
-              padding: '8px 14px',
-              backgroundColor: '#1f2e44',
-              color: '#f1f5f9',
-              border: '1px solid #2e3f5a',
+              padding: '8px 16px',
+              minWidth: '115px',
+              backgroundColor: 'rgba(6, 182, 212, 0.15)',
+              color: '#06b6d4',
+              border: '1px solid rgba(6, 182, 212, 0.4)',
               borderRadius: '8px',
-              cursor: 'pointer',
+              cursor: refreshing ? 'not-allowed' : 'pointer',
               fontSize: '13px',
-              fontWeight: 600,
+              fontWeight: 700,
+              boxShadow: '0 4px 12px rgba(6, 182, 212, 0.15)',
+              transition: 'all 0.15s',
+              whiteSpace: 'nowrap',
+              flexShrink: 0
             }}
           >
             <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
@@ -471,114 +544,183 @@ export default function DockerPage() {
         </div>
       </div>
 
-      {/* ── 1-Line Docker Deploy Banner ── */}
+      {/* ========================================================================= */}
+      {/* 2. FLEET OBSERVABILITY KPI METRICS MATRIX */}
+      {/* ========================================================================= */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+        
+        {/* Total Containers & Health Breakdown Card */}
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', padding: '16px 18px', borderLeft: '4px solid #06b6d4' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Fleet Containers
+            </span>
+            <Box size={16} color="#06b6d4" />
+          </div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9', marginTop: '4px' }}>{stats.total}</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', fontSize: '11px', fontWeight: 600, marginTop: '6px' }}>
+            <span style={{ color: '#22c55e' }}>🟢 {stats.running} Healthy</span>
+            {stats.highLoad > 0 && <span style={{ color: '#f59e0b' }}>🟡 {stats.highLoad} High Load</span>}
+            {stats.restarting > 0 && <span style={{ color: '#eab308' }}>🟠 {stats.restarting} Restarting</span>}
+            {stats.failed > 0 && <span style={{ color: '#ef4444' }}>🔴 {stats.failed} Crash/OOM</span>}
+          </div>
+        </div>
+
+        {/* Aggregate CPU Utilization Card */}
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', padding: '16px 18px', borderLeft: '4px solid #38bdf8' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Fleet CPU Load
+            </span>
+            <Cpu size={16} color="#38bdf8" />
+          </div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9', marginTop: '4px' }}>
+            {stats.totalCpu.toFixed(1)}%
+          </div>
+          <div style={{ height: '4px', backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '8px' }}>
+            <div style={{
+              width: `${Math.min(stats.totalCpu / Math.max(servers.length, 1), 100)}%`,
+              height: '100%',
+              backgroundColor: stats.totalCpu > 150 ? '#ef4444' : (stats.totalCpu > 75 ? '#f59e0b' : '#38bdf8')
+            }} />
+          </div>
+          <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
+            Across {servers.length} connected server host{servers.length === 1 ? '' : 's'}
+          </div>
+        </div>
+
+        {/* Aggregate Memory Footprint Card */}
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', padding: '16px 18px', borderLeft: '4px solid #a855f7' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#a855f7', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              RAM Allocated
+            </span>
+            <Activity size={16} color="#a855f7" />
+          </div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9', marginTop: '4px' }}>
+            {formatBytes(stats.totalMem)}
+          </div>
+          <div style={{ fontSize: '11px', color: '#c084fc', marginTop: '6px', fontWeight: 600 }}>
+            {stats.highLoad > 0 ? `⚠️ ${stats.highLoad} container(s) near memory limits` : '🟢 Zero memory starvation warnings'}
+          </div>
+        </div>
+
+        {/* Image Registry & Storage Reclaim Card */}
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', padding: '16px 18px', borderLeft: '4px solid #f59e0b' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Images & Storage
+            </span>
+            <Layers size={16} color="#f59e0b" />
+          </div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9', marginTop: '4px' }}>
+            {images.length} <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 500 }}>Images</span>
+          </div>
+          <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '6px' }}>
+            {stats.reclaimableBytes > 0 ? `💡 ~${formatBytes(stats.reclaimableBytes)} reclaimable from unused images` : 'Clean image utilization'}
+          </div>
+        </div>
+
+        {/* Volumes & Bridges Card */}
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', padding: '16px 18px', borderLeft: '4px solid #10b981' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Topology & Net
+            </span>
+            <HardDrive size={16} color="#10b981" />
+          </div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: '#f1f5f9', marginTop: '4px' }}>
+            {volumes.length} <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 500 }}>Vols</span> / {networks.length} <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 500 }}>Nets</span>
+          </div>
+          <div style={{ fontSize: '11px', color: '#6ee7b7', marginTop: '6px' }}>
+            Persistent storage & virtual bridges
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 3. DOCKER AGENT TELEMETRY CONNECTION BANNER */}
+      {/* ========================================================================= */}
       <div style={{
-        background: 'linear-gradient(90deg, rgba(6, 182, 212, 0.1) 0%, rgba(13, 18, 32, 0.95) 100%)',
+        backgroundColor: '#070c18',
         border: '1px solid rgba(6, 182, 212, 0.25)',
         borderRadius: '10px',
-        padding: '12px 16px',
-        marginBottom: '20px',
+        padding: '12px 18px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '16px',
         flexWrap: 'wrap',
+        gap: '12px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '280px' }}>
-          <div style={{
-            width: '32px',
-            height: '32px',
-            borderRadius: '8px',
-            background: 'rgba(6, 182, 212, 0.18)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            <Terminal size={16} color="#06b6d4" />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Connect Any Remote Machine to Docker Fleet
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: '240px' }}>
+          <Radio size={18} color="#06b6d4" className="pulse-indicator" />
+          <div>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9', display: 'block' }}>
+              Stream Container Telemetry From Any Remote Server
             </span>
-            <code style={{
-              fontFamily: 'monospace',
-              fontSize: '11px',
-              color: '#e2e8f0',
-              backgroundColor: '#090d16',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              border: '1px solid #1e293b',
-              wordBreak: 'break-all',
-            }}>
-              {dockerCmd}
-            </code>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+              Deploy our lightweight read-only container monitor to stream live metrics and stdout/stderr logs.
+            </span>
           </div>
         </div>
 
-        <button
-          onClick={handleCopyCmd}
-          type="button"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '7px 12px',
-            background: copiedCmd ? '#064e3b' : '#0369a1',
-            color: '#ffffff',
-            border: 'none',
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, maxWidth: '750px' }}>
+          <div style={{
+            flex: 1,
+            backgroundColor: '#040711',
+            border: '1px solid #1f2e44',
             borderRadius: '6px',
-            fontSize: '12px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-        >
-          {copiedCmd ? <Check size={14} color="#34d399" /> : <Copy size={14} />}
-          <span>{copiedCmd ? 'Copied!' : 'Copy Command'}</span>
-        </button>
-      </div>
-
-      {/* ── KPI Stats Grid ── */}
-      <div className="docker-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-        <div className="kpi-card" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '10px', padding: '16px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total Containers</span>
-          <strong style={{ display: 'block', fontSize: '26px', fontWeight: 800, color: '#f1f5f9', marginTop: '4px' }}>{stats.total}</strong>
-        </div>
-        <div className="kpi-card" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '10px', padding: '16px', borderLeft: '3px solid #22c55e' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#22c55e', textTransform: 'uppercase' }}>Running</span>
-          <strong style={{ display: 'block', fontSize: '26px', fontWeight: 800, color: '#22c55e', marginTop: '4px' }}>{stats.running}</strong>
-        </div>
-        <div className="kpi-card" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '10px', padding: '16px', borderLeft: '3px solid #f59e0b' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase' }}>Stopped / Exited</span>
-          <strong style={{ display: 'block', fontSize: '26px', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>{stats.stopped}</strong>
-        </div>
-        <div className="kpi-card" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '10px', padding: '16px', borderLeft: '3px solid #38bdf8' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase' }}>Docker Images</span>
-          <strong style={{ display: 'block', fontSize: '26px', fontWeight: 800, color: '#38bdf8', marginTop: '4px' }}>{images.length}</strong>
-        </div>
-        <div className="kpi-card" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '10px', padding: '16px', borderLeft: '3px solid #a855f7' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#a855f7', textTransform: 'uppercase' }}>Volumes / Net</span>
-          <strong style={{ display: 'block', fontSize: '26px', fontWeight: 800, color: '#a855f7', marginTop: '4px' }}>{volumes.length} / {networks.length}</strong>
+            padding: '6px 12px',
+            color: '#38bdf8',
+            fontFamily: 'monospace',
+            fontSize: '11px',
+            overflowX: 'auto',
+            whiteSpace: 'nowrap'
+          }}>
+            {dockerCmd}
+          </div>
+          <button
+            onClick={handleCopyCmd}
+            type="button"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '6px 12px',
+              backgroundColor: copiedCmd ? 'rgba(34, 197, 94, 0.15)' : 'rgba(6, 182, 212, 0.15)',
+              border: copiedCmd ? '1px solid #22c55e' : '1px solid #06b6d4',
+              borderRadius: '6px',
+              color: copiedCmd ? '#22c55e' : '#06b6d4',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              flexShrink: 0
+            }}
+          >
+            {copiedCmd ? <Check size={12} /> : <Copy size={12} />}
+            {copiedCmd ? 'Copied' : 'Copy'}
+          </button>
         </div>
       </div>
 
-      {/* ── Sub-Tab Toolbar & Node Selector ── */}
+      {/* ========================================================================= */}
+      {/* 4. MULTI-DIMENSIONAL SUB-TAB TOOLBAR & FILTER CONTROLS */}
+      {/* ========================================================================= */}
       <div style={{
         backgroundColor: '#0d1220',
         border: '1px solid #1f2e44',
-        borderRadius: '10px',
+        borderRadius: '12px',
         padding: '10px 16px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         flexWrap: 'wrap',
-        gap: '12px',
-        marginBottom: '16px'
+        gap: '12px'
       }}>
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+        {/* Navigation Tabs */}
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
           {[
-            { id: 'containers', label: 'Containers', count: containers.length, icon: Box },
+            { id: 'containers', label: 'Containers Fleet', count: containers.length, icon: Box },
             { id: 'images', label: 'Docker Images', count: images.length, icon: Layers },
             { id: 'networks', label: 'Networks', count: networks.length, icon: Globe },
             { id: 'volumes', label: 'Volumes', count: volumes.length, icon: HardDrive },
@@ -623,16 +765,53 @@ export default function DockerPage() {
           })}
         </div>
 
+        {/* Right Search & Health Filter Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#080c14', border: '1px solid #1f2e44', borderRadius: '6px', padding: '6px 10px', width: '220px' }}>
+          {activeTab === 'containers' && (
+            <div style={{ display: 'flex', backgroundColor: '#080c14', borderRadius: '6px', border: '1px solid #1f2e44', padding: '2px', flexWrap: 'wrap' }}>
+              {[
+                { id: 'all', label: 'All' },
+                { id: 'running', label: 'Healthy' },
+                { id: 'high-load', label: 'High Load' },
+                { id: 'restarting', label: 'Restarting' },
+                { id: 'error', label: 'OOM / Error' },
+                { id: 'stopped', label: 'Stopped' }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setStatusFilter(f.id)}
+                  type="button"
+                  style={{
+                    padding: '3px 8px',
+                    border: 'none',
+                    borderRadius: '4px',
+                    backgroundColor: statusFilter === f.id ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                    color: statusFilter === f.id ? '#06b6d4' : '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                    fontWeight: statusFilter === f.id ? 700 : 500
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#080c14', border: '1px solid #1f2e44', borderRadius: '6px', padding: '5px 10px', width: '220px' }}>
             <Search size={14} color="#64748b" />
             <input
               type="text"
-              placeholder="Search by name, image, host..."
+              placeholder="Search container, image..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ background: 'none', border: 'none', color: '#f1f5f9', outline: 'none', width: '100%', fontSize: '12px' }}
             />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 0 }}>
+                <X size={12} />
+              </button>
+            )}
           </div>
 
           <ServerSelectDropdown
@@ -644,166 +823,202 @@ export default function DockerPage() {
         </div>
       </div>
 
-      {/* ── Sub-Tab Content ── */}
-
-      {/* TAB 1: CONTAINERS */}
+      {/* ========================================================================= */}
+      {/* 5. SUB-TAB 1: ENTERPRISE CONTAINERS FLEET OBSERVABILITY TABLE */}
+      {/* ========================================================================= */}
       {activeTab === 'containers' && (
-        <div className="table-wrapper" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
           {filteredContainers.length === 0 ? (
-            <div className="empty-state" style={{ textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
-              <Box size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
-              <strong style={{ color: '#cbd5e1', display: 'block', fontSize: '15px' }}>No active containers found</strong>
+            <div style={{ textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
+              <Box size={42} style={{ opacity: 0.3, marginBottom: '12px' }} />
+              <strong style={{ color: '#cbd5e1', display: 'block', fontSize: '15px' }}>No containers match current criteria</strong>
               <p style={{ fontSize: '12px', marginTop: '4px', color: '#64748b' }}>
-                Use "Deploy Container" above to run any Docker container on your connected nodes.
+                Ensure your agents are running or adjust your health status/host filter.
               </p>
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
-                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase' }}>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Container</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Image</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Host Machine</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Status</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>CPU / Memory</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700, textAlign: 'right' }}>Actions & Controls</th>
+                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Container & Identity</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Image Tag</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Host Node</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Status & Health</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Live CPU %</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Memory Footprint</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>PIDs</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700, textAlign: 'right' }}>Observability Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredContainers.map((container, idx) => {
-                  const state = String(container.state || container.State || container.status || '').toLowerCase();
-                  const isUp = state === 'running' || state.includes('up');
-                  const isRestarting = state.includes('restarting');
                   const rawId = container.id || container.ID || container.name || `c-${idx}`;
                   const shortId = rawId.length > 12 ? rawId.substring(0, 12) : rawId;
                   const name = container.names || container.Names || container.name || 'unnamed';
-                  const cpu = container.cpu_percent || container.cpu_stats || 0;
+                  const image = container.image || container.Image || '--';
+                  const state = String(container.state || container.State || container.status || '').toLowerCase();
+                  const isUp = state === 'running' || state.includes('up');
+                  const isRestarting = state.includes('restarting') || (container.restart_count && container.restart_count > 5);
+                  const isOOM = state.includes('137');
+                  const isExitErr = state.includes('exit (1') || state.includes('dead') || state.includes('failed');
+
+                  const cpu = container.cpu_percent || 0;
                   const memUsed = container.memory_used_bytes || container.memory_used || 0;
-                  const isBusy = actionLoading[rawId] || actionLoading[name];
+                  const memLimit = container.memory_limit_bytes || container.memory_limit || 0;
+                  const memPct = memLimit > 0 ? ((memUsed / memLimit) * 100).toFixed(1) : 0;
+                  const isHighMem = memPct > 80;
+                  const isHighCpu = cpu > 75;
 
                   return (
-                    <tr key={rawId} style={{ borderBottom: '1px solid rgba(31, 46, 68, 0.4)', color: '#cbd5e1' }}>
+                    <tr 
+                      key={rawId} 
+                      style={{ borderBottom: '1px solid rgba(31, 46, 68, 0.4)', color: '#cbd5e1', transition: 'background-color 0.15s' }}
+                      className="container-hover-row"
+                    >
                       {/* Name & ID */}
                       <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                           <span style={{ fontWeight: 700, color: '#f1f5f9', fontSize: '14px' }}>{name}</span>
                           <span
                             onClick={() => handleCopyId(rawId)}
-                            style={{ fontSize: '11px', color: copiedId === rawId ? '#34d399' : '#64748b', fontFamily: 'monospace', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}
-                            title="Click to copy Container ID"
+                            style={{ fontSize: '11px', color: copiedId === rawId ? '#34d399' : '#64748b', fontFamily: 'monospace', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            title="Click to copy SHA Container ID"
                           >
-                            {copiedId === rawId ? <Check size={10} /> : <Copy size={10} />}
+                            {copiedId === rawId ? <Check size={11} /> : <Copy size={11} />}
                             {shortId}
                           </span>
                         </div>
                       </td>
 
-                      {/* Image */}
+                      {/* Image Tag */}
                       <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>
-                        <span style={{ padding: '2px 6px', backgroundColor: 'rgba(6, 182, 212, 0.1)', border: '1px solid rgba(6, 182, 212, 0.25)', borderRadius: '4px', color: '#06b6d4', fontSize: '11px' }}>
-                          {container.image || container.Image || '--'}
+                        <span style={{
+                          padding: '3px 8px',
+                          backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                          border: '1px solid rgba(6, 182, 212, 0.3)',
+                          borderRadius: '4px',
+                          color: '#06b6d4',
+                          fontSize: '11px'
+                        }}>
+                          {image}
                         </span>
                       </td>
 
-                      {/* Host Machine */}
+                      {/* Host Node */}
                       <td style={{ padding: '12px 16px' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: '#38bdf8' }}>
-                          <Server size={13} color="#06b6d4" />
-                          {container.hostServerName}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Server size={14} color="#38bdf8" />
+                          <span style={{ fontWeight: 600, color: '#f1f5f9' }}>{container.hostServerName}</span>
+                        </div>
                       </td>
 
-                      {/* Status */}
+                      {/* Health Status */}
                       <td style={{ padding: '12px 16px' }}>
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '3px 8px',
-                            borderRadius: '12px',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            backgroundColor: isUp ? 'rgba(34, 197, 94, 0.12)' : (isRestarting ? 'rgba(234, 179, 8, 0.12)' : 'rgba(239, 68, 68, 0.12)'),
-                            color: isUp ? '#22c55e' : (isRestarting ? '#eab308' : '#ef4444'),
-                            border: isUp ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                          }}
-                        >
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: isUp ? '#22c55e' : (isRestarting ? '#eab308' : '#ef4444') }} />
-                          {container.status || (isUp ? 'Running' : 'Exited')}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '3px 8px',
+                              borderRadius: '12px',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              backgroundColor: isUp 
+                                ? (isHighCpu || isHighMem ? 'rgba(245, 158, 11, 0.15)' : 'rgba(34, 197, 94, 0.15)') 
+                                : (isRestarting ? 'rgba(234, 179, 8, 0.15)' : 'rgba(239, 68, 68, 0.15)'),
+                              color: isUp 
+                                ? (isHighCpu || isHighMem ? '#f59e0b' : '#22c55e') 
+                                : (isRestarting ? '#eab308' : '#ef4444'),
+                              border: isUp 
+                                ? (isHighCpu || isHighMem ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(34, 197, 94, 0.35)') 
+                                : '1px solid rgba(239, 68, 68, 0.35)',
+                              width: 'fit-content'
+                            }}
+                          >
+                            <span style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              backgroundColor: isUp ? '#22c55e' : (isRestarting ? '#eab308' : '#ef4444'),
+                              boxShadow: isUp ? '0 0 8px #22c55e' : 'none'
+                            }} />
+                            {isOOM ? 'OOMKilled (137)' : (isExitErr ? (container.status || 'Crash Exited') : (isUp ? (isHighCpu || isHighMem ? 'Degraded Load' : 'Healthy') : (isRestarting ? 'Restarting' : 'Stopped')))}
+                          </span>
+                          {container.restart_count > 0 && (
+                            <span style={{ fontSize: '10px', color: '#f59e0b', fontWeight: 600 }}>
+                              {container.restart_count} restart{container.restart_count === 1 ? '' : 's'}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
-                      {/* CPU / Memory */}
+                      {/* Live CPU % */}
                       <td style={{ padding: '12px 16px' }}>
                         {isUp ? (
-                          <span style={{ fontSize: '12px', fontFamily: 'monospace' }}>
-                            <strong style={{ color: '#f1f5f9' }}>{typeof cpu === 'number' ? `${cpu.toFixed(1)}%` : cpu}</strong>
-                            {' CPU • '}
-                            <strong style={{ color: '#c084fc' }}>{formatBytes(memUsed)}</strong>
-                          </span>
+                          <div style={{ width: '100px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#f1f5f9', marginBottom: '3px' }}>
+                              <span style={{ fontWeight: 600, color: cpu > 75 ? '#ef4444' : (cpu > 40 ? '#f59e0b' : '#38bdf8') }}>
+                                {cpu.toFixed(1)}%
+                              </span>
+                            </div>
+                            <div style={{ height: '5px', backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                              <div style={{
+                                width: `${Math.min(cpu, 100)}%`,
+                                height: '100%',
+                                backgroundColor: cpu > 75 ? '#ef4444' : (cpu > 40 ? '#f59e0b' : '#06b6d4'),
+                                borderRadius: '3px'
+                              }} />
+                            </div>
+                          </div>
                         ) : (
-                          <span style={{ color: '#64748b' }}>--</span>
+                          <span style={{ color: '#64748b', fontSize: '12px' }}>--</span>
                         )}
                       </td>
 
-                      {/* Actions */}
+                      {/* Memory Footprint */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {isUp ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '12px', color: isHighMem ? '#f87171' : '#c084fc', fontFamily: 'monospace', fontWeight: 600 }}>
+                                {formatBytes(memUsed)}
+                              </span>
+                              {isHighMem && (
+                                <span style={{ fontSize: '9px', backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>
+                                  OOM Risk
+                                </span>
+                              )}
+                            </div>
+                            {memLimit > 0 && (
+                              <span style={{ fontSize: '10px', color: '#64748b' }}>
+                                of {formatBytes(memLimit)} ({memPct}%)
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#64748b', fontSize: '12px' }}>--</span>
+                        )}
+                      </td>
+
+                      {/* PIDs */}
+                      <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#94a3b8', fontSize: '12px' }}>
+                        {container.pids || (isUp ? 1 : 0)}
+                      </td>
+
+                      {/* Observability Actions */}
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
-                          {isUp ? (
-                            <button
-                              onClick={() => handleContainerAction(container, 'stop')}
-                              disabled={Boolean(isBusy)}
-                              type="button"
-                              style={{
-                                padding: '5px 8px',
-                                backgroundColor: 'rgba(234, 179, 8, 0.12)',
-                                border: '1px solid rgba(234, 179, 8, 0.35)',
-                                borderRadius: '6px',
-                                color: '#eab308',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                fontSize: '11px',
-                                fontWeight: 700
-                              }}
-                              title="Stop Container"
-                            >
-                              <Square size={12} fill="#eab308" />
-                              Stop
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleContainerAction(container, 'start')}
-                              disabled={Boolean(isBusy)}
-                              type="button"
-                              style={{
-                                padding: '5px 8px',
-                                backgroundColor: 'rgba(34, 197, 94, 0.12)',
-                                border: '1px solid rgba(34, 197, 94, 0.35)',
-                                borderRadius: '6px',
-                                color: '#22c55e',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                fontSize: '11px',
-                                fontWeight: 700
-                              }}
-                              title="Start Container"
-                            >
-                              <Play size={12} fill="#22c55e" />
-                              Start
-                            </button>
-                          )}
-
+                          
+                          {/* Deep Dive Inspect & Monitor */}
                           <button
-                            onClick={() => handleContainerAction(container, 'restart')}
-                            disabled={Boolean(isBusy)}
+                            onClick={() => {
+                              setInspectContainer(container);
+                              setInspectTab('telemetry');
+                            }}
                             type="button"
                             style={{
-                              padding: '5px 8px',
+                              padding: '6px 11px',
                               backgroundColor: 'rgba(6, 182, 212, 0.12)',
                               border: '1px solid rgba(6, 182, 212, 0.35)',
                               borderRadius: '6px',
@@ -811,58 +1026,39 @@ export default function DockerPage() {
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '11px',
-                              fontWeight: 700
+                              gap: '5px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              transition: 'all 0.15s'
                             }}
-                            title="Restart Container"
+                            title="Open Deep-Dive Container Telemetry & Diagnostic Inspector"
                           >
-                            <RotateCw size={12} className={isBusy === 'restart' ? 'spin' : ''} />
-                            Restart
+                            <Eye size={13} />
+                            Inspect
                           </button>
 
+                          {/* Live Logs */}
                           <button
                             onClick={() => handleOpenLogs(container)}
                             type="button"
                             style={{
-                              padding: '5px 8px',
-                              backgroundColor: '#1f2e44',
-                              border: '1px solid #2e3f5a',
+                              padding: '6px 11px',
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid #1f2e44',
                               borderRadius: '6px',
-                              color: '#f1f5f9',
+                              color: '#cbd5e1',
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '11px',
-                              fontWeight: 600
+                              gap: '5px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              transition: 'all 0.15s'
                             }}
-                            title="View Container Logs"
+                            title="View Streaming Logs with Syntax Highlighting"
                           >
-                            <FileText size={12} />
+                            <FileText size={13} color="#38bdf8" />
                             Logs
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`Delete container "${name}" on ${container.hostServerName}?`)) {
-                                handleContainerAction(container, 'remove');
-                              }
-                            }}
-                            type="button"
-                            style={{
-                              padding: '5px 8px',
-                              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                              border: '1px solid rgba(239, 68, 68, 0.35)',
-                              borderRadius: '6px',
-                              color: '#f87171',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}
-                            title="Remove Container"
-                          >
-                            <Trash2 size={12} />
                           </button>
                         </div>
                       </td>
@@ -875,42 +1071,49 @@ export default function DockerPage() {
         </div>
       )}
 
-      {/* TAB 2: DOCKER IMAGES */}
+      {/* ========================================================================= */}
+      {/* 6. SUB-TAB 2: DOCKER IMAGES REGISTRY & STORAGE OBSERVABILITY */}
+      {/* ========================================================================= */}
       {activeTab === 'images' && (
-        <div className="table-wrapper" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
           {filteredImages.length === 0 ? (
-            <div className="empty-state" style={{ textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
+            <div style={{ textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
               <Layers size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
-              <strong style={{ color: '#cbd5e1', display: 'block', fontSize: '15px' }}>No Docker images found on connected nodes</strong>
-              <p style={{ fontSize: '12px', marginTop: '4px', color: '#64748b' }}>
-                Use "Pull Image" above to pull Docker images directly onto your nodes.
-              </p>
+              <strong style={{ color: '#cbd5e1', display: 'block', fontSize: '15px' }}>No Docker images discovered</strong>
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
-                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase' }}>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Image & Tag</th>
+                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Image Repository & Tag</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Host Machine</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Image ID</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Size</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700, textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Virtual Size</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Created</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700, textAlign: 'right' }}>Active Usage & Reclaim</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredImages.map((img, idx) => {
-                  const imgName = img.repository || img.name || 'unnamed';
-                  const imgTag = img.tag || 'latest';
-                  const fullImageName = `${imgName}:${imgTag}`;
+                  const fullImg = img.repository ? `${img.repository}:${img.tag || 'latest'}` : (img.name || img.id);
+                  const inUseCount = containers.filter(c => (c.image === fullImg || c.image === img.name || c.image === img.repository) && c.hostServerId === img.hostServerId).length;
 
                   return (
                     <tr key={img.id || idx} style={{ borderBottom: '1px solid rgba(31, 46, 68, 0.4)', color: '#cbd5e1' }}>
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <Layers size={16} color="#06b6d4" />
-                          <strong style={{ color: '#f1f5f9', fontSize: '14px' }}>{imgName}</strong>
-                          <span style={{ padding: '2px 6px', backgroundColor: 'rgba(6, 182, 212, 0.15)', border: '1px solid rgba(6, 182, 212, 0.3)', borderRadius: '4px', color: '#06b6d4', fontSize: '11px', fontFamily: 'monospace' }}>
-                            {imgTag}
+                          <span style={{ fontWeight: 700, color: '#f1f5f9' }}>{img.repository || img.name || 'Unnamed'}</span>
+                          <span style={{
+                            padding: '1px 6px',
+                            backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                            border: '1px solid rgba(6, 182, 212, 0.25)',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            color: '#06b6d4',
+                            fontFamily: 'monospace'
+                          }}>
+                            {img.tag || 'latest'}
                           </span>
                         </div>
                       </td>
@@ -922,69 +1125,44 @@ export default function DockerPage() {
                         </span>
                       </td>
 
-                      <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#64748b', fontSize: '12px' }}>
+                      <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#64748b' }}>
                         {(img.id || '').substring(0, 16)}
                       </td>
 
-                      <td style={{ padding: '12px 16px', color: '#38bdf8', fontFamily: 'monospace' }}>
+                      <td style={{ padding: '12px 16px', color: '#38bdf8', fontFamily: 'monospace', fontWeight: 600 }}>
                         {img.size || (img.size_bytes ? formatBytes(img.size_bytes) : '-')}
                       </td>
 
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
-                          <button
-                            onClick={() => {
-                              setRunForm({
-                                serverId: img.hostServerId,
-                                image: fullImageName,
-                                name: `${imgName.split('/').pop()}-app`,
-                                ports: '8080:80',
-                                environment: '',
-                                volumes: '',
-                                restartPolicy: 'unless-stopped',
-                                command: '',
-                                network: '',
-                              });
-                              setShowRunModal(true);
-                            }}
-                            type="button"
-                            style={{
-                              padding: '5px 10px',
-                              backgroundColor: 'rgba(2, 132, 199, 0.15)',
-                              border: '1px solid rgba(2, 132, 199, 0.4)',
-                              borderRadius: '6px',
-                              color: '#38bdf8',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '11px',
-                              fontWeight: 700
-                            }}
-                            title="Run Container From This Image"
-                          >
-                            <Play size={12} fill="#38bdf8" />
-                            Run Container
-                          </button>
+                      <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '11px' }}>
+                        {img.created || img.created_at || 'Cached'}
+                      </td>
 
-                          <button
-                            onClick={() => handleRemoveImage(img)}
-                            type="button"
-                            style={{
-                              padding: '5px 8px',
-                              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                              border: '1px solid rgba(239, 68, 68, 0.35)',
-                              borderRadius: '6px',
-                              color: '#f87171',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}
-                            title="Delete Image"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        {inUseCount > 0 ? (
+                          <span style={{
+                            padding: '3px 10px',
+                            borderRadius: '10px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                            color: '#22c55e',
+                            border: '1px solid rgba(34, 197, 94, 0.3)'
+                          }}>
+                            Active ({inUseCount} container{inUseCount === 1 ? '' : 's'})
+                          </span>
+                        ) : (
+                          <span style={{
+                            padding: '3px 10px',
+                            borderRadius: '10px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            color: '#f59e0b',
+                            border: '1px solid rgba(245, 158, 11, 0.3)'
+                          }}>
+                            Unused (Reclaimable)
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -995,22 +1173,26 @@ export default function DockerPage() {
         </div>
       )}
 
-      {/* TAB 3: NETWORKS */}
+      {/* ========================================================================= */}
+      {/* 7. SUB-TAB 3: NETWORKS */}
+      {/* ========================================================================= */}
       {activeTab === 'networks' && (
-        <div className="table-wrapper" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
           {networks.length === 0 ? (
-            <div style={{ padding: '60px 24px', textAlign: 'center', color: '#64748b' }}>
-              No custom Docker networks detected across fleet.
+            <div style={{ textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
+              <Globe size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
+              <strong style={{ color: '#cbd5e1', display: 'block', fontSize: '15px' }}>No Docker networks detected</strong>
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
-                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase' }}>
+                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Network Name</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Host Machine</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Host Node</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Driver</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Scope</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Subnet / Gateway</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Subnet CIDR</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Gateway</th>
                 </tr>
               </thead>
               <tbody>
@@ -1018,7 +1200,7 @@ export default function DockerPage() {
                   <tr key={net.id || idx} style={{ borderBottom: '1px solid rgba(31, 46, 68, 0.4)', color: '#cbd5e1' }}>
                     <td style={{ padding: '12px 16px', fontWeight: 700, color: '#f1f5f9' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Globe size={15} color="#3b82f6" />
+                        <Globe size={16} color="#3b82f6" />
                         {net.name}
                       </div>
                     </td>
@@ -1028,8 +1210,9 @@ export default function DockerPage() {
                         {net.driver || 'bridge'}
                       </span>
                     </td>
-                    <td style={{ padding: '12px 16px', color: '#64748b' }}>{net.scope || 'local'}</td>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#94a3b8' }}>{net.subnet || net.gateway || 'Default'}</td>
+                    <td style={{ padding: '12px 16px', color: '#94a3b8' }}>{net.scope || 'local'}</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#e2e8f0' }}>{net.subnet || '-'}</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#e2e8f0' }}>{net.gateway || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1038,22 +1221,24 @@ export default function DockerPage() {
         </div>
       )}
 
-      {/* TAB 4: VOLUMES */}
+      {/* ========================================================================= */}
+      {/* 8. SUB-TAB 4: VOLUMES */}
+      {/* ========================================================================= */}
       {activeTab === 'volumes' && (
-        <div className="table-wrapper" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
           {volumes.length === 0 ? (
-            <div style={{ padding: '60px 24px', textAlign: 'center', color: '#64748b' }}>
-              No persistent volumes mapped across fleet.
+            <div style={{ textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
+              <HardDrive size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
+              <strong style={{ color: '#cbd5e1', display: 'block', fontSize: '15px' }}>No persistent volumes discovered</strong>
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
-                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase' }}>
+                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Volume Name</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Host Machine</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Driver</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Mount Point</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Size</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Mount Path</th>
                 </tr>
               </thead>
               <tbody>
@@ -1061,14 +1246,15 @@ export default function DockerPage() {
                   <tr key={vol.name || idx} style={{ borderBottom: '1px solid rgba(31, 46, 68, 0.4)', color: '#cbd5e1' }}>
                     <td style={{ padding: '12px 16px', fontWeight: 700, color: '#f1f5f9' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <HardDrive size={15} color="#a855f7" />
+                        <HardDrive size={16} color="#a855f7" />
                         {vol.name}
                       </div>
                     </td>
                     <td style={{ padding: '12px 16px', color: '#38bdf8' }}>{vol.hostServerName}</td>
                     <td style={{ padding: '12px 16px', color: '#94a3b8' }}>{vol.driver || 'local'}</td>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#64748b', fontSize: '11px' }}>{vol.mountpoint || vol.Mountpoint || vol.mount_point || '-'}</td>
-                    <td style={{ padding: '12px 16px', color: '#c084fc', fontWeight: 600 }}>{vol.size || '-'}</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#94a3b8', fontSize: '11px' }}>
+                      {vol.mountpoint || vol.Mountpoint || '-'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1077,21 +1263,25 @@ export default function DockerPage() {
         </div>
       )}
 
-      {/* TAB 5: EVENTS */}
+      {/* ========================================================================= */}
+      {/* 9. SUB-TAB 5: EVENTS & AUDIT STREAM */}
+      {/* ========================================================================= */}
       {activeTab === 'events' && (
-        <div className="table-wrapper" style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
+        <div style={{ backgroundColor: '#0d1220', border: '1px solid #1f2e44', borderRadius: '12px', overflow: 'hidden' }}>
           {events.length === 0 ? (
-            <div style={{ padding: '60px 24px', textAlign: 'center', color: '#64748b' }}>
-              No recent Docker lifecycle audit events.
+            <div style={{ textAlign: 'center', padding: '60px 24px', color: '#64748b' }}>
+              <Zap size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
+              <strong style={{ color: '#cbd5e1', display: 'block', fontSize: '15px' }}>No daemon lifecycle events recorded</strong>
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
-                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase' }}>
+                <tr style={{ backgroundColor: '#080c14', borderBottom: '1px solid #1f2e44', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Timestamp</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Host Machine</th>
                   <th style={{ padding: '12px 16px', fontWeight: 700 }}>Action</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Resource Target</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Type</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 700 }}>Target Resource</th>
                 </tr>
               </thead>
               <tbody>
@@ -1113,8 +1303,11 @@ export default function DockerPage() {
                         {evt.action || 'event'}
                       </span>
                     </td>
+                    <td style={{ padding: '12px 16px', color: '#94a3b8', textTransform: 'uppercase', fontSize: '11px' }}>
+                      {evt.type || 'container'}
+                    </td>
                     <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#f1f5f9' }}>
-                      {evt.actor || evt.target || evt.resource || '-'}
+                      {evt.actor || evt.actor_name || evt.target || evt.resource || '-'}
                     </td>
                   </tr>
                 ))}
@@ -1125,451 +1318,227 @@ export default function DockerPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 1: DEPLOY / RUN CONTAINER MODAL */}
+      {/* MODAL 1: ENTERPRISE DEEP DIVE CONTAINER TELEMETRY & DIAGNOSTIC INSPECTOR */}
       {/* ========================================================================= */}
-      {showRunModal && (
+      {inspectContainer && (
         <div style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          backdropFilter: 'blur(5px)',
+          backgroundColor: 'rgba(0, 0, 0, 0.88)',
+          backdropFilter: 'blur(8px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 99999,
+          zIndex: 9999,
           padding: '20px'
         }}>
           <div style={{
             backgroundColor: '#0d1220',
             border: '1px solid #1f2e44',
-            borderRadius: '12px',
+            borderRadius: '16px',
             width: '100%',
-            maxWidth: '560px',
+            maxWidth: '900px',
+            maxHeight: '88vh',
+            display: 'flex',
+            flexDirection: 'column',
             overflow: 'hidden',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85)'
+            boxShadow: '0 25px 60px -15px rgba(0,0,0,0.9)'
           }}>
+            {/* Modal Header */}
             <div style={{
-              padding: '16px 20px',
+              padding: '16px 22px',
               backgroundColor: '#111827',
               borderBottom: '1px solid #1f2e44',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Play size={18} color="#0284c7" fill="#0284c7" />
-                <h3 style={{ margin: 0, fontSize: '16px', color: '#f1f5f9', fontWeight: 700 }}>
-                  Deploy New Docker Container
-                </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ padding: '8px', backgroundColor: 'rgba(6, 182, 212, 0.15)', borderRadius: '8px' }}>
+                  <Box size={22} color="#06b6d4" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', color: '#f1f5f9', fontWeight: 700 }}>
+                    Container Observability: {inspectContainer.name || inspectContainer.names || inspectContainer.id}
+                  </h3>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
+                    {inspectContainer.image} • Host Node: <strong style={{ color: '#38bdf8' }}>{inspectContainer.hostServerName}</strong>
+                  </span>
+                </div>
               </div>
-              <button
-                onClick={() => setShowRunModal(false)}
-                type="button"
-                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}
-              >
-                <X size={18} />
+              <button onClick={() => setInspectContainer(null)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}>
+                <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleRunSubmit} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* Target Host */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                  Target Connected Host <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <select
-                  value={runForm.serverId}
-                  onChange={(e) => setRunForm({ ...runForm, serverId: e.target.value })}
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#080c14',
-                    border: '1px solid #1f2e44',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    outline: 'none'
-                  }}
-                >
-                  <option value="" disabled>-- Select Connected Host --</option>
-                  {onlineServersList.map(s => {
-                    const sId = s.id || s.ID || s.machine_id;
-                    return (
-                      <option key={sId} value={sId}>
-                        {s.hostname || s.name} ({s.ip_address || 'Connected'})
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              {/* Docker Image */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                  Docker Image <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. nginx:alpine, redis:7-alpine, postgres:15"
-                  value={runForm.image}
-                  onChange={(e) => setRunForm({ ...runForm, image: e.target.value })}
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#080c14',
-                    border: '1px solid #1f2e44',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
-                  {['nginx:alpine', 'redis:7-alpine', 'postgres:15-alpine', 'alpine:latest', 'httpd:alpine'].map(suggested => (
-                    <button
-                      key={suggested}
-                      type="button"
-                      onClick={() => setRunForm({ ...runForm, image: suggested })}
-                      style={{
-                        padding: '2px 8px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid #1f2e44',
-                        borderRadius: '4px',
-                        color: '#38bdf8',
-                        fontSize: '11px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {suggested}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Container Name */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                  Container Name (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. my-web-app"
-                  value={runForm.name}
-                  onChange={(e) => setRunForm({ ...runForm, name: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#080c14',
-                    border: '1px solid #1f2e44',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-
-              {/* Ports & Restart Policy (2 Columns) */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                    Port Mappings
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 8080:80, 5432:5432"
-                    value={runForm.ports}
-                    onChange={(e) => setRunForm({ ...runForm, ports: e.target.value })}
+            {/* Sub-Nav Toolbar in Modal */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #1f2e44', backgroundColor: '#090d16', padding: '0 16px', overflowX: 'auto' }}>
+              {[
+                { id: 'telemetry', label: 'Live Telemetry', icon: Activity },
+                { id: 'diagnostics', label: 'Health Diagnostics', icon: AlertTriangle },
+                { id: 'ports', label: 'Network & Ports', icon: Globe },
+                { id: 'raw', label: 'Raw Inspect JSON', icon: FileText }
+              ].map(t => {
+                const Icon = t.icon;
+                const isActive = inspectTab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setInspectTab(t.id)}
                     style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      backgroundColor: '#080c14',
-                      border: '1px solid #1f2e44',
-                      borderRadius: '6px',
-                      color: '#f1f5f9',
-                      fontSize: '13px',
-                      outline: 'none',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                    Restart Policy
-                  </label>
-                  <select
-                    value={runForm.restartPolicy}
-                    onChange={(e) => setRunForm({ ...runForm, restartPolicy: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      backgroundColor: '#080c14',
-                      border: '1px solid #1f2e44',
-                      borderRadius: '6px',
-                      color: '#f1f5f9',
-                      fontSize: '13px',
-                      outline: 'none'
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '12px 14px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: isActive ? '2px solid #06b6d4' : '2px solid transparent',
+                      color: isActive ? '#06b6d4' : '#94a3b8',
+                      fontSize: '12px',
+                      fontWeight: isActive ? 700 : 500,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
                     }}
                   >
-                    <option value="unless-stopped">unless-stopped</option>
-                    <option value="always">always</option>
-                    <option value="on-failure">on-failure</option>
-                    <option value="no">no (none)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Env Vars & Volume Mounts (2 Columns) */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                    Environment Variables
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. ENV=prod, PORT=80"
-                    value={runForm.environment}
-                    onChange={(e) => setRunForm({ ...runForm, environment: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      backgroundColor: '#080c14',
-                      border: '1px solid #1f2e44',
-                      borderRadius: '6px',
-                      color: '#f1f5f9',
-                      fontSize: '13px',
-                      outline: 'none',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                    Volumes
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. /data:/var/lib/data"
-                    value={runForm.volumes}
-                    onChange={(e) => setRunForm({ ...runForm, volumes: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      backgroundColor: '#080c14',
-                      border: '1px solid #1f2e44',
-                      borderRadius: '6px',
-                      color: '#f1f5f9',
-                      fontSize: '13px',
-                      outline: 'none',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Modal Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowRunModal(false)}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: 'transparent',
-                    border: '1px solid #1f2e44',
-                    borderRadius: '6px',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    fontSize: '13px'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '8px 20px',
-                    backgroundColor: '#0284c7',
-                    border: 'none',
-                    borderRadius: '6px',
-                    color: '#ffffff',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    fontSize: '13px'
-                  }}
-                >
-                  <Play size={14} fill="#ffffff" />
-                  Launch Container
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 2: PULL IMAGE MODAL */}
-      {/* ========================================================================= */}
-      {showPullModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          backdropFilter: 'blur(5px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 99999,
-          padding: '20px'
-        }}>
-          <div style={{
-            backgroundColor: '#0d1220',
-            border: '1px solid #1f2e44',
-            borderRadius: '12px',
-            width: '100%',
-            maxWidth: '480px',
-            overflow: 'hidden',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85)'
-          }}>
-            <div style={{
-              padding: '16px 20px',
-              backgroundColor: '#111827',
-              borderBottom: '1px solid #1f2e44',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Download size={18} color="#06b6d4" />
-                <h3 style={{ margin: 0, fontSize: '16px', color: '#f1f5f9', fontWeight: 700 }}>
-                  Pull Docker Image to Node
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowPullModal(false)}
-                type="button"
-                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}
-              >
-                <X size={18} />
-              </button>
+                    <Icon size={14} />
+                    {t.label}
+                  </button>
+                );
+              })}
             </div>
 
-            <form onSubmit={handlePullSubmit} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* Target Host */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                  Target Node <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <select
-                  value={pullForm.serverId}
-                  onChange={(e) => setPullForm({ ...pullForm, serverId: e.target.value })}
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#080c14',
-                    border: '1px solid #1f2e44',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    outline: 'none'
-                  }}
-                >
-                  <option value="" disabled>-- Select Connected Host --</option>
-                  {onlineServersList.map(s => {
-                    const sId = s.id || s.ID || s.machine_id;
-                    return (
-                      <option key={sId} value={sId}>
-                        {s.hostname || s.name} ({s.ip_address || 'Connected'})
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
+            {/* Modal Body */}
+            <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              
+              {/* TAB 1: LIVE METRICS */}
+              {inspectTab === 'telemetry' && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+                    <div style={{ padding: '12px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid #1f2e44' }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>CPU Utilization</span>
+                      <strong style={{ fontSize: '18px', color: '#38bdf8' }}>{(inspectContainer.cpu_percent || 0).toFixed(1)}%</strong>
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid #1f2e44' }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Memory Used (RSS)</span>
+                      <strong style={{ fontSize: '18px', color: '#c084fc' }}>{formatBytes(inspectContainer.memory_used_bytes || inspectContainer.memory_used || 0)}</strong>
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid #1f2e44' }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Active Status</span>
+                      <strong style={{ fontSize: '14px', color: '#22c55e', textTransform: 'uppercase' }}>{inspectContainer.state || 'running'}</strong>
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid #1f2e44' }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Restart Count</span>
+                      <strong style={{ fontSize: '18px', color: '#f59e0b' }}>{inspectContainer.restart_count || 0}</strong>
+                    </div>
+                  </div>
 
-              {/* Docker Image */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>
-                  Image Repository & Tag <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. ubuntu:22.04, redis:alpine, node:20"
-                  value={pullForm.image}
-                  onChange={(e) => setPullForm({ ...pullForm, image: e.target.value })}
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#080c14',
-                    border: '1px solid #1f2e44',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid #1f2e44' }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Full SHA-256 ID</span>
+                      <strong style={{ fontSize: '12px', color: '#f1f5f9', fontFamily: 'monospace' }}>{inspectContainer.id || inspectContainer.ID}</strong>
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid #1f2e44' }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Image Repository</span>
+                      <strong style={{ fontSize: '12px', color: '#06b6d4', fontFamily: 'monospace' }}>{inspectContainer.image}</strong>
+                    </div>
+                  </div>
 
-              {/* Modal Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowPullModal(false)}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: 'transparent',
-                    border: '1px solid #1f2e44',
-                    borderRadius: '6px',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    fontSize: '13px'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '8px 20px',
-                    backgroundColor: '#0284c7',
-                    border: 'none',
-                    borderRadius: '6px',
-                    color: '#ffffff',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    fontSize: '13px'
-                  }}
-                >
-                  <Download size={14} />
-                  Start Pulling Image
-                </button>
-              </div>
-            </form>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <button
+                      onClick={() => handleOpenLogs(inspectContainer)}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#06b6d4',
+                        color: '#080c14',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <FileText size={14} /> Open Live Streaming Logs
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* TAB 2: DIAGNOSTIC ANALYZER */}
+              {inspectTab === 'diagnostics' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
+                    Automated Container Health & Stability Diagnostics
+                  </span>
+                  {getContainerDiagnostic(inspectContainer).map((diag, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: diag.type === 'danger' 
+                          ? '1px solid rgba(239, 68, 68, 0.4)' 
+                          : (diag.type === 'warning' ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(34, 197, 94, 0.4)'),
+                        backgroundColor: diag.type === 'danger' 
+                          ? 'rgba(239, 68, 68, 0.1)' 
+                          : (diag.type === 'warning' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(34, 197, 94, 0.1)'),
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '3px'
+                      }}
+                    >
+                      <strong style={{
+                        fontSize: '13px',
+                        color: diag.type === 'danger' ? '#f87171' : (diag.type === 'warning' ? '#fbbf24' : '#4ade80')
+                      }}>
+                        {diag.title}
+                      </strong>
+                      <span style={{ fontSize: '12px', color: '#cbd5e1' }}>{diag.msg}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* TAB 3: PORTS & NETWORK */}
+              {inspectTab === 'ports' && (
+                <div style={{ padding: '16px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid #1f2e44' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#f1f5f9', display: 'block', marginBottom: '8px' }}>
+                    Port Mappings & Virtual Networks
+                  </span>
+                  <div style={{ fontFamily: 'monospace', color: '#38bdf8', fontSize: '13px' }}>
+                    {inspectContainer.ports || inspectContainer.Ports || 'No host ports mapped.'}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: RAW JSON */}
+              {inspectTab === 'raw' && (
+                <pre style={{
+                  padding: '16px',
+                  backgroundColor: '#050811',
+                  borderRadius: '8px',
+                  border: '1px solid #1f2e44',
+                  color: '#a5f3fc',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  overflowX: 'auto',
+                  maxHeight: '340px'
+                }}>
+                  {JSON.stringify(inspectContainer, null, 2)}
+                </pre>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 3: LIVE LOG VIEWER MODAL */}
+      {/* MODAL 2: ENTERPRISE LIVE LOG STREAMER */}
       {/* ========================================================================= */}
       {activeLogContainer && (
         <div style={{
@@ -1578,39 +1547,42 @@ export default function DockerPage() {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          backdropFilter: 'blur(6px)',
+          backgroundColor: 'rgba(0, 0, 0, 0.88)',
+          backdropFilter: 'blur(8px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 99999,
+          zIndex: 9999,
           padding: '24px'
         }}>
           <div style={{
-            backgroundColor: '#0a0e17',
+            backgroundColor: '#0d1220',
             border: '1px solid #1f2e44',
-            borderRadius: '12px',
+            borderRadius: '16px',
             width: '100%',
-            maxWidth: '900px',
-            height: '75vh',
+            maxWidth: '1000px',
+            height: '82vh',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85)'
+            boxShadow: '0 25px 60px -15px rgba(0,0,0,0.9)'
           }}>
+            {/* Logs Header */}
             <div style={{
               padding: '14px 20px',
               backgroundColor: '#111827',
               borderBottom: '1px solid #1f2e44',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between'
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '10px'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <Terminal size={18} color="#06b6d4" />
                 <div>
                   <h3 style={{ margin: 0, fontSize: '15px', color: '#f1f5f9', fontWeight: 700 }}>
-                    Logs: {activeLogContainer.name || activeLogContainer.names || activeLogContainer.id}
+                    Stdout/Stderr Logs: {activeLogContainer.name || activeLogContainer.names || activeLogContainer.id}
                   </h3>
                   <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
                     {activeLogContainer.image} • Host: {activeLogContainer.hostServerName}
@@ -1618,7 +1590,77 @@ export default function DockerPage() {
                 </div>
               </div>
 
+              {/* Log Controls */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                
+                {/* Severity Filter */}
+                <div style={{ display: 'flex', backgroundColor: '#070a11', borderRadius: '6px', border: '1px solid #1f2e44', padding: '2px' }}>
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'warn-error', label: 'Warn/Err' },
+                    { id: 'error', label: 'Errors' }
+                  ].map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => setLogSeverity(s.id)}
+                      type="button"
+                      style={{
+                        padding: '3px 8px',
+                        border: 'none',
+                        borderRadius: '4px',
+                        backgroundColor: logSeverity === s.id ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                        color: logSeverity === s.id ? '#06b6d4' : '#94a3b8',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        fontWeight: logSeverity === s.id ? 700 : 500
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search in logs */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#070a11', border: '1px solid #1f2e44', borderRadius: '6px', padding: '4px 8px' }}>
+                  <Search size={12} color="#64748b" />
+                  <input
+                    type="text"
+                    placeholder="Search logs..."
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                    style={{ background: 'none', border: 'none', color: '#f1f5f9', outline: 'none', fontSize: '11px', width: '120px' }}
+                  />
+                  {logSearch && (
+                    <button onClick={() => setLogSearch('')} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 0 }}>
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Download Log File */}
+                <button
+                  onClick={handleDownloadLogs}
+                  type="button"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '6px 10px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid #1f2e44',
+                    borderRadius: '6px',
+                    color: '#38bdf8',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                  title="Download complete log output"
+                >
+                  <Download size={12} />
+                  Download
+                </button>
+
+                {/* Refresh */}
                 <button
                   onClick={() => handleOpenLogs(activeLogContainer)}
                   disabled={logsLoading}
@@ -1626,19 +1668,20 @@ export default function DockerPage() {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '5px',
-                    padding: '6px 12px',
+                    gap: '4px',
+                    padding: '6px 10px',
                     backgroundColor: 'rgba(255, 255, 255, 0.05)',
                     border: '1px solid #1f2e44',
                     borderRadius: '6px',
                     color: '#f1f5f9',
-                    fontSize: '12px',
+                    fontSize: '11px',
                     cursor: 'pointer'
                   }}
                 >
-                  <RefreshCw size={13} className={logsLoading ? 'spin' : ''} />
+                  <RefreshCw size={12} className={logsLoading ? 'spin' : ''} />
                   Refresh
                 </button>
+
                 <button
                   onClick={() => setActiveLogContainer(null)}
                   type="button"
@@ -1649,32 +1692,56 @@ export default function DockerPage() {
               </div>
             </div>
 
+            {/* Terminal Body with Line Numbers and Colorized Levels */}
             <div style={{
               flex: 1,
               backgroundColor: '#050811',
-              padding: '16px',
-              fontFamily: 'monospace',
+              padding: '14px',
+              fontFamily: '"Fira Code", monospace',
               fontSize: '12px',
               lineHeight: '1.6',
-              color: '#34d399',
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap'
+              overflowY: 'auto'
             }}>
               {logsLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#06b6d4' }}>
-                  <RefreshCw size={14} className="spin" /> Loading streaming logs...
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#06b6d4', padding: '12px' }}>
+                  <RefreshCw size={14} className="spin" /> Streaming live logs...
+                </div>
+              ) : parsedLogLines.length === 0 ? (
+                <div style={{ color: '#64748b', padding: '12px' }}>
+                  No log entries found matching filter.
                 </div>
               ) : (
-                containerLogs || 'No log output available for this container.'
+                parsedLogLines.map(line => {
+                  let color = '#34d399'; // default info/ok
+                  if (line.level === 'error') color = '#f87171';
+                  else if (line.level === 'warn') color = '#fbbf24';
+                  else if (line.level === 'debug') color = '#c084fc';
+
+                  return (
+                    <div key={line.index} style={{ display: 'flex', gap: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      <span style={{ color: '#475569', userSelect: 'none', width: '32px', textAlign: 'right', flexShrink: 0 }}>
+                        {line.index}
+                      </span>
+                      <span style={{ color }}>{line.text}</span>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
         </div>
       )}
 
+      {/* Internal Custom CSS */}
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         .spin { animation: spin 0.8s linear infinite; }
+        .container-hover-row:hover { background-color: rgba(255, 255, 255, 0.03) !important; }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+        .pulse-indicator { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
       `}</style>
     </div>
   );

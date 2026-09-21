@@ -13,6 +13,7 @@ import (
 	"infrapilot/backend/internal/events"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/services"
+	"infrapilot/backend/internal/utils"
 	"infrapilot/backend/internal/websocket"
 
 	"github.com/gin-gonic/gin"
@@ -119,17 +120,29 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		apiKey = "agent-key"
 	}
 
+	var parsedURLID uuid.UUID
+	if c.Param("id") != "" {
+		parsedURLID, _ = uuid.Parse(c.Param("id"))
+	}
+
+	// 0. Check if this host has been permanently deleted / decommissioned
+	if utils.IsHostDecommissioned(database.DB, parsedURLID, req.Hostname, req.IPAddress) {
+		c.JSON(http.StatusGone, gin.H{
+			"error":  "Machine has been permanently deleted and decommissioned by administrator. Telemetry transmission halted.",
+			"status": "decommissioned",
+		})
+		return
+	}
+
 	var machine *models.Machine
 
 	// 1. If explicit server ID passed in URL param
-	if c.Param("id") != "" {
-		if id, err := uuid.Parse(c.Param("id")); err == nil {
-			var mByID models.Machine
-			if err := database.DB.Where("id = ?", id).First(&mByID).Error; err == nil {
-				if (req.Hostname == "" || mByID.Hostname == "" || strings.EqualFold(mByID.Hostname, req.Hostname)) &&
-					(req.OS == "" || mByID.OS == "" || strings.EqualFold(mByID.OS, req.OS)) {
-					machine = &mByID
-				}
+	if parsedURLID != uuid.Nil {
+		var mByID models.Machine
+		if err := database.DB.Where("id = ?", parsedURLID).First(&mByID).Error; err == nil {
+			if (req.Hostname == "" || mByID.Hostname == "" || strings.EqualFold(mByID.Hostname, req.Hostname)) &&
+				(req.OS == "" || mByID.OS == "" || strings.EqualFold(mByID.OS, req.OS)) {
+				machine = &mByID
 			}
 		}
 	}
@@ -183,17 +196,15 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		}
 	}
 
-	// 7. Auto-provision distinct server record if this is a newly connected host / OS
-	if machine == nil && req.Hostname != "" {
+	// 7. Auto-provision distinct server record if this is a newly connected host / OS (and NOT decommissioned)
+	if machine == nil && req.Hostname != "" && !utils.IsHostDecommissioned(database.DB, parsedURLID, req.Hostname, req.IPAddress) {
 		newID := uuid.New()
-		if c.Param("id") != "" {
-			if parsed, err := uuid.Parse(c.Param("id")); err == nil {
-				var count int64
-				if database.DB != nil {
-					database.DB.Model(&models.Server{}).Where("id = ?", parsed).Count(&count)
-					if count == 0 {
-						newID = parsed
-					}
+		if parsedURLID != uuid.Nil {
+			var count int64
+			if database.DB != nil {
+				database.DB.Model(&models.Server{}).Where("id = ?", parsedURLID).Count(&count)
+				if count == 0 {
+					newID = parsedURLID
 				}
 			}
 		}

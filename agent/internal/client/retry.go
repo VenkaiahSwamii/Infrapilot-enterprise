@@ -45,6 +45,12 @@ func PostWithRetry(url string, body []byte, contentType string) error {
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				return nil
 			}
+			if resp.StatusCode == http.StatusGone {
+				return fmt.Errorf("host decommissioned: HTTP 410 (machine was permanently deleted by administrator)")
+			}
+			if resp.StatusCode == http.StatusForbidden {
+				return fmt.Errorf("host blocked: HTTP 403 (machine is blocked or stopped)")
+			}
 			lastErr = fmt.Errorf("HTTP status %d", resp.StatusCode)
 		} else {
 			lastErr = err

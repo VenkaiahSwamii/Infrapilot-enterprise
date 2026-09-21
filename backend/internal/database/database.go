@@ -232,6 +232,7 @@ func Connect() {
 		&models.UserHostPermission{},
 		&models.EnrollmentToken{},
 		&models.Server{},
+		&models.DecommissionedHost{},
 		&models.Metric{},
 		&models.LinuxServer{},
 		&models.LinuxMetric{},

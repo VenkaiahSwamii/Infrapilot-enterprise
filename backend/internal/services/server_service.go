@@ -13,6 +13,7 @@ import (
 	"infrapilot/backend/internal/events"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/repository"
+	"infrapilot/backend/internal/utils"
 	"infrapilot/backend/internal/websocket"
 
 	"github.com/google/uuid"
@@ -102,6 +103,10 @@ func (s *ServerService) PublishEvent(e events.Event) {
 }
 
 func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*models.Server, error) {
+	if utils.IsHostDecommissioned(database.DB, input.ID, input.Hostname, input.IPAddress) {
+		return nil, errors.New("machine has been permanently deleted and decommissioned by administrator")
+	}
+
 	server, err := s.serverRepo.FindExistingServer(input.ID, input.Hostname, input.IPAddress, input.MACAddress, input.OS)
 	if err == nil && server != nil {
 		isBlocked := server.IsBlocked || strings.ToUpper(server.Status) == "BLOCKED" || strings.ToUpper(server.Status) == "STOPPED"

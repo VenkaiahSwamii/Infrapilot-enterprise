@@ -1,33 +1,23 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Layers, 
-  Play, 
-  Square, 
-  RotateCw, 
-  Trash2, 
   FileText, 
-  Info, 
   Search, 
   RefreshCw, 
-  CheckCircle2, 
   AlertCircle, 
-  Clock, 
   HardDrive, 
   Globe, 
   Box, 
   Cpu, 
-  MemoryStick, 
   Copy, 
   Check, 
   X, 
   Terminal, 
-  ExternalLink,
-  ChevronRight,
-  ShieldCheck,
-  Zap,
-  Filter,
-  Plus,
-  DownloadCloud
+  Zap, 
+  Eye,
+  Activity,
+  AlertTriangle,
+  Download
 } from 'lucide-react';
 import { 
   getDockerOverview, 
@@ -36,14 +26,7 @@ import {
   getDockerNetworks, 
   getDockerVolumes, 
   getDockerEvents, 
-  getContainerLogs,
-  startContainer,
-  stopContainer,
-  restartContainer,
-  removeContainer,
-  runContainer,
-  pullImage,
-  removeImage
+  getContainerLogs
 } from '../../../api/docker.js';
 import { useDashboardStore } from '../../../store/dashboardStore.jsx';
 
@@ -65,43 +48,21 @@ export default function DockerTab({ machine }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [actionLoading, setActionLoading] = useState({});
 
   // Filtering & Searching
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'running' | 'exited' | 'restarting'
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'running' | 'high-load' | 'restarting' | 'error' | 'stopped'
 
   // Modals
   const [activeLogContainer, setActiveLogContainer] = useState(null);
   const [containerLogs, setContainerLogs] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
   const [logSearch, setLogSearch] = useState('');
-  const [autoScrollLogs, setAutoScrollLogs] = useState(true);
+  const [logSeverity, setLogSeverity] = useState('all'); // 'all' | 'warn-error' | 'error'
 
   const [inspectContainer, setInspectContainer] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [inspectTab, setInspectTab] = useState('telemetry'); // 'telemetry' | 'diagnostics' | 'ports' | 'raw'
   const [copiedId, setCopiedId] = useState(null);
-
-  // Deploy / Run Container Modal State
-  const [showRunModal, setShowRunModal] = useState(false);
-  const [runLoading, setRunLoading] = useState(false);
-  const [runForm, setRunForm] = useState({
-    image: '',
-    name: '',
-    ports: '',
-    env: '',
-    volumes: '',
-    restart: 'unless-stopped',
-    command: ''
-  });
-
-  // Pull Image Modal State
-  const [showPullModal, setShowPullModal] = useState(false);
-  const [pullLoading, setPullLoading] = useState(false);
-  const [pullForm, setPullForm] = useState({
-    image: '',
-    tag: 'latest'
-  });
 
   // Fetch all Docker data for this machine
   const fetchAllData = async (isManualRefresh = false) => {
@@ -146,128 +107,42 @@ export default function DockerTab({ machine }) {
   };
 
   useEffect(() => {
-    fetchAllData();
+    fetchAllData(false);
     const interval = setInterval(() => {
-      fetchAllData(true);
+      fetchAllData(false);
     }, 15000);
     return () => clearInterval(interval);
   }, [machineId]);
 
-  // Container Action Dispatcher
-  const handleAction = async (container, action) => {
-    const cId = container.id || container.ID || container.name || container.Name;
-    setActionLoading(prev => ({ ...prev, [cId]: action }));
-
-    try {
-      let res;
-      if (action === 'start') res = await startContainer(machineId, cId);
-      else if (action === 'stop') res = await stopContainer(machineId, cId);
-      else if (action === 'restart') res = await restartContainer(machineId, cId);
-      else if (action === 'remove') res = await removeContainer(machineId, cId);
-
-      addToast('success', `Container ${action.toUpperCase()}`, `Request to ${action} ${container.name || cId} dispatched successfully.`);
-      setTimeout(() => fetchAllData(true), 1500);
-    } catch (err) {
-      addToast('critical', `Action Failed: ${action}`, err.response?.data?.error || err.message);
-    } finally {
-      setActionLoading(prev => ({ ...prev, [cId]: null }));
-      setConfirmDelete(null);
-    }
-  };
-
-  // Run/Deploy Container Dispatcher
-  const handleDeployContainer = async (e) => {
-    if (e) e.preventDefault();
-    if (!runForm.image.trim()) {
-      addToast('critical', 'Validation Error', 'Image name is required.');
-      return;
-    }
-
-    setRunLoading(true);
-    try {
-      const payload = {
-        machine_id: machineId,
-        image: runForm.image.trim(),
-        name: runForm.name.trim(),
-        ports: runForm.ports ? runForm.ports.split(',').map(p => p.trim()).filter(Boolean) : [],
-        environment: runForm.env ? runForm.env.split(',').map(e => e.trim()).filter(Boolean) : [],
-        volumes: runForm.volumes ? runForm.volumes.split(',').map(v => v.trim()).filter(Boolean) : [],
-        restart: runForm.restart || 'unless-stopped',
-        command: runForm.command.trim()
-      };
-
-      await runContainer(payload);
-      addToast('success', 'Container Deployment Initiated', `Dispatched docker run for ${payload.image} on ${machine?.hostname || 'this host'}.`);
-      setShowRunModal(false);
-      setRunForm({
-        image: '',
-        name: '',
-        ports: '',
-        env: '',
-        volumes: '',
-        restart: 'unless-stopped',
-        command: ''
-      });
-      setTimeout(() => fetchAllData(true), 1500);
-    } catch (err) {
-      addToast('critical', 'Container Run Failed', err.response?.data?.error || err.message);
-    } finally {
-      setRunLoading(false);
-    }
-  };
-
-  // Pull Image Dispatcher
-  const handlePullImage = async (e) => {
-    if (e) e.preventDefault();
-    if (!pullForm.image.trim()) {
-      addToast('critical', 'Validation Error', 'Image repository is required.');
-      return;
-    }
-
-    setPullLoading(true);
-    try {
-      const fullImage = pullForm.tag ? `${pullForm.image.trim()}:${pullForm.tag.trim()}` : pullForm.image.trim();
-      await pullImage(machineId, fullImage);
-      addToast('success', 'Image Pull Initiated', `Dispatched docker pull for ${fullImage}. Check event logs for progress.`);
-      setShowPullModal(false);
-      setPullForm({ image: '', tag: 'latest' });
-      setTimeout(() => fetchAllData(true), 2500);
-    } catch (err) {
-      addToast('critical', 'Image Pull Failed', err.response?.data?.error || err.message);
-    } finally {
-      setPullLoading(false);
-    }
-  };
-
-  // Remove Image Dispatcher
-  const handleDeleteImage = async (img) => {
-    const fullImg = img.repository ? `${img.repository}:${img.tag || 'latest'}` : (img.name || img.id);
-    if (!confirm(`Are you sure you want to remove image ${fullImg}?`)) return;
-
-    try {
-      await removeImage(machineId, fullImg, false);
-      addToast('success', 'Image Remove Dispatched', `Requested removal of image ${fullImg}.`);
-      setTimeout(() => fetchAllData(true), 1500);
-    } catch (err) {
-      addToast('critical', 'Image Removal Failed', err.response?.data?.error || err.message);
-    }
-  };
-
-  // Open Log Viewer
+  // Open Log Streamer
   const handleOpenLogs = async (container) => {
     const cId = container.id || container.ID || container.name;
     setActiveLogContainer(container);
     setLogsLoading(true);
     setContainerLogs('');
+    setLogSearch('');
+    setLogSeverity('all');
 
     try {
       const data = await getContainerLogs(cId);
-      setContainerLogs(data.logs || 'No logs generated by container yet.');
+      setContainerLogs(data.logs || 'No log output emitted by container yet.');
     } catch (err) {
       setContainerLogs(`Error loading container logs: ${err.response?.data?.error || err.message}`);
     } finally {
       setLogsLoading(false);
     }
+  };
+
+  const handleDownloadLogs = () => {
+    if (!containerLogs) return;
+    const blob = new Blob([containerLogs], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `docker-${activeLogContainer?.name || 'container'}-logs.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    addToast('success', 'Logs Downloaded', 'Container log file saved to your device.');
   };
 
   const handleCopyId = (id) => {
@@ -284,104 +159,171 @@ export default function DockerTab({ machine }) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  // Stats calculation
+  // Metrics summary
   const stats = useMemo(() => {
     const total = containers.length;
-    const running = containers.filter(c => {
-      const state = String(c.state || c.State || c.status || '').toLowerCase();
-      return state === 'running' || state.includes('up');
-    }).length;
-    const restarting = containers.filter(c => {
-      const state = String(c.state || c.State || c.status || '').toLowerCase();
-      return state.includes('restarting');
-    }).length;
-    const stopped = total - running - restarting;
+    let running = 0;
+    let highLoad = 0;
+    let restarting = 0;
+    let failed = 0;
+    let stopped = 0;
+    let totalCpu = 0;
+    let totalMem = 0;
 
-    const totalCpu = containers.reduce((acc, c) => acc + (c.cpu_percent || 0), 0);
-    const totalMem = containers.reduce((acc, c) => acc + (c.memory_used_bytes || c.memory_used || 0), 0);
+    containers.forEach(c => {
+      const state = String(c.state || c.State || c.status || '').toLowerCase();
+      const isUp = state === 'running' || state.includes('up');
+      const isRest = state.includes('restarting') || (c.restart_count && c.restart_count > 5);
+      const isErr = state.includes('exit (1') || state.includes('dead') || state.includes('failed') || state.includes('137');
+      const cpu = c.cpu_percent || 0;
+      const memUsed = c.memory_used_bytes || c.memory_used || 0;
+      const memLimit = c.memory_limit_bytes || c.memory_limit || 0;
+      const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
 
-    return { total, running, stopped, restarting, totalCpu, totalMem };
-  }, [containers]);
+      totalCpu += cpu;
+      totalMem += memUsed;
+
+      if (isErr) failed++;
+      else if (isRest) restarting++;
+      else if (isUp) {
+        running++;
+        if (cpu > 75 || memPct > 80) highLoad++;
+      } else {
+        stopped++;
+      }
+    });
+
+    let reclaimableBytes = 0;
+    images.forEach(img => {
+      const fullImg = img.repository ? `${img.repository}:${img.tag || 'latest'}` : (img.name || img.id);
+      const inUse = containers.some(c => c.image === fullImg || c.image === img.name || c.image === img.repository);
+      if (!inUse && img.size_bytes) {
+        reclaimableBytes += img.size_bytes;
+      }
+    });
+
+    return { total, running, highLoad, restarting, failed, stopped, totalCpu, totalMem, reclaimableBytes };
+  }, [containers, images]);
 
   // Filtered containers
   const filteredContainers = useMemo(() => {
     return containers.filter(c => {
       const state = String(c.state || c.State || c.status || '').toLowerCase();
-      if (statusFilter === 'running' && !(state === 'running' || state.includes('up'))) return false;
-      if (statusFilter === 'exited' && (state === 'running' || state.includes('up') || state.includes('restarting'))) return false;
-      if (statusFilter === 'restarting' && !state.includes('restarting')) return false;
+      const isUp = state === 'running' || state.includes('up');
+      const isRest = state.includes('restarting') || (c.restart_count && c.restart_count > 5);
+      const isErr = state.includes('exit (1') || state.includes('dead') || state.includes('failed') || state.includes('137');
+      const cpu = c.cpu_percent || 0;
+      const memUsed = c.memory_used_bytes || c.memory_used || 0;
+      const memLimit = c.memory_limit_bytes || c.memory_limit || 0;
+      const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
+      const isHighLoad = cpu > 75 || memPct > 80;
+
+      if (statusFilter === 'running' && (!isUp || isHighLoad || isRest)) return false;
+      if (statusFilter === 'high-load' && (!isUp || !isHighLoad)) return false;
+      if (statusFilter === 'restarting' && !isRest) return false;
+      if (statusFilter === 'error' && !isErr) return false;
+      if (statusFilter === 'stopped' && (isUp || isRest || isErr)) return false;
 
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
-      const name = String(c.name || c.Name || c.names || '').toLowerCase();
+      const name = String(c.name || c.names || c.Name || '').toLowerCase();
       const image = String(c.image || c.Image || '').toLowerCase();
       const id = String(c.id || c.ID || '').toLowerCase();
       return name.includes(q) || image.includes(q) || id.includes(q);
     });
   }, [containers, statusFilter, searchQuery]);
 
-  if (loading && !overview && containers.length === 0) {
-    return (
-      <div className="tab-empty" style={{ padding: '48px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-        <RefreshCw size={32} className="spin" color="#06b6d4" />
-        <div style={{ fontSize: '15px', color: '#f1f5f9' }}>Connecting to Docker daemon telemetry...</div>
-      </div>
-    );
-  }
+  // Filtered images
+  const filteredImages = useMemo(() => {
+    if (!searchQuery) return images;
+    const q = searchQuery.toLowerCase();
+    return images.filter(img => {
+      const name = String(img.name || img.repository || '').toLowerCase();
+      const tag = String(img.tag || '').toLowerCase();
+      return name.includes(q) || tag.includes(q);
+    });
+  }, [images, searchQuery]);
 
-  const isDockerInstalled = overview?.docker_installed !== false;
+  const parsedLogLines = useMemo(() => {
+    if (!containerLogs) return [];
+    const lines = containerLogs.split('\n');
+    return lines
+      .map((line, idx) => {
+        const lower = line.toLowerCase();
+        let level = 'info';
+        if (lower.includes('error') || lower.includes('err') || lower.includes('fatal') || lower.includes('panic') || lower.includes('exception') || lower.includes('fail')) {
+          level = 'error';
+        } else if (lower.includes('warn') || lower.includes('warning')) {
+          level = 'warn';
+        } else if (lower.includes('debug') || lower.includes('trace')) {
+          level = 'debug';
+        }
+        return { index: idx + 1, text: line, level };
+      })
+      .filter(item => {
+        if (logSeverity === 'error' && item.level !== 'error') return false;
+        if (logSeverity === 'warn-error' && item.level !== 'error' && item.level !== 'warn') return false;
+        if (logSearch.trim() && !item.text.toLowerCase().includes(logSearch.toLowerCase())) return false;
+        return true;
+      });
+  }, [containerLogs, logSearch, logSeverity]);
+
+  // Automated Container Health Analyzer for Inspector
+  const getContainerDiagnostic = (c) => {
+    if (!c) return [];
+    const diags = [];
+    const state = String(c.state || c.State || c.status || '').toLowerCase();
+    const isUp = state === 'running' || state.includes('up');
+    const cpu = c.cpu_percent || 0;
+    const memUsed = c.memory_used_bytes || c.memory_used || 0;
+    const memLimit = c.memory_limit_bytes || c.memory_limit || 0;
+    const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
+    const restarts = c.restart_count || 0;
+
+    if (isUp) {
+      if (cpu > 85) {
+        diags.push({ type: 'danger', title: 'High CPU Saturation', msg: `Container is using ${cpu.toFixed(1)}% CPU, which exceeds the 85% recommended threshold.` });
+      } else if (cpu > 60) {
+        diags.push({ type: 'warning', title: 'Moderate CPU Load', msg: `Container CPU is at ${cpu.toFixed(1)}%. Monitor for throttling spikes.` });
+      } else {
+        diags.push({ type: 'success', title: 'CPU Health Nominal', msg: `Current CPU utilization (${cpu.toFixed(1)}%) is well within steady-state limits.` });
+      }
+
+      if (memPct > 88) {
+        diags.push({ type: 'danger', title: 'Critical OOM-Kill Risk', msg: `Memory usage (${memPct.toFixed(1)}%) is dangerously close to limit (${formatBytes(memLimit)}). Risk of OOM killer.` });
+      } else if (memPct > 70) {
+        diags.push({ type: 'warning', title: 'Elevated Memory Utilization', msg: `Memory usage is at ${memPct.toFixed(1)}% of allocated limit.` });
+      } else {
+        diags.push({ type: 'success', title: 'Memory Allocation Stable', msg: `RAM utilization is healthy at ${formatBytes(memUsed)} (${memPct.toFixed(1)}%).` });
+      }
+    } else {
+      if (state.includes('137')) {
+        diags.push({ type: 'danger', title: 'Terminated by OOM Killer (Exit 137)', msg: 'Container was killed by Linux Kernel Out-Of-Memory (OOM) killer due to exceeding memory cgroup limits.' });
+      } else if (state.includes('1')) {
+        diags.push({ type: 'danger', title: 'Application Runtime Crash (Exit 1)', msg: 'Container process exited with error code 1. Inspect live stdout/stderr logs for stack traces.' });
+      } else {
+        diags.push({ type: 'info', title: 'Graceful Termination / Standby', msg: 'Container was stopped cleanly (Exit 0) and is ready to start on demand.' });
+      }
+    }
+
+    if (restarts > 5) {
+      diags.push({ type: 'danger', title: 'Crash-Looping Detected', msg: `Container has restarted ${restarts} times. Check configuration or dependency health.` });
+    } else if (restarts > 0) {
+      diags.push({ type: 'warning', title: 'Restart History', msg: `Container has restarted ${restarts} time(s) since host boot.` });
+    }
+
+    return diags;
+  };
 
   return (
-    <div className="docker-enterprise-tab" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div className="docker-node-monitoring" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       
       {/* ========================================================================= */}
-      {/* 1. EXECUTIVE METRICS & ENGINE STATUS KPI GRID */}
+      {/* 1. NODE DOCKER ENTERPRISE KPI CARDS */}
       {/* ========================================================================= */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '12px'
-      }}>
-        {/* Docker Engine Status Card */}
-        <div style={{
-          backgroundColor: '#0d1220',
-          border: '1px solid var(--border-soft)',
-          borderRadius: '12px',
-          padding: '16px 18px',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          gap: '8px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Docker Engine</span>
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '2px 8px',
-              backgroundColor: isDockerInstalled ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-              border: isDockerInstalled ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)',
-              borderRadius: '12px',
-              fontSize: '11px',
-              fontWeight: 700,
-              color: isDockerInstalled ? '#22c55e' : '#ef4444'
-            }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isDockerInstalled ? '#22c55e' : '#ef4444' }} />
-              {isDockerInstalled ? 'Active' : 'Offline'}
-            </span>
-          </div>
-          <div>
-            <div style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9' }}>
-              {overview?.docker_version || overview?.engine_version || 'Docker Daemon'}
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px', fontFamily: 'monospace' }}>
-              API: {overview?.api_version || 'v1.44'} • {overview?.host_os || machine?.platform || 'Host OS'}
-            </div>
-          </div>
-        </div>
-
-        {/* Containers Breakdown Card */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+        
+        {/* Total Containers Card */}
         <div style={{
           backgroundColor: '#0d1220',
           border: '1px solid var(--border-soft)',
@@ -390,16 +332,15 @@ export default function DockerTab({ machine }) {
           borderLeft: '4px solid #06b6d4'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Total Containers</span>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Containers Inventory</span>
             <Box size={16} color="#06b6d4" />
           </div>
-          <div style={{ fontSize: '26px', fontWeight: 800, color: '#f1f5f9' }}>
-            {stats.total}
-          </div>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '11px', fontWeight: 600 }}>
-            <span style={{ color: '#22c55e' }}>🟢 {stats.running} Running</span>
-            <span style={{ color: '#eab308' }}>🟡 {stats.restarting} Restarting</span>
-            <span style={{ color: '#94a3b8' }}>⚪ {stats.stopped} Stopped</span>
+          <div style={{ fontSize: '24px', fontWeight: 800, color: '#f1f5f9' }}>{stats.total}</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', fontSize: '11px', fontWeight: 600, marginTop: '4px' }}>
+            <span style={{ color: '#22c55e' }}>🟢 {stats.running} Healthy</span>
+            {stats.highLoad > 0 && <span style={{ color: '#f59e0b' }}>🟡 {stats.highLoad} High Load</span>}
+            {stats.restarting > 0 && <span style={{ color: '#eab308' }}>🟠 {stats.restarting} Restarting</span>}
+            {stats.failed > 0 && <span style={{ color: '#ef4444' }}>🔴 {stats.failed} Crash</span>}
           </div>
         </div>
 
@@ -521,29 +462,35 @@ export default function DockerTab({ machine }) {
             <>
               {/* Status Filter Pills */}
               <div style={{ display: 'flex', backgroundColor: 'rgba(255, 255, 255, 0.04)', borderRadius: '6px', border: '1px solid var(--border-soft)', padding: '2px' }}>
-                {['all', 'running', 'restarting', 'exited'].map(filterKey => (
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'running', label: 'Healthy' },
+                  { id: 'high-load', label: 'High Load' },
+                  { id: 'restarting', label: 'Restarting' },
+                  { id: 'error', label: 'OOM/Err' },
+                  { id: 'stopped', label: 'Stopped' }
+                ].map(f => (
                   <button
-                    key={filterKey}
-                    onClick={() => setStatusFilter(filterKey)}
+                    key={f.id}
+                    onClick={() => setStatusFilter(f.id)}
                     style={{
                       padding: '3px 8px',
                       border: 'none',
                       borderRadius: '4px',
-                      backgroundColor: statusFilter === filterKey ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
-                      color: statusFilter === filterKey ? '#06b6d4' : 'var(--muted)',
+                      backgroundColor: statusFilter === f.id ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                      color: statusFilter === f.id ? '#06b6d4' : 'var(--muted)',
                       cursor: 'pointer',
                       fontSize: '11px',
-                      textTransform: 'capitalize',
-                      fontWeight: statusFilter === filterKey ? 700 : 500
+                      fontWeight: statusFilter === f.id ? 700 : 500
                     }}
                   >
-                    {filterKey}
+                    {f.label}
                   </button>
                 ))}
               </div>
 
               {/* Search Box */}
-              <div style={{ position: 'relative', width: '200px' }}>
+              <div style={{ position: 'relative', width: '180px' }}>
                 <Search size={13} style={{ position: 'absolute', left: '9px', top: '9px', color: 'var(--muted)' }} />
                 <input
                   type="text"
@@ -575,81 +522,27 @@ export default function DockerTab({ machine }) {
             </>
           )}
 
-          {/* Deploy Container Button */}
-          <button
-            onClick={() => {
-              setRunForm({
-                image: '',
-                name: '',
-                ports: '',
-                env: '',
-                volumes: '',
-                restart: 'unless-stopped',
-                command: ''
-              });
-              setShowRunModal(true);
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '0 12px',
-              height: '30px',
-              backgroundColor: '#06b6d4',
-              border: 'none',
-              borderRadius: '6px',
-              color: '#080c14',
-              fontSize: '12px',
-              fontWeight: 700,
-              cursor: 'pointer'
-            }}
-          >
-            <Plus size={14} />
-            Deploy Container
-          </button>
-
-          {/* Pull Image Button */}
-          <button
-            onClick={() => {
-              setPullForm({ image: '', tag: 'latest' });
-              setShowPullModal(true);
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '0 12px',
-              height: '30px',
-              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border-soft)',
-              borderRadius: '6px',
-              color: 'var(--text)',
-              fontSize: '12px',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            <DownloadCloud size={14} />
-            Pull Image
-          </button>
-
           {/* Refresh Button */}
           <button
             onClick={() => fetchAllData(true)}
             disabled={refreshing}
             style={{
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '0 12px',
-              height: '30px',
-              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border-soft)',
+              justifyContent: 'center',
+              gap: '6px',
+              padding: '0 14px',
+              height: '32px',
+              minWidth: '95px',
+              backgroundColor: 'rgba(6, 182, 212, 0.12)',
+              border: '1px solid rgba(6, 182, 212, 0.35)',
               borderRadius: '6px',
-              color: 'var(--text)',
+              color: '#06b6d4',
               fontSize: '12px',
-              fontWeight: 600,
-              cursor: refreshing ? 'not-allowed' : 'pointer'
+              fontWeight: 700,
+              cursor: refreshing ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0
             }}
           >
             <RefreshCw size={13} className={refreshing ? 'spin' : ''} />
@@ -690,11 +583,11 @@ export default function DockerTab({ machine }) {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--muted)', fontSize: '11px', textTransform: 'uppercase', backgroundColor: 'rgba(255, 255, 255, 0.02)' }}>
                   <th style={{ padding: '12px 16px' }}>Container & Image</th>
-                  <th style={{ padding: '12px 16px' }}>Status & State</th>
+                  <th style={{ padding: '12px 16px' }}>Status & Health</th>
                   <th style={{ padding: '12px 16px' }}>Ports</th>
                   <th style={{ padding: '12px 16px' }}>CPU Usage</th>
-                  <th style={{ padding: '12px 16px' }}>Memory</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '12px 16px' }}>Memory Footprint</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>Observability Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -705,13 +598,17 @@ export default function DockerTab({ machine }) {
                   const image = container.image || container.Image || 'unknown';
                   const state = String(container.state || container.State || container.status || '').toLowerCase();
                   const isRunning = state === 'running' || state.includes('up');
-                  const isRestarting = state.includes('restarting');
+                  const isRestarting = state.includes('restarting') || (container.restart_count && container.restart_count > 5);
+                  const isOOM = state.includes('137');
+                  const isExitErr = state.includes('exit (1') || state.includes('dead') || state.includes('failed');
+
                   const ports = container.ports || container.Ports || '-';
                   const cpu = container.cpu_percent || 0;
                   const memUsed = container.memory_used_bytes || container.memory_used || 0;
                   const memLimit = container.memory_limit_bytes || container.memory_limit || 0;
                   const memPct = memLimit > 0 ? ((memUsed / memLimit) * 100).toFixed(1) : 0;
-                  const isBusy = actionLoading[rawId] || actionLoading[name];
+                  const isHighMem = memPct > 80;
+                  const isHighCpu = cpu > 75;
 
                   return (
                     <tr 
@@ -738,7 +635,7 @@ export default function DockerTab({ machine }) {
                                 alignItems: 'center',
                                 gap: '3px'
                               }}
-                              title="Click to copy container ID"
+                              title="Click to copy SHA container ID"
                             >
                               {copiedId === rawId ? <Check size={11} /> : <Copy size={11} />}
                               {shortId}
@@ -768,16 +665,15 @@ export default function DockerTab({ machine }) {
                               width: '8px',
                               height: '8px',
                               borderRadius: '50%',
-                              backgroundColor: isRunning ? '#22c55e' : (isRestarting ? '#eab308' : '#64748b'),
+                              backgroundColor: isRunning ? '#22c55e' : (isRestarting ? '#eab308' : '#ef4444'),
                               boxShadow: isRunning ? '0 0 8px #22c55e' : (isRestarting ? '0 0 8px #eab308' : 'none')
                             }} />
                             <span style={{
                               fontSize: '12px',
                               fontWeight: 700,
-                              textTransform: 'uppercase',
-                              color: isRunning ? '#22c55e' : (isRestarting ? '#eab308' : '#94a3b8')
+                              color: isRunning ? (isHighCpu || isHighMem ? '#f59e0b' : '#22c55e') : (isRestarting ? '#eab308' : '#ef4444')
                             }}>
-                              {container.state || (isRunning ? 'Running' : 'Exited')}
+                              {isOOM ? 'OOMKilled (137)' : (isExitErr ? 'Crash Exited' : (isRunning ? (isHighCpu || isHighMem ? 'Degraded Load' : 'Healthy') : (isRestarting ? 'Restarting' : 'Stopped')))}
                             </span>
                           </div>
                           <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
@@ -805,7 +701,9 @@ export default function DockerTab({ machine }) {
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ width: '100px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text)', marginBottom: '3px' }}>
-                            <span>{cpu.toFixed(1)}%</span>
+                            <span style={{ fontWeight: 600, color: cpu > 75 ? '#ef4444' : (cpu > 40 ? '#f59e0b' : '#06b6d4') }}>
+                              {cpu.toFixed(1)}%
+                            </span>
                           </div>
                           <div style={{ height: '5px', backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
                             <div style={{
@@ -821,11 +719,18 @@ export default function DockerTab({ machine }) {
                       {/* Memory */}
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          <span style={{ fontSize: '12px', color: '#f1f5f9', fontFamily: 'monospace' }}>
-                            {formatBytes(memUsed)} {memLimit > 0 ? `/ ${formatBytes(memLimit)}` : ''}
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '12px', color: isHighMem ? '#f87171' : '#f1f5f9', fontFamily: 'monospace' }}>
+                              {formatBytes(memUsed)}
+                            </span>
+                            {isHighMem && (
+                              <span style={{ fontSize: '9px', backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>
+                                OOM Risk
+                              </span>
+                            )}
+                          </div>
                           {memLimit > 0 && (
-                            <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{memPct}% used</span>
+                            <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{memPct}% of {formatBytes(memLimit)}</span>
                           )}
                         </div>
                       </td>
@@ -834,132 +739,53 @@ export default function DockerTab({ machine }) {
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
                           
-                          {/* Start / Stop Toggle */}
-                          {isRunning ? (
-                            <button
-                              onClick={() => handleAction(container, 'stop')}
-                              disabled={Boolean(isBusy)}
-                              style={{
-                                padding: '5px 8px',
-                                backgroundColor: 'rgba(234, 179, 8, 0.1)',
-                                border: '1px solid rgba(234, 179, 8, 0.3)',
-                                borderRadius: '6px',
-                                color: '#eab308',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                fontSize: '11px',
-                                fontWeight: 700
-                              }}
-                              title="Stop Container"
-                            >
-                              <Square size={12} fill="#eab308" />
-                              Stop
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleAction(container, 'start')}
-                              disabled={Boolean(isBusy)}
-                              style={{
-                                padding: '5px 8px',
-                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                                border: '1px solid rgba(34, 197, 94, 0.3)',
-                                borderRadius: '6px',
-                                color: '#22c55e',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                fontSize: '11px',
-                                fontWeight: 700
-                              }}
-                              title="Start Container"
-                            >
-                              <Play size={12} fill="#22c55e" />
-                              Start
-                            </button>
-                          )}
-
-                          {/* Restart */}
+                          {/* Deep Dive Inspect & Metrics */}
                           <button
-                            onClick={() => handleAction(container, 'restart')}
-                            disabled={Boolean(isBusy)}
+                            onClick={() => {
+                              setInspectContainer(container);
+                              setInspectTab('telemetry');
+                            }}
+                            type="button"
                             style={{
-                              padding: '5px 8px',
-                              backgroundColor: 'rgba(6, 182, 212, 0.1)',
-                              border: '1px solid rgba(6, 182, 212, 0.3)',
+                              padding: '6px 11px',
+                              backgroundColor: 'rgba(6, 182, 212, 0.12)',
+                              border: '1px solid rgba(6, 182, 212, 0.35)',
                               borderRadius: '6px',
                               color: '#06b6d4',
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '11px',
+                              gap: '5px',
+                              fontSize: '12px',
                               fontWeight: 700
                             }}
-                            title="Restart Container"
+                            title="Open Deep-Dive Container Telemetry Monitor"
                           >
-                            <RotateCw size={12} className={isBusy === 'restart' ? 'spin' : ''} />
-                            Restart
+                            <Eye size={13} />
+                            Inspect
                           </button>
 
                           {/* Logs */}
                           <button
                             onClick={() => handleOpenLogs(container)}
+                            type="button"
                             style={{
-                              padding: '5px 8px',
+                              padding: '6px 11px',
                               backgroundColor: 'rgba(255, 255, 255, 0.05)',
                               border: '1px solid var(--border-soft)',
                               borderRadius: '6px',
-                              color: 'var(--text)',
+                              color: '#cbd5e1',
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '11px',
+                              gap: '5px',
+                              fontSize: '12px',
                               fontWeight: 600
                             }}
-                            title="View Streaming Logs"
+                            title="View Streaming Logs with Syntax Highlighting"
                           >
-                            <FileText size={12} />
+                            <FileText size={13} color="#38bdf8" />
                             Logs
-                          </button>
-
-                          {/* Inspect */}
-                          <button
-                            onClick={() => setInspectContainer(container)}
-                            style={{
-                              padding: '5px 8px',
-                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                              border: '1px solid var(--border-soft)',
-                              borderRadius: '6px',
-                              color: 'var(--muted)',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}
-                            title="Inspect Metadata"
-                          >
-                            <Info size={12} />
-                          </button>
-
-                          {/* Delete */}
-                          <button
-                            onClick={() => setConfirmDelete(container)}
-                            style={{
-                              padding: '5px 8px',
-                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                              border: '1px solid rgba(239, 68, 68, 0.3)',
-                              borderRadius: '6px',
-                              color: '#f87171',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}
-                            title="Delete Container"
-                          >
-                            <Trash2 size={12} />
                           </button>
 
                         </div>
@@ -988,14 +814,16 @@ export default function DockerTab({ machine }) {
                 <tr style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--muted)', fontSize: '11px', textTransform: 'uppercase', backgroundColor: 'rgba(255, 255, 255, 0.02)' }}>
                   <th style={{ padding: '12px 16px' }}>Repository & Tag</th>
                   <th style={{ padding: '12px 16px' }}>Image ID</th>
-                  <th style={{ padding: '12px 16px' }}>Size</th>
+                  <th style={{ padding: '12px 16px' }}>Virtual Size</th>
                   <th style={{ padding: '12px 16px' }}>Created</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>Active Usage & Reclaim</th>
                 </tr>
               </thead>
               <tbody>
                 {images.map((img, idx) => {
                   const fullImg = img.repository ? `${img.repository}:${img.tag || 'latest'}` : (img.name || img.id);
+                  const inUseCount = containers.filter(c => (c.image === fullImg || c.image === img.name || c.image === img.repository)).length;
+
                   return (
                     <tr key={img.id || idx} style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--text)' }}>
                       <td style={{ padding: '12px 16px' }}>
@@ -1016,56 +844,38 @@ export default function DockerTab({ machine }) {
                       <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--muted)' }}>
                         {(img.id || '').substring(0, 16)}
                       </td>
-                      <td style={{ padding: '12px 16px', color: '#38bdf8', fontFamily: 'monospace' }}>
+                      <td style={{ padding: '12px 16px', color: '#38bdf8', fontFamily: 'monospace', fontWeight: 600 }}>
                         {img.size || (img.size_bytes ? formatBytes(img.size_bytes) : '-')}
                       </td>
-                      <td style={{ padding: '12px 16px', color: 'var(--muted)' }}>
-                        {img.created || img.created_at || '-'}
+                      <td style={{ padding: '12px 16px', color: 'var(--muted)', fontSize: '11px' }}>
+                        {img.created || img.created_at || 'Cached'}
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
-                          <button
-                            onClick={() => {
-                              setRunForm(prev => ({ ...prev, image: fullImg }));
-                              setShowRunModal(true);
-                            }}
-                            style={{
-                              padding: '5px 8px',
-                              backgroundColor: 'rgba(6, 182, 212, 0.1)',
-                              border: '1px solid rgba(6, 182, 212, 0.3)',
-                              borderRadius: '6px',
-                              color: '#06b6d4',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '11px',
-                              fontWeight: 700
-                            }}
-                            title="Launch container from this image"
-                          >
-                            <Play size={12} fill="#06b6d4" />
-                            Run
-                          </button>
-                          <button
-                            onClick={() => handleDeleteImage(img)}
-                            style={{
-                              padding: '5px 8px',
-                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                              border: '1px solid rgba(239, 68, 68, 0.3)',
-                              borderRadius: '6px',
-                              color: '#f87171',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '11px'
-                            }}
-                            title="Remove image from host"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
+                        {inUseCount > 0 ? (
+                          <span style={{
+                            padding: '3px 10px',
+                            borderRadius: '10px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                            color: '#22c55e',
+                            border: '1px solid rgba(34, 197, 94, 0.3)'
+                          }}>
+                            Active ({inUseCount} container{inUseCount === 1 ? '' : 's'})
+                          </span>
+                        ) : (
+                          <span style={{
+                            padding: '3px 10px',
+                            borderRadius: '10px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            color: '#f59e0b',
+                            border: '1px solid rgba(245, 158, 11, 0.3)'
+                          }}>
+                            Unused (Reclaimable)
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1092,7 +902,7 @@ export default function DockerTab({ machine }) {
                   <th style={{ padding: '12px 16px' }}>Network Name</th>
                   <th style={{ padding: '12px 16px' }}>Driver</th>
                   <th style={{ padding: '12px 16px' }}>Scope</th>
-                  <th style={{ padding: '12px 16px' }}>Subnet</th>
+                  <th style={{ padding: '12px 16px' }}>Subnet CIDR</th>
                   <th style={{ padding: '12px 16px' }}>Gateway</th>
                 </tr>
               </thead>
@@ -1231,8 +1041,8 @@ export default function DockerTab({ machine }) {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          backdropFilter: 'blur(6px)',
+          backgroundColor: 'rgba(0, 0, 0, 0.88)',
+          backdropFilter: 'blur(8px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -1240,16 +1050,16 @@ export default function DockerTab({ machine }) {
           padding: '24px'
         }}>
           <div style={{
-            backgroundColor: '#0a0e17',
+            backgroundColor: '#0d1220',
             border: '1px solid var(--border-soft)',
-            borderRadius: '12px',
+            borderRadius: '16px',
             width: '100%',
             maxWidth: '960px',
-            height: '80vh',
+            height: '82vh',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)'
+            boxShadow: '0 25px 60px -15px rgba(0,0,0,0.9)'
           }}>
             {/* Header */}
             <div style={{
@@ -1258,7 +1068,9 @@ export default function DockerTab({ machine }) {
               borderBottom: '1px solid var(--border-soft)',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between'
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '10px'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <Terminal size={18} color="#06b6d4" />
@@ -1273,6 +1085,73 @@ export default function DockerTab({ machine }) {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                
+                {/* Severity Filter */}
+                <div style={{ display: 'flex', backgroundColor: '#070a11', borderRadius: '6px', border: '1px solid var(--border-soft)', padding: '2px' }}>
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'warn-error', label: 'Warn/Err' },
+                    { id: 'error', label: 'Errors' }
+                  ].map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => setLogSeverity(s.id)}
+                      type="button"
+                      style={{
+                        padding: '3px 8px',
+                        border: 'none',
+                        borderRadius: '4px',
+                        backgroundColor: logSeverity === s.id ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                        color: logSeverity === s.id ? '#06b6d4' : 'var(--muted)',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        fontWeight: logSeverity === s.id ? 700 : 500
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#070a11', border: '1px solid var(--border-soft)', borderRadius: '6px', padding: '4px 8px' }}>
+                  <Search size={12} color="var(--muted)" />
+                  <input
+                    type="text"
+                    placeholder="Search logs..."
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                    style={{ background: 'none', border: 'none', color: '#f1f5f9', outline: 'none', fontSize: '11px', width: '120px' }}
+                  />
+                  {logSearch && (
+                    <button onClick={() => setLogSearch('')} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: 0 }}>
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleDownloadLogs}
+                  type="button"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '0 10px',
+                    height: '30px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--border-soft)',
+                    borderRadius: '6px',
+                    color: '#38bdf8',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                  title="Download full container log file"
+                >
+                  <Download size={12} />
+                  Download
+                </button>
+
                 <button
                   onClick={() => handleOpenLogs(activeLogContainer)}
                   disabled={logsLoading}
@@ -1280,8 +1159,8 @@ export default function DockerTab({ machine }) {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '5px',
-                    padding: '0 12px',
-                    height: '32px',
+                    padding: '0 10px',
+                    height: '30px',
                     backgroundColor: 'rgba(255, 255, 255, 0.05)',
                     border: '1px solid var(--border-soft)',
                     borderRadius: '6px',
@@ -1290,14 +1169,15 @@ export default function DockerTab({ machine }) {
                     cursor: 'pointer'
                   }}
                 >
-                  <RefreshCw size={13} className={logsLoading ? 'spin' : ''} />
+                  <RefreshCw size={12} className={logsLoading ? 'spin' : ''} />
                   Refresh
                 </button>
+
                 <button
                   onClick={() => setActiveLogContainer(null)}
                   style={{
-                    width: '32px',
-                    height: '32px',
+                    width: '30px',
+                    height: '30px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1316,44 +1196,46 @@ export default function DockerTab({ machine }) {
             {/* Log Terminal Window */}
             <div style={{
               flex: 1,
-              padding: '16px',
-              backgroundColor: '#070a11',
-              color: '#38bdf8',
+              padding: '14px',
+              backgroundColor: '#050811',
               fontFamily: '"Fira Code", monospace',
               fontSize: '12px',
               lineHeight: 1.6,
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap'
+              overflowY: 'auto'
             }}>
               {logsLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#06b6d4' }}>
-                  <RefreshCw size={16} className="spin" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#06b6d4', padding: '12px' }}>
+                  <RefreshCw size={14} className="spin" />
                   Streaming live stdout/stderr logs...
                 </div>
+              ) : parsedLogLines.length === 0 ? (
+                <div style={{ color: 'var(--muted)', padding: '12px' }}>
+                  No log entries matching filter criteria.
+                </div>
               ) : (
-                containerLogs || 'No logs generated by container.'
-              )}
-            </div>
+                parsedLogLines.map(line => {
+                  let color = '#34d399';
+                  if (line.level === 'error') color = '#f87171';
+                  else if (line.level === 'warn') color = '#fbbf24';
+                  else if (line.level === 'debug') color = '#c084fc';
 
-            {/* Log Footer */}
-            <div style={{
-              padding: '8px 16px',
-              backgroundColor: '#111827',
-              borderTop: '1px solid var(--border-soft)',
-              fontSize: '11px',
-              color: 'var(--muted)',
-              display: 'flex',
-              justifyContent: 'space-between'
-            }}>
-              <span>Live stream from Docker runtime</span>
-              <span>Host: {machine?.hostname || 'Node'}</span>
+                  return (
+                    <div key={line.index} style={{ display: 'flex', gap: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      <span style={{ color: '#475569', userSelect: 'none', width: '32px', textAlign: 'right', flexShrink: 0 }}>
+                        {line.index}
+                      </span>
+                      <span style={{ color }}>{line.text}</span>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 2: CONTAINER METADATA INSPECTOR */}
+      {/* MODAL 2: CONTAINER TELEMETRY & DIAGNOSTIC INSPECTOR */}
       {/* ========================================================================= */}
       {inspectContainer && (
         <div style={{
@@ -1362,166 +1244,8 @@ export default function DockerTab({ machine }) {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '24px'
-        }}>
-          <div style={{
-            backgroundColor: '#0d1220',
-            border: '1px solid var(--border-soft)',
-            borderRadius: '12px',
-            width: '100%',
-            maxWidth: '640px',
-            maxHeight: '80vh',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }}>
-            <div style={{
-              padding: '16px 20px',
-              backgroundColor: '#111827',
-              borderBottom: '1px solid var(--border-soft)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Info size={18} color="#06b6d4" />
-                <h3 style={{ margin: 0, fontSize: '15px', color: '#f1f5f9', fontWeight: 700 }}>
-                  Container Inspect: {inspectContainer.name || inspectContainer.Name}
-                </h3>
-              </div>
-              <button onClick={() => setInspectContainer(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div style={{ padding: '10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Container ID</span>
-                  <strong style={{ fontSize: '12px', color: '#f1f5f9', fontFamily: 'monospace' }}>{inspectContainer.id || inspectContainer.ID}</strong>
-                </div>
-                <div style={{ padding: '10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Image</span>
-                  <strong style={{ fontSize: '12px', color: '#06b6d4', fontFamily: 'monospace' }}>{inspectContainer.image || inspectContainer.Image}</strong>
-                </div>
-                <div style={{ padding: '10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>State</span>
-                  <strong style={{ fontSize: '12px', color: '#22c55e', textTransform: 'uppercase' }}>{inspectContainer.state || 'N/A'}</strong>
-                </div>
-                <div style={{ padding: '10px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Ports</span>
-                  <strong style={{ fontSize: '12px', color: '#f1f5f9', fontFamily: 'monospace' }}>{inspectContainer.ports || 'None'}</strong>
-                </div>
-              </div>
-
-              <div>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: '6px' }}>Raw JSON Metadata</span>
-                <pre style={{
-                  padding: '12px',
-                  backgroundColor: '#070a11',
-                  borderRadius: '6px',
-                  color: '#a5f3fc',
-                  fontSize: '11px',
-                  fontFamily: 'monospace',
-                  overflowX: 'auto',
-                  maxHeight: '200px'
-                }}>
-                  {JSON.stringify(inspectContainer, null, 2)}
-                </pre>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 3: DELETE CONFIRMATION */}
-      {/* ========================================================================= */}
-      {confirmDelete && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '16px'
-        }}>
-          <div style={{
-            backgroundColor: '#111827',
-            border: '1px solid var(--border-soft)',
-            borderRadius: '12px',
-            width: '100%',
-            maxWidth: '420px',
-            padding: '20px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#f87171', marginBottom: '12px' }}>
-              <Trash2 size={20} />
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Remove Container?</h3>
-            </div>
-            <p style={{ fontSize: '13px', color: 'var(--text)', lineHeight: 1.5, margin: '0 0 18px' }}>
-              Are you sure you want to delete container <strong style={{ color: '#f1f5f9' }}>{confirmDelete.name || confirmDelete.id}</strong>?
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button
-                onClick={() => setConfirmDelete(null)}
-                style={{
-                  padding: '0 16px',
-                  height: '34px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid var(--border-soft)',
-                  borderRadius: '6px',
-                  color: 'var(--text)',
-                  fontSize: '13px',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleAction(confirmDelete, 'remove')}
-                style={{
-                  padding: '0 18px',
-                  height: '34px',
-                  backgroundColor: '#ef4444',
-                  border: 'none',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  cursor: 'pointer'
-                }}
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 4: DEPLOY CONTAINER MODAL */}
-      {/* ========================================================================= */}
-      {showRunModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          backdropFilter: 'blur(6px)',
+          backgroundColor: 'rgba(0, 0, 0, 0.88)',
+          backdropFilter: 'blur(8px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -1531,14 +1255,14 @@ export default function DockerTab({ machine }) {
           <div style={{
             backgroundColor: '#0d1220',
             border: '1px solid var(--border-soft)',
-            borderRadius: '12px',
+            borderRadius: '16px',
             width: '100%',
-            maxWidth: '560px',
-            maxHeight: '90vh',
+            maxWidth: '850px',
+            maxHeight: '85vh',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)'
+            boxShadow: '0 25px 60px -15px rgba(0,0,0,0.9)'
           }}>
             {/* Modal Header */}
             <div style={{
@@ -1549,396 +1273,183 @@ export default function DockerTab({ machine }) {
               alignItems: 'center',
               justifyContent: 'space-between'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Plus size={18} color="#06b6d4" />
-                <h3 style={{ margin: 0, fontSize: '15px', color: '#f1f5f9', fontWeight: 700 }}>
-                  Deploy Docker Container on {machine?.hostname || 'Host'}
-                </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Box size={20} color="#06b6d4" />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', color: '#f1f5f9', fontWeight: 700 }}>
+                    Container Telemetry: {inspectContainer.name || inspectContainer.id}
+                  </h3>
+                  <span style={{ fontSize: '11px', color: 'var(--muted)', fontFamily: 'monospace' }}>
+                    {inspectContainer.image}
+                  </span>
+                </div>
               </div>
-              <button onClick={() => setShowRunModal(false)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>
-                <X size={18} />
+              <button onClick={() => setInspectContainer(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>
+                <X size={20} />
               </button>
             </div>
 
-            {/* Modal Form */}
-            <form onSubmit={handleDeployContainer} style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* Image Name */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                  Image Name <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. nginx:alpine, redis:7-alpine, postgres:15"
-                  value={runForm.image}
-                  onChange={(e) => setRunForm(prev => ({ ...prev, image: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#070a11',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-
-              {/* Quick Picks */}
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {['nginx:alpine', 'redis:7-alpine', 'postgres:15-alpine', 'node:18-alpine', 'python:3.11-slim', 'rabbitmq:management'].map(tpl => (
+            {/* Sub-Nav Toolbar in Modal */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-soft)', backgroundColor: '#090d16', padding: '0 16px' }}>
+              {[
+                { id: 'telemetry', label: 'Live Metrics', icon: Activity },
+                { id: 'diagnostics', label: 'Diagnostics', icon: AlertTriangle },
+                { id: 'ports', label: 'Ports & Network', icon: Globe },
+                { id: 'raw', label: 'JSON Metadata', icon: FileText }
+              ].map(t => {
+                const Icon = t.icon;
+                const isActive = inspectTab === t.id;
+                return (
                   <button
-                    key={tpl}
-                    type="button"
-                    onClick={() => setRunForm(prev => ({ ...prev, image: tpl }))}
+                    key={t.id}
+                    onClick={() => setInspectTab(t.id)}
                     style={{
-                      padding: '3px 8px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                      border: '1px solid var(--border-soft)',
-                      borderRadius: '4px',
-                      color: '#06b6d4',
-                      fontSize: '11px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '10px 14px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: isActive ? '2px solid #06b6d4' : '2px solid transparent',
+                      color: isActive ? '#06b6d4' : 'var(--muted)',
+                      fontSize: '12px',
+                      fontWeight: isActive ? 700 : 500,
                       cursor: 'pointer'
                     }}
                   >
-                    + {tpl}
+                    <Icon size={14} />
+                    {t.label}
                   </button>
-                ))}
-              </div>
-
-              {/* Container Name */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                  Container Name <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. my-nginx-web"
-                  value={runForm.name}
-                  onChange={(e) => setRunForm(prev => ({ ...prev, name: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#070a11',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-
-              {/* Port Mappings */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                  Port Mappings <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(host:container, comma separated)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. 8080:80, 443:443"
-                  value={runForm.ports}
-                  onChange={(e) => setRunForm(prev => ({ ...prev, ports: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#070a11',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-
-              {/* Environment Variables */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                  Environment Variables <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(KEY=VAL, comma separated)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. PORT=3000, NODE_ENV=production"
-                  value={runForm.env}
-                  onChange={(e) => setRunForm(prev => ({ ...prev, env: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#070a11',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-
-              {/* Volumes */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                  Volumes <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(host:container, comma separated)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. /var/data:/data"
-                  value={runForm.volumes}
-                  onChange={(e) => setRunForm(prev => ({ ...prev, volumes: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#070a11',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-
-              {/* Restart Policy & Command */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                    Restart Policy
-                  </label>
-                  <select
-                    value={runForm.restart}
-                    onChange={(e) => setRunForm(prev => ({ ...prev, restart: e.target.value }))}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      backgroundColor: '#070a11',
-                      border: '1px solid var(--border-soft)',
-                      borderRadius: '6px',
-                      color: '#f1f5f9',
-                      fontSize: '13px',
-                      boxSizing: 'border-box'
-                    }}
-                  >
-                    <option value="unless-stopped">unless-stopped</option>
-                    <option value="always">always</option>
-                    <option value="on-failure">on-failure</option>
-                    <option value="no">no</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                    Custom Command <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. sh -c 'npm start'"
-                    value={runForm.command}
-                    onChange={(e) => setRunForm(prev => ({ ...prev, command: e.target.value }))}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      backgroundColor: '#070a11',
-                      border: '1px solid var(--border-soft)',
-                      borderRadius: '6px',
-                      color: '#f1f5f9',
-                      fontSize: '13px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowRunModal(false)}
-                  style={{
-                    padding: '0 16px',
-                    height: '36px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: 'var(--text)',
-                    fontSize: '13px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={runLoading}
-                  style={{
-                    padding: '0 20px',
-                    height: '36px',
-                    backgroundColor: '#06b6d4',
-                    border: 'none',
-                    borderRadius: '6px',
-                    color: '#080c14',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: runLoading ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  {runLoading && <RefreshCw size={14} className="spin" />}
-                  {runLoading ? 'Deploying...' : 'Deploy Container'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 5: PULL DOCKER IMAGE MODAL */}
-      {/* ========================================================================= */}
-      {showPullModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          backdropFilter: 'blur(6px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '20px'
-        }}>
-          <div style={{
-            backgroundColor: '#0d1220',
-            border: '1px solid var(--border-soft)',
-            borderRadius: '12px',
-            width: '100%',
-            maxWidth: '480px',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)'
-          }}>
-            <div style={{
-              padding: '16px 20px',
-              backgroundColor: '#111827',
-              borderBottom: '1px solid var(--border-soft)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <DownloadCloud size={18} color="#06b6d4" />
-                <h3 style={{ margin: 0, fontSize: '15px', color: '#f1f5f9', fontWeight: 700 }}>
-                  Pull Docker Image on {machine?.hostname || 'Host'}
-                </h3>
-              </div>
-              <button onClick={() => setShowPullModal(false)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>
-                <X size={18} />
-              </button>
+                );
+              })}
             </div>
 
-            <form onSubmit={handlePullImage} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                  Image Repository <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. ubuntu, postgres, nginx, redis"
-                  value={pullForm.image}
-                  onChange={(e) => setPullForm(prev => ({ ...prev, image: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#070a11',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
+            {/* Modal Body */}
+            <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              
+              {/* Telemetry Tab */}
+              {inspectTab === 'telemetry' && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+                    <div style={{ padding: '12px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>CPU Utilization</span>
+                      <strong style={{ fontSize: '18px', color: '#38bdf8' }}>{(inspectContainer.cpu_percent || 0).toFixed(1)}%</strong>
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Memory Used (RSS)</span>
+                      <strong style={{ fontSize: '18px', color: '#c084fc' }}>{formatBytes(inspectContainer.memory_used_bytes || inspectContainer.memory_used || 0)}</strong>
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Status</span>
+                      <strong style={{ fontSize: '14px', color: '#22c55e', textTransform: 'uppercase' }}>{inspectContainer.state || 'running'}</strong>
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Restarts</span>
+                      <strong style={{ fontSize: '18px', color: '#f59e0b' }}>{inspectContainer.restart_count || 0}</strong>
+                    </div>
+                  </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9', marginBottom: '6px' }}>
-                  Tag
-                </label>
-                <input
-                  type="text"
-                  placeholder="latest"
-                  value={pullForm.tag}
-                  onChange={(e) => setPullForm(prev => ({ ...prev, tag: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: '#070a11',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: '#f1f5f9',
-                    fontSize: '13px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Full SHA ID</span>
+                      <strong style={{ fontSize: '12px', color: '#f1f5f9', fontFamily: 'monospace' }}>{inspectContainer.id || inspectContainer.ID}</strong>
+                    </div>
+                    <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Image Tag</span>
+                      <strong style={{ fontSize: '12px', color: '#06b6d4', fontFamily: 'monospace' }}>{inspectContainer.image}</strong>
+                    </div>
+                  </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowPullModal(false)}
-                  style={{
-                    padding: '0 16px',
-                    height: '36px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                    border: '1px solid var(--border-soft)',
-                    borderRadius: '6px',
-                    color: 'var(--text)',
-                    fontSize: '13px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={pullLoading}
-                  style={{
-                    padding: '0 20px',
-                    height: '36px',
-                    backgroundColor: '#06b6d4',
-                    border: 'none',
-                    borderRadius: '6px',
-                    color: '#080c14',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: pullLoading ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  {pullLoading && <RefreshCw size={14} className="spin" />}
-                  {pullLoading ? 'Pulling Image...' : 'Pull Image'}
-                </button>
-              </div>
-            </form>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                    <button
+                      onClick={() => handleOpenLogs(inspectContainer)}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#06b6d4',
+                        color: '#080c14',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <FileText size={14} /> Open Live Streaming Logs
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Diagnostics Tab */}
+              {inspectTab === 'diagnostics' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
+                    Automated Stability & Diagnostic Health Checks
+                  </span>
+                  {getContainerDiagnostic(inspectContainer).map((diag, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: diag.type === 'danger' 
+                          ? '1px solid rgba(239, 68, 68, 0.4)' 
+                          : (diag.type === 'warning' ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(34, 197, 94, 0.4)'),
+                        backgroundColor: diag.type === 'danger' 
+                          ? 'rgba(239, 68, 68, 0.1)' 
+                          : (diag.type === 'warning' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(34, 197, 94, 0.1)'),
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '3px'
+                      }}
+                    >
+                      <strong style={{
+                        fontSize: '13px',
+                        color: diag.type === 'danger' ? '#f87171' : (diag.type === 'warning' ? '#fbbf24' : '#4ade80')
+                      }}>
+                        {diag.title}
+                      </strong>
+                      <span style={{ fontSize: '12px', color: '#cbd5e1' }}>{diag.msg}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Ports Tab */}
+              {inspectTab === 'ports' && (
+                <div style={{ padding: '16px', backgroundColor: '#070a11', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#f1f5f9', display: 'block', marginBottom: '8px' }}>
+                    Port Mappings & Networks
+                  </span>
+                  <div style={{ fontFamily: 'monospace', color: '#38bdf8', fontSize: '13px' }}>
+                    {inspectContainer.ports || inspectContainer.Ports || 'No host ports mapped.'}
+                  </div>
+                </div>
+              )}
+
+              {/* Raw JSON Tab */}
+              {inspectTab === 'raw' && (
+                <pre style={{
+                  padding: '16px',
+                  backgroundColor: '#050811',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-soft)',
+                  color: '#a5f3fc',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  overflowX: 'auto',
+                  maxHeight: '320px'
+                }}>
+                  {JSON.stringify(inspectContainer, null, 2)}
+                </pre>
+              )}
+            </div>
           </div>
         </div>
       )}
-
-      {/* Internal Custom CSS */}
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .spin { animation: spin 0.8s linear infinite; }
-        .container-row:hover { background-color: rgba(255, 255, 255, 0.03) !important; }
-      `}</style>
     </div>
   );
 }

@@ -89,3 +89,18 @@ type ServerSnapshot struct {
 	DiskTotal       uint64     `json:"disk_total"`
 	DiskUsed        uint64     `json:"disk_used"`
 }
+
+// DecommissionedHost tracks deleted / decommissioned hosts to prevent unauthorized resurrection
+type DecommissionedHost struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	ServerID  uuid.UUID `gorm:"type:uuid;index" json:"server_id"`
+	Hostname  string    `gorm:"size:255;index" json:"hostname"`
+	IPAddress string    `gorm:"size:100;index" json:"ip_address"`
+	DeletedAt time.Time `json:"deleted_at"`
+	DeletedBy string    `json:"deleted_by"`
+	Reason    string    `json:"reason"`
+}
+
+func (DecommissionedHost) TableName() string {
+	return "decommissioned_hosts"
+}
