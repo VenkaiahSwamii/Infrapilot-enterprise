@@ -129,52 +129,73 @@ type DockerVolumeInput = docker.DockerVolumeInput
 type DockerNetworkInput = docker.DockerNetworkInput
 type DockerEventInput = docker.DockerEventInput
 
+func isSameOSFamily(os1, os2 string) bool {
+	o1 := strings.ToLower(strings.TrimSpace(os1))
+	o2 := strings.ToLower(strings.TrimSpace(os2))
+
+	if o1 == "" || o2 == "" || o1 == o2 {
+		return true
+	}
+
+	isWin1 := strings.Contains(o1, "win")
+	isWin2 := strings.Contains(o2, "win")
+	if isWin1 || isWin2 {
+		return isWin1 == isWin2
+	}
+
+	isLin1 := strings.Contains(o1, "lin") || strings.Contains(o1, "ubuntu") || strings.Contains(o1, "debian") || strings.Contains(o1, "rhel") || strings.Contains(o1, "centos")
+	isLin2 := strings.Contains(o2, "lin") || strings.Contains(o2, "ubuntu") || strings.Contains(o2, "debian") || strings.Contains(o2, "rhel") || strings.Contains(o2, "centos")
+	if isLin1 || isLin2 {
+		return isLin1 == isLin2
+	}
+
+	return true
+}
+
 func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *models.Machine, error) {
 	var machine *models.Machine
 
-	// 1. Match by Hostname AND OS (prevents Linux vs Windows collisions on same hostname)
-	if input.Hostname != "" && input.OS != "" && database.DB != nil {
-		var m models.Machine
-		if err := database.DB.Where("LOWER(hostname) = LOWER(?) AND LOWER(os) = LOWER(?)", input.Hostname, input.OS).First(&m).Error; err == nil {
-			machine = &m
+	// 1. Match by Hostname (if OS family is compatible)
+	if input.Hostname != "" && database.DB != nil {
+		var machines []models.Machine
+		if err := database.DB.Where("LOWER(hostname) = LOWER(?)", input.Hostname).Find(&machines).Error; err == nil {
+			for i := range machines {
+				if isSameOSFamily(machines[i].OS, input.OS) {
+					machine = &machines[i]
+					break
+				}
+			}
 		}
 	}
 
-	// 2. Match by Hostname AND IP
-	if machine == nil && input.Hostname != "" && input.IPAddress != "" && database.DB != nil {
-		var m models.Machine
-		if err := database.DB.Where("LOWER(hostname) = LOWER(?) AND ip_address = ?", input.Hostname, input.IPAddress).First(&m).Error; err == nil {
-			machine = &m
+	// 2. Match by IP Address
+	if machine == nil && input.IPAddress != "" && database.DB != nil {
+		var machines []models.Machine
+		if err := database.DB.Where("ip_address = ?", input.IPAddress).Find(&machines).Error; err == nil {
+			for i := range machines {
+				if isSameOSFamily(machines[i].OS, input.OS) {
+					machine = &machines[i]
+					break
+				}
+			}
 		}
 	}
 
-	// 3. Match by API Key if compatible OS
+	// 3. Match by API Key
 	if machine == nil && input.APIKey != "" && s.machineRepo != nil {
 		m, err := s.machineRepo.FindByAPIKey(input.APIKey)
 		if err == nil && m != nil {
-			if input.OS == "" || m.OS == "" || strings.EqualFold(m.OS, input.OS) {
+			if isSameOSFamily(m.OS, input.OS) {
 				machine = m
 			}
 		}
 	}
 
-	// 4. Match by Hostname alone (if OS is compatible)
-	if machine == nil && input.Hostname != "" && database.DB != nil {
-		var m models.Machine
-		if err := database.DB.Where("LOWER(hostname) = LOWER(?)", input.Hostname).First(&m).Error; err == nil {
-			if input.OS == "" || m.OS == "" || strings.EqualFold(m.OS, input.OS) {
-				machine = &m
-			}
-		}
-	}
-
-	// 5. Match by IP Address alone (if OS is compatible)
-	if machine == nil && input.IPAddress != "" && database.DB != nil {
-		var m models.Machine
-		if err := database.DB.Where("ip_address = ?", input.IPAddress).First(&m).Error; err == nil {
-			if input.OS == "" || m.OS == "" || strings.EqualFold(m.OS, input.OS) {
-				machine = &m
-			}
+	// 4. Single-server fallback (if only 1 server exists in DB)
+	if machine == nil && database.DB != nil {
+		var totalServers []models.Machine
+		if err := database.DB.Find(&totalServers).Error; err == nil && len(totalServers) == 1 {
+			machine = &totalServers[0]
 		}
 	}
 

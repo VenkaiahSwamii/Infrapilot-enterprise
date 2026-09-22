@@ -184,7 +184,7 @@ func (s *RemoteDeployService) TestConnection(ctx context.Context, target RemoteD
 		}
 
 		// Local loopback host fallback when target is local machine and SSH service isn't listening on port 22
-		if (target.Host == "127.0.0.1" || target.Host == "localhost" || target.Host == "192.168.1.2") && port == 22 {
+		if (target.Host == "127.0.0.1" || target.Host == "localhost" || target.Host == "::1") && port == 22 {
 			localHostname, _ := os.Hostname()
 			if localHostname == "" {
 				localHostname = "LocalHost"
@@ -220,7 +220,7 @@ func (s *RemoteDeployService) TestConnection(ctx context.Context, target RemoteD
 
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
-		if (target.Host == "127.0.0.1" || target.Host == "localhost" || target.Host == "192.168.1.2") && port == 22 {
+		if (target.Host == "127.0.0.1" || target.Host == "localhost" || target.Host == "::1") && port == 22 {
 			localHostname, _ := os.Hostname()
 			if localHostname == "" {
 				localHostname = "LocalHost"
@@ -362,7 +362,7 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	addr := fmt.Sprintf("%s:%d", target.Host, port)
 	client, err = ssh.Dial("tcp", addr, config)
 	if err != nil {
-		if (target.Host == "127.0.0.1" || target.Host == "localhost" || target.Host == "192.168.1.2") && port == 22 {
+		if (target.Host == "127.0.0.1" || target.Host == "localhost" || target.Host == "::1") && port == 22 {
 			addLog("[INFO] Local loopback transport established for host %s", target.Host)
 		} else {
 			updateStep(0, "failed", "SSH connection rejected: "+err.Error(), "", time.Since(step1Start))
@@ -440,7 +440,7 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 		} else if strings.HasPrefix(target.Host, "192.168.159.") {
 			serverURL = "http://192.168.159.1:8080"
 		} else {
-			serverURL = "http://192.168.1.2:8080"
+			serverURL = "http://192.168.1.86:8080"
 		}
 	}
 
