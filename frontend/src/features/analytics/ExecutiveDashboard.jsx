@@ -1,23 +1,33 @@
 import React from 'react';
-import { Building2, Server, Layers, Cpu, AlertTriangle, ShieldCheck, Activity, Award } from 'lucide-react';
+import { Building2, Server, Layers, Cpu, AlertTriangle, ShieldCheck, Activity, Award, AlertCircle } from 'lucide-react';
+import { useServerStore } from '../../store/serverStore.jsx';
 
 export default function ExecutiveDashboard({ overview }) {
-  const data = overview || {
-    total_servers: 480,
-    docker_containers: 3200,
-    k8s_clusters: 28,
-    critical_incidents: 4,
-    availability_pct: 99.97,
-  };
+  const { servers } = useServerStore();
+
+  const totalServers = servers.length || (overview?.total_servers ?? 0);
+  const hasData = totalServers > 0 || (overview && (overview.total_servers > 0 || overview.docker_containers > 0));
+
+  if (!hasData) {
+    return (
+      <div style={{ background: '#161b22', border: '1px dashed #30363d', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', margin: '20px 0' }}>
+        <AlertCircle size={40} color="#58a6ff" style={{ margin: '0 auto 12px auto', display: 'block' }} />
+        <h3 style={{ color: '#f0f6fc', fontSize: '18px', margin: '0 0 8px 0', fontWeight: 700 }}>No Executive KPI Telemetry</h3>
+        <p style={{ color: '#8b949e', fontSize: '13px', maxWidth: '500px', margin: '0 auto', lineHeight: 1.5 }}>
+          No active agent nodes or enterprise cluster telemetry detected. Please enroll host agents to populate the executive dashboard.
+        </p>
+      </div>
+    );
+  }
 
   const widgets = [
-    { label: 'INFRASTRUCTURE HEALTH', value: '96%', color: '#3fb950', icon: Activity, desc: 'Global system health' },
-    { label: 'ORGANIZATIONS', value: '12', color: '#58a6ff', icon: Building2, desc: 'Enterprise tenants' },
-    { label: 'SERVERS MONITORED', value: data.total_servers || '480', color: '#58a6ff', icon: Server, desc: 'Active agent hosts' },
-    { label: 'CONTAINERS', value: (data.docker_containers || 3200).toLocaleString(), color: '#a855f7', icon: Layers, desc: 'Docker container instances' },
-    { label: 'KUBERNETES CLUSTERS', value: data.k8s_clusters || '28', color: '#ffa657', icon: Cpu, desc: 'Production K8s clusters' },
-    { label: 'CRITICAL ALERTS', value: data.critical_incidents || '4', color: '#f78166', icon: AlertTriangle, desc: 'Requires immediate action' },
-    { label: 'SLA COMPLIANCE', value: `${data.availability_pct || 99.97}%`, color: '#3fb950', icon: ShieldCheck, desc: 'Monthly uptime rating' },
+    { label: 'INFRASTRUCTURE HEALTH', value: overview?.health_pct ? `${overview.health_pct}%` : '100%', color: '#3fb950', icon: Activity, desc: 'Global system health' },
+    { label: 'ORGANIZATIONS', value: overview?.organizations_count ?? '1', color: '#58a6ff', icon: Building2, desc: 'Enterprise tenants' },
+    { label: 'SERVERS MONITORED', value: String(totalServers), color: '#58a6ff', icon: Server, desc: 'Active agent hosts' },
+    { label: 'CONTAINERS', value: (overview?.docker_containers ?? 0).toLocaleString(), color: '#a855f7', icon: Layers, desc: 'Docker container instances' },
+    { label: 'KUBERNETES CLUSTERS', value: String(overview?.k8s_clusters ?? 0), color: '#ffa657', icon: Cpu, desc: 'Production K8s clusters' },
+    { label: 'CRITICAL ALERTS', value: String(overview?.critical_incidents ?? 0), color: '#f78166', icon: AlertTriangle, desc: 'Requires immediate action' },
+    { label: 'SLA COMPLIANCE', value: `${overview?.availability_pct ?? 100}%`, color: '#3fb950', icon: ShieldCheck, desc: 'Monthly uptime rating' },
   ];
 
   return (
@@ -27,7 +37,7 @@ export default function ExecutiveDashboard({ overview }) {
           <Award size={20} color="#58a6ff" />
           Executive KPI Dashboard
         </h3>
-        <span style={{ fontSize: '13px', color: '#8b949e' }}>High-level strategic insights, organization scale & operational compliance</span>
+        <span style={{ fontSize: '13px', color: '#8b949e' }}>High-level strategic insights, organization scale &amp; operational compliance</span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px' }}>

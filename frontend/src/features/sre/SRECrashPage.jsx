@@ -131,6 +131,9 @@ export default function SRECrashPage() {
   ];
 
   const servicesList = useMemo(() => {
+    if (!liveServices || liveServices.length === 0) {
+      return [];
+    }
     const isNonRunning = (st) => ['stopped', 'failed', 'inactive', 'dead', 'exited', 'tripped'].includes(String(st || '').toLowerCase());
     return CONFIG_TOML_SERVICES.map((cfgSvc) => {
       // Find if live service status was reported for this config.toml entry
@@ -280,53 +283,97 @@ export default function SRECrashPage() {
       </div>
 
       {/* ── SERVICES GRID ── */}
-      <div className="crash-services-grid">
-        {filteredServices.map((svc) => (
-          <div key={svc.id} className="service-card">
-            <div className="svc-card-header">
-              <div className="svc-title-wrap">
-                <Zap size={16} className="svc-icon yellow" />
-                <div>
-                  <h4 className="svc-name">{svc.name}</h4>
-                  <span className="svc-type">{svc.type}</span>
+      {servicesList.length === 0 ? (
+        <div className="empty-sre-card">
+          <AlertCircle size={36} className="empty-icon yellow" />
+          <h3 className="empty-title">No Active Monitored Services</h3>
+          <p className="empty-desc">
+            No live systemd service telemetry is reported. Please enroll and start an <code>infrapilot-agent</code> on your machine to monitor daemons and circuit breakers.
+          </p>
+        </div>
+      ) : (
+        <div className="crash-services-grid">
+          {filteredServices.map((svc) => (
+            <div key={svc.id} className="service-card">
+              <div className="svc-card-header">
+                <div className="svc-title-wrap">
+                  <Zap size={16} className="svc-icon yellow" />
+                  <div>
+                    <h4 className="svc-name">{svc.name}</h4>
+                    <span className="svc-type">{svc.type}</span>
+                  </div>
+                </div>
+
+                <span className={`svc-status-badge ${svc.status.toLowerCase()}`}>{svc.status}</span>
+              </div>
+
+              <div className="svc-metric-row">
+                <span className="metric-label">Restarts in Window</span>
+                <strong className="metric-val">{svc.restarts} / {svc.maxRestarts} max</strong>
+              </div>
+
+              <div className="svc-progress-bar">
+                <div className="svc-bar-fill green" style={{ width: '0%' }} />
+              </div>
+
+              <div className="svc-sub-grid">
+                <div className="sub-card">
+                  <span className="sub-label">RESTART WINDOW</span>
+                  <strong className="sub-val">{svc.windowSec}s</strong>
+                </div>
+
+                <div className="sub-card">
+                  <span className="sub-label">CIRCUIT BREAKER</span>
+                  <strong className="sub-val green-txt">{svc.circuitBreaker}</strong>
                 </div>
               </div>
 
-              <span className={`svc-status-badge ${svc.status.toLowerCase()}`}>{svc.status}</span>
-            </div>
-
-            <div className="svc-metric-row">
-              <span className="metric-label">Restarts in Window</span>
-              <strong className="metric-val">{svc.restarts} / {svc.maxRestarts} max</strong>
-            </div>
-
-            <div className="svc-progress-bar">
-              <div className="svc-bar-fill green" style={{ width: '0%' }} />
-            </div>
-
-            <div className="svc-sub-grid">
-              <div className="sub-card">
-                <span className="sub-label">RESTART WINDOW</span>
-                <strong className="sub-val">{svc.windowSec}s</strong>
+              <div className="svc-card-footer">
+                <CheckCircle2 size={14} className="footer-icon green" />
+                <span>Service daemon is running healthy. No crash events detected.</span>
               </div>
 
-              <div className="sub-card">
-                <span className="sub-label">CIRCUIT BREAKER</span>
-                <strong className="sub-val green-txt">{svc.circuitBreaker}</strong>
-              </div>
+              <AdminSREPolicyControl category="Service" component={svc.matchKey || svc.name} compact />
             </div>
-
-            <div className="svc-card-footer">
-              <CheckCircle2 size={14} className="footer-icon green" />
-              <span>Service daemon is running healthy. No crash events detected.</span>
-            </div>
-
-            <AdminSREPolicyControl category="Service" component={svc.matchKey || svc.name} compact />
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       <style>{`
+        .empty-sre-card {
+          background: #111827;
+          border: 1px dashed #1f293d;
+          border-radius: 14px;
+          padding: 48px 24px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          gap: 12px;
+          margin-top: 16px;
+        }
+        .empty-icon.yellow { color: #eab308; }
+        .empty-title {
+          font-size: 18px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0;
+        }
+        .empty-desc {
+          font-size: 13px;
+          color: #94a3b8;
+          max-width: 520px;
+          margin: 0;
+          line-height: 1.5;
+        }
+        .empty-desc code {
+          background: #1e293b;
+          color: #38bdf8;
+          padding: 2px 6px;
+          border-radius: 4px;
+        }
+
         .sre-crash-page-root {
           padding: 28px 36px;
           min-height: 100vh;

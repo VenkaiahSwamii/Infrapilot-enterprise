@@ -15,14 +15,17 @@ import {
   Clock,
   Sparkles
 } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import { useServerStore } from '../../store/serverStore.jsx';
 
 export default function Overview({ data }) {
   const { servers, liveMetricsMap } = useServerStore();
 
+  const hasData = servers.length > 0 || (data && (data.avg_cpu_percent !== undefined || data.total_hosts > 0));
+
   // Compute live averages from actual connected fleet
-  const totalHosts = servers.length || 3;
-  const onlineHosts = servers.filter((s) => String(s.status || '').toUpperCase() === 'ONLINE').length || totalHosts;
+  const totalHosts = servers.length || (data?.total_hosts ?? 0);
+  const onlineHosts = servers.filter((s) => String(s.status || '').toUpperCase() === 'ONLINE').length || (data?.online_hosts ?? 0);
 
   let liveCpuSum = 0;
   let liveMemSum = 0;
@@ -36,21 +39,33 @@ export default function Overview({ data }) {
     count++;
   }
 
-  const avgCpu = count > 0 ? Math.round(liveCpuSum / count) : data?.avg_cpu_percent ?? 4.8;
-  const avgMem = count > 0 ? Math.round(liveMemSum / count) : data?.avg_memory_percent ?? 32.4;
-  const avgDisk = count > 0 ? Math.round(liveDiskSum / count) : 24.2;
+  const avgCpu = count > 0 ? Math.round(liveCpuSum / count) : (data?.avg_cpu_percent ? Math.round(data.avg_cpu_percent) : 0);
+  const avgMem = count > 0 ? Math.round(liveMemSum / count) : (data?.avg_memory_percent ? Math.round(data.avg_memory_percent) : 0);
+  const avgDisk = count > 0 ? Math.round(liveDiskSum / count) : (data?.avg_disk_percent ? Math.round(data.avg_disk_percent) : 0);
 
-  const availabilityPct = data?.availability_pct ?? 99.98;
+  const availabilityPct = data?.availability_pct ?? (totalHosts > 0 ? 100 : 0);
   const alertsToday = data?.alerts_today ?? 0;
   const criticalIncidents = data?.critical_incidents ?? 0;
 
   const scorecard = data?.scorecard || {
-    availability: 99.9,
-    performance: 96,
-    security: 94,
-    reliability: 98,
-    overall: 97,
+    availability: totalHosts > 0 ? 100 : 0,
+    performance: totalHosts > 0 ? 100 : 0,
+    security: totalHosts > 0 ? 100 : 0,
+    reliability: totalHosts > 0 ? 100 : 0,
+    overall: totalHosts > 0 ? 100 : 0,
   };
+
+  if (!hasData) {
+    return (
+      <div style={{ background: '#161b22', border: '1px dashed #30363d', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', margin: '20px 0' }}>
+        <AlertCircle size={40} color="#58a6ff" style={{ margin: '0 auto 12px auto', display: 'block' }} />
+        <h3 style={{ color: '#f0f6fc', fontSize: '18px', margin: '0 0 8px 0', fontWeight: 700 }}>No Infrastructure Telemetry Collected</h3>
+        <p style={{ color: '#8b949e', fontSize: '13px', maxWidth: '500px', margin: '0 auto', lineHeight: 1.5 }}>
+          No connected servers or telemetry metrics are reported. Please enroll and start an <code>infrapilot-agent</code> on your host machine to populate infrastructure analytics.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="analytics-overview-root">

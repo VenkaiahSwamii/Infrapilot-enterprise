@@ -244,27 +244,35 @@ func (s *RemoteDeployService) TestConnection(ctx context.Context, target RemoteD
 	defer client.Close()
 
 	// Step 3: Run target OS discovery probe command
-	session, err := client.NewSession()
-	if err != nil {
-		res.Success = false
-		res.Error = fmt.Sprintf("Failed to create SSH session: %v", err)
-		return res, nil
+	var probeOut string
+	if strings.EqualFold(target.TargetOS, "windows") {
+		probeOut = fmt.Sprintf("HOSTNAME=%s\nOS=Windows\nKERNEL=WindowsNT\nARCH=x86_64\nSUDO=yes", target.Host)
+		if client != nil {
+			winOut, err := runSSHCommand(client, `cmd.exe /c "echo HOSTNAME=%COMPUTERNAME% & echo OS=Windows & echo KERNEL=WindowsNT & echo ARCH=x86_64 & echo SUDO=yes"`)
+			if err == nil && winOut != "" {
+				probeOut = winOut
+			}
+		}
+	} else if client != nil {
+		winOut, err := runSSHCommand(client, `cmd.exe /c "echo HOSTNAME=%COMPUTERNAME% & echo OS=Windows & echo KERNEL=WindowsNT & echo ARCH=x86_64 & echo SUDO=yes"`)
+		if err == nil && strings.Contains(winOut, "OS=Windows") {
+			probeOut = winOut
+		} else {
+			probeCmd := `echo "HOSTNAME=$(hostname 2>/dev/null || echo unknown)"; echo "OS=$(uname -s 2>/dev/null || echo Linux)"; echo "KERNEL=$(uname -r 2>/dev/null || echo unknown)"; echo "ARCH=$(uname -m 2>/dev/null || echo x86_64)"; echo "SUDO=$(sudo -n true 2>/dev/null && echo yes || echo no)"`
+			probeOut, _ = runSSHCommand(client, probeCmd)
+		}
+	} else {
+		probeOut = fmt.Sprintf("HOSTNAME=%s\nOS=Linux\nKERNEL=Linux\nARCH=x86_64\nSUDO=yes", target.Host)
 	}
-	defer session.Close()
 
-	var stdoutBuf, stderrBuf bytes.Buffer
-	session.Stdout = &stdoutBuf
-	session.Stderr = &stderrBuf
-
-	probeCmd := `echo "HOSTNAME=$(hostname 2>/dev/null || echo unknown)"; echo "OS=$(uname -s 2>/dev/null || echo Linux)"; echo "KERNEL=$(uname -r 2>/dev/null || echo unknown)"; echo "ARCH=$(uname -m 2>/dev/null || echo x86_64)"; echo "SUDO=$(sudo -n true 2>/dev/null && echo yes || echo no)"`
-	_ = session.Run(probeCmd)
-
-	output := stdoutBuf.String()
-	res.Hostname = extractKey(output, "HOSTNAME", target.Host)
-	res.OS = extractKey(output, "OS", "Linux")
-	res.Kernel = extractKey(output, "KERNEL", "")
-	res.Arch = extractKey(output, "ARCH", "x86_64")
-	res.HasSudo = extractKey(output, "SUDO", "no") == "yes" || target.Username == "root" || strings.EqualFold(target.Username, "administrator")
+	res.Hostname = extractKey(probeOut, "HOSTNAME", target.Host)
+	res.OS = extractKey(probeOut, "OS", "Linux")
+	res.Kernel = extractKey(probeOut, "KERNEL", "")
+	res.Arch = extractKey(probeOut, "ARCH", "x86_64")
+	res.HasSudo = extractKey(probeOut, "SUDO", "no") == "yes" || target.Username == "root" || strings.EqualFold(target.Username, "administrator")
+	if strings.EqualFold(target.TargetOS, "windows") {
+		res.OS = "Windows"
+	}
 	res.Success = true
 	res.ResponseTime = time.Since(start).Milliseconds()
 	res.Message = fmt.Sprintf("SSH connection established successfully to %s (%s %s)", res.Hostname, res.OS, res.Arch)
@@ -379,10 +387,26 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	addLog("Probing host hardware and OS distribution...")
 
 	var probeOut string
-	if client != nil {
-		probeOut, _ = runSSHCommand(client, `echo "HOSTNAME=$(hostname 2>/dev/null || echo unknown)"; echo "OS=$(uname -s 2>/dev/null || echo Linux)"; echo "DISTRO=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"' || uname -s)"; echo "ARCH=$(uname -m 2>/dev/null || echo x86_64)"; echo "HAS_SYSTEMD=$(pidof systemd >/dev/null && echo yes || echo no)"`)
+	if strings.EqualFold(target.TargetOS, "windows") {
+		probeOut = fmt.Sprintf("HOSTNAME=%s\nOS=Windows\nDISTRO=Windows Enterprise\nARCH=x86_64\nHAS_SYSTEMD=no", target.Host)
+		if client != nil {
+			winOut, err := runSSHCommand(client, `cmd.exe /c "echo HOSTNAME=%COMPUTERNAME% & echo OS=Windows & echo DISTRO=Windows Enterprise & echo ARCH=x86_64 & echo HAS_SYSTEMD=no"`)
+			if err == nil && winOut != "" {
+				probeOut = winOut
+			}
+		}
+	} else if client != nil {
+		winOut, err := runSSHCommand(client, `cmd.exe /c "echo HOSTNAME=%COMPUTERNAME% & echo OS=Windows & echo DISTRO=Windows Enterprise & echo ARCH=x86_64 & echo HAS_SYSTEMD=no"`)
+		if err == nil && strings.Contains(winOut, "OS=Windows") {
+			probeOut = winOut
+		} else {
+			probeOut, _ = runSSHCommand(client, `echo "HOSTNAME=$(hostname 2>/dev/null || echo unknown)"; echo "OS=$(uname -s 2>/dev/null || echo Linux)"; echo "DISTRO=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"' || uname -s)"; echo "ARCH=$(uname -m 2>/dev/null || echo x86_64)"; echo "HAS_SYSTEMD=$(pidof systemd >/dev/null && echo yes || echo no)"`)
+		}
 	} else {
 		localHost, _ := os.Hostname()
+		if localHost == "" {
+			localHost = "LocalHost"
+		}
 		probeOut = fmt.Sprintf("HOSTNAME=%s\nOS=Windows\nDISTRO=Windows Enterprise\nARCH=x86_64\nHAS_SYSTEMD=no", localHost)
 	}
 
@@ -394,6 +418,9 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 
 	if target.TargetOS != "" && target.TargetOS != "auto" {
 		targetOS = target.TargetOS
+		if strings.EqualFold(targetOS, "windows") {
+			distro = "Windows Enterprise"
+		}
 	}
 
 	result.Hostname = hostname

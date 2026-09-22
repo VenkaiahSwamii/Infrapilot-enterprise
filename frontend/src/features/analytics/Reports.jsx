@@ -50,89 +50,10 @@ export default function Reports({ reports, onRefresh }) {
   const [msg, setMsg] = useState(null);
 
   // Initial curated reports archive
-  const [localReports, setLocalReports] = useState([
-    {
-      id: 'rep-exec-901',
-      name: 'Q3 Enterprise Fleet Infrastructure Health & Capacity',
-      type: 'summary',
-      format: 'pdf',
-      size: '2.4 MB',
-      generated_by: 'system_admin@infrapilot.io',
-      created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
-      status: 'Ready',
-      scope: 'Global Fleet (3 Hosts)'
-    },
-    {
-      id: 'rep-sec-882',
-      name: 'SOC2 & HIPAA Host Hardening & Security Audit',
-      type: 'compliance',
-      format: 'pdf',
-      size: '1.8 MB',
-      generated_by: 'compliance_officer',
-      created_at: new Date(Date.now() - 3600000 * 28).toISOString(),
-      status: 'Ready',
-      scope: 'All Nodes'
-    },
-    {
-      id: 'rep-inc-743',
-      name: 'Critical Incident Telemetry & MTTR Root Cause Summary',
-      type: 'incident',
-      format: 'xlsx',
-      size: '840 KB',
-      generated_by: 'sre_lead@infrapilot.io',
-      created_at: new Date(Date.now() - 3600000 * 72).toISOString(),
-      status: 'Ready',
-      scope: 'Production Tier'
-    },
-    {
-      id: 'rep-k8s-619',
-      name: 'Kubernetes Workload Allocation & Pod Restarts Metric Export',
-      type: 'k8s',
-      format: 'csv',
-      size: '420 KB',
-      generated_by: 'automation_daemon',
-      created_at: new Date(Date.now() - 3600000 * 120).toISOString(),
-      status: 'Ready',
-      scope: 'Cluster 01'
-    }
-  ]);
+  const [localReports, setLocalReports] = useState([]);
 
   // Scheduled recurring reports state
-  const [schedules, setSchedules] = useState([
-    {
-      id: 'sch-1',
-      name: 'Weekly Executive Infrastructure Summary',
-      type: 'summary',
-      format: 'pdf',
-      frequency: 'weekly',
-      day: 'Every Monday 00:00 UTC',
-      recipients: 'execs@infrapilot.io, devops-team@infrapilot.io',
-      enabled: true,
-      next_run: 'In 2 days'
-    },
-    {
-      id: 'sch-2',
-      name: 'Daily High-Severity Incident Audit',
-      type: 'incident',
-      format: 'xlsx',
-      frequency: 'daily',
-      day: 'Daily at 23:59 UTC',
-      recipients: 'oncall@infrapilot.io',
-      enabled: true,
-      next_run: 'Today at 23:59 UTC'
-    },
-    {
-      id: 'sch-3',
-      name: 'Monthly Fleet Capacity & Cost Right-Sizing',
-      type: 'compliance',
-      format: 'pdf',
-      frequency: 'monthly',
-      day: '1st of every month',
-      recipients: 'finance@infrapilot.io, cto@infrapilot.io',
-      enabled: true,
-      next_run: 'In 3 days'
-    }
-  ]);
+  const [schedules, setSchedules] = useState([]);
 
   // One-click quick templates
   const templates = [

@@ -119,14 +119,14 @@ export default function SRELatencyPage() {
   const machineId = primaryMachine ? (primaryMachine.id || primaryMachine.ID || getMachineId(primaryMachine)) : '';
   const live = (machineId && liveMetrics[machineId]) ? liveMetrics[machineId] : {};
 
-  // Real or derived live latency ms
-  const rawLat = live.latency_ms ?? primaryMachine.latency_ms ?? 17.7;
+  // Real live latency ms
+  const hasLatencyData = machines.length > 0 && (live.latency_ms !== undefined || primaryMachine.latency_ms !== undefined);
+  const rawLat = live.latency_ms ?? primaryMachine.latency_ms ?? 0;
   const realLatency = Number(rawLat).toFixed(1);
-
   const numLat = Number(realLatency);
   const latencyStatus = numLat >= 120 ? 'CRITICAL' : numLat >= 50 ? 'WARNING' : 'EXCELLENT';
 
-  const endpoints = [
+  const endpoints = hasLatencyData ? [
     {
       id: 'end-gateway',
       name: 'gateway',
@@ -136,7 +136,7 @@ export default function SRELatencyPage() {
       gatewayIp: '8.8.8.8',
       history: [17.2, 17.5, 17.8, 17.4, 17.7, 17.6, 17.9, numLat],
     },
-  ];
+  ] : [];
 
   const excellentCount = endpoints.filter((e) => e.status === 'EXCELLENT').length;
   const warningCount = endpoints.filter((e) => e.status === 'WARNING').length;
@@ -264,31 +264,41 @@ export default function SRELatencyPage() {
       </div>
 
       {/* ── ENDPOINTS GRID ── */}
-      <div className="latency-endpoints-grid">
-        {filteredEndpoints.map((ep) => (
-          <div key={ep.id} className="endpoint-card">
-            <div className="ep-card-header">
-              <div className="ep-title-wrap">
-                <Globe size={16} className="ep-icon green" />
-                <div>
-                  <h4 className="ep-name">{ep.name}</h4>
-                  <span className="ep-type">{ep.type}</span>
+      {endpoints.length === 0 ? (
+        <div className="empty-sre-card">
+          <AlertCircle size={36} className="empty-icon cyan" />
+          <h3 className="empty-title">No Network Latency Telemetry</h3>
+          <p className="empty-desc">
+            No live ping responses or gateway latency metrics are reported. Please enroll and start an <code>infrapilot-agent</code> on your target machine to monitor network degradation.
+          </p>
+        </div>
+      ) : (
+        <div className="latency-endpoints-grid">
+          {filteredEndpoints.map((ep) => (
+            <div key={ep.id} className="endpoint-card">
+              <div className="ep-card-header">
+                <div className="ep-title-wrap">
+                  <Globe size={16} className="ep-icon green" />
+                  <div>
+                    <h4 className="ep-name">{ep.name}</h4>
+                    <span className="ep-type">{ep.type}</span>
+                  </div>
                 </div>
+
+                <span className={`ep-status-badge ${ep.status.toLowerCase()}`}>{ep.status}</span>
               </div>
 
-              <span className={`ep-status-badge ${ep.status.toLowerCase()}`}>{ep.status}</span>
+              <div className="ep-latency-val">
+                {ep.latencyMs} <span className="ms-lbl">ms</span>
+              </div>
+
+              <LatencySparkline data={ep.history} color="#22c55e" />
+
+              <AdminSREPolicyControl category="Network" component={ep.name.toLowerCase().includes('gateway') ? 'gateway' : 'dns_latency'} compact />
             </div>
-
-            <div className="ep-latency-val">
-              {ep.latencyMs} <span className="ms-lbl">ms</span>
-            </div>
-
-            <LatencySparkline data={ep.history} color="#22c55e" />
-
-            <AdminSREPolicyControl category="Network" component={ep.name.toLowerCase().includes('gateway') ? 'gateway' : 'dns_latency'} compact />
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* ── BOTTOM TRENDS SECTION ── */}
       <div className="latency-trends-section">
@@ -310,6 +320,40 @@ export default function SRELatencyPage() {
       </div>
 
       <style>{`
+        .empty-sre-card {
+          background: #111827;
+          border: 1px dashed #1f293d;
+          border-radius: 14px;
+          padding: 48px 24px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          gap: 12px;
+          margin-top: 16px;
+        }
+        .empty-icon.cyan { color: #38bdf8; }
+        .empty-title {
+          font-size: 18px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0;
+        }
+        .empty-desc {
+          font-size: 13px;
+          color: #94a3b8;
+          max-width: 520px;
+          margin: 0;
+          line-height: 1.5;
+        }
+        .empty-desc code {
+          background: #1e293b;
+          color: #38bdf8;
+          padding: 2px 6px;
+          border-radius: 4px;
+        }
+
         .sre-latency-page-root {
           padding: 28px 36px;
           min-height: 100vh;

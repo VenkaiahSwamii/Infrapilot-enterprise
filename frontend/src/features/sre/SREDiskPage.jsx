@@ -55,47 +55,7 @@ export default function SREDiskPage() {
   });
 
   // Live SRE Disk Audit Logs & Remediation History
-  const [remediationHistory, setRemediationHistory] = useState([
-    {
-      id: 'rem-disk-101',
-      timestamp: '12m ago',
-      machine: 'prod-web-01',
-      mountPoint: '/tmp',
-      reason: 'Reactive threshold breached (92.4% > 90.0%)',
-      filesScanned: 148,
-      filesDeleted: 42,
-      freedMB: 2450.5,
-      status: 'VERIFIED_PASSED',
-      postUsagePct: 74.2,
-      dryRun: false,
-    },
-    {
-      id: 'rem-disk-102',
-      timestamp: '1h 35m ago',
-      machine: 'prod-cache-01',
-      mountPoint: '/var/tmp',
-      reason: 'Predictive burn rate threshold (Full in 2.1h at 45 MB/min)',
-      filesScanned: 86,
-      filesDeleted: 28,
-      freedMB: 1820.0,
-      status: 'VERIFIED_PASSED',
-      postUsagePct: 68.5,
-      dryRun: false,
-    },
-    {
-      id: 'rem-disk-103',
-      timestamp: '4h 10m ago',
-      machine: 'prod-db-01',
-      mountPoint: 'C:',
-      reason: 'Manual SRE trigger (Dry-Run mode)',
-      filesScanned: 312,
-      filesDeleted: 0,
-      freedMB: 0,
-      status: 'DRY_RUN_SIMULATION',
-      postUsagePct: 78.9,
-      dryRun: true,
-    },
-  ]);
+  const [remediationHistory, setRemediationHistory] = useState([]);
 
   // Fetch real connected machine disk metrics from backend
   const fetchDiskData = async () => {
@@ -242,13 +202,13 @@ export default function SREDiskPage() {
         status: safePct >= diskPolicy.reactiveThreshold ? 'CRITICAL' : safePct >= 80 ? 'WARNING' : 'HEALTHY',
       };
     });
-  } else {
+  } else if (machines.length > 0 && primaryMachine && (live?.disk_total || primaryMachine?.total_disk_gb || live?.disk_usage !== undefined)) {
     const totalDiskGB = Number(primaryMachine?.total_disk_gb || 0);
-    const totalDiskBytes = live?.disk_total || (totalDiskGB > 0 ? totalDiskGB * 1024 * 1024 * 1024 : 120 * 1024 * 1024 * 1024);
-    const usedDiskBytes = live?.disk_used || ((live?.disk_usage !== undefined && live?.disk_usage !== null && totalDiskBytes) ? (live.disk_usage / 100) * totalDiskBytes : 48 * 1024 * 1024 * 1024);
+    const totalDiskBytes = live?.disk_total || (totalDiskGB > 0 ? totalDiskGB * 1024 * 1024 * 1024 : 0);
+    const usedDiskBytes = live?.disk_used || ((live?.disk_usage !== undefined && live?.disk_usage !== null && totalDiskBytes) ? (live.disk_usage / 100) * totalDiskBytes : 0);
 
-    const totalGBNum = totalDiskBytes > 0 ? Number((totalDiskBytes / (1024 * 1024 * 1024)).toFixed(1)) : 120.0;
-    const usedGBNum = usedDiskBytes > 0 ? Number((usedDiskBytes / (1024 * 1024 * 1024)).toFixed(1)) : 48.0;
+    const totalGBNum = totalDiskBytes > 0 ? Number((totalDiskBytes / (1024 * 1024 * 1024)).toFixed(1)) : 0;
+    const usedGBNum = usedDiskBytes > 0 ? Number((usedDiskBytes / (1024 * 1024 * 1024)).toFixed(1)) : 0;
     const freeGBNum = Math.max(0, Number((totalGBNum - usedGBNum).toFixed(1)));
 
     let usagePctNum = 0;
@@ -258,19 +218,21 @@ export default function SREDiskPage() {
       usagePctNum = Number(((usedGBNum / totalGBNum) * 100).toFixed(1));
     }
 
-    volumes = [
-      {
-        id: 'vol-root',
-        name: isWindows ? 'System Drive (C:)' : 'root (/)',
-        type: isWindows ? 'NTFS / LOCAL' : 'EXT4 / LOCAL',
-        mountPoint: isWindows ? 'C:' : '/',
-        usedGB: usedGBNum,
-        freeGB: freeGBNum,
-        totalGB: totalGBNum,
-        usagePct: usagePctNum,
-        status: usagePctNum >= diskPolicy.reactiveThreshold ? 'CRITICAL' : usagePctNum >= 80 ? 'WARNING' : 'HEALTHY',
-      },
-    ];
+    if (totalGBNum > 0 || usedGBNum > 0 || live?.disk_usage !== undefined) {
+      volumes = [
+        {
+          id: 'vol-root',
+          name: isWindows ? 'System Drive (C:)' : 'root (/)',
+          type: isWindows ? 'NTFS / LOCAL' : 'EXT4 / LOCAL',
+          mountPoint: isWindows ? 'C:' : '/',
+          usedGB: usedGBNum,
+          freeGB: freeGBNum,
+          totalGB: totalGBNum,
+          usagePct: usagePctNum,
+          status: usagePctNum >= diskPolicy.reactiveThreshold ? 'CRITICAL' : usagePctNum >= 80 ? 'WARNING' : 'HEALTHY',
+        },
+      ];
+    }
   }
 
   const healthyCount = volumes.filter((v) => v.status === 'HEALTHY').length;
@@ -537,61 +499,71 @@ export default function SREDiskPage() {
       </div>
 
       {/* ── DISK VOLUMES GRID ── */}
-      <div className="storage-volumes-grid">
-        {filteredVolumes.map((vol) => {
-          const statusLower = String(vol.status || 'healthy').toLowerCase();
-          const pctVal = isNaN(vol.usagePct) ? 0 : vol.usagePct;
+      {volumes.length === 0 ? (
+        <div className="empty-sre-card">
+          <AlertCircle size={36} className="empty-icon cyan" />
+          <h3 className="empty-title">No Storage Volumes Monitored</h3>
+          <p className="empty-desc">
+            No live storage telemetry is reported. Please enroll and start an <code>infrapilot-agent</code> on your target machine to view active partition capacity and burn rates.
+          </p>
+        </div>
+      ) : (
+        <div className="storage-volumes-grid">
+          {filteredVolumes.map((vol) => {
+            const statusLower = String(vol.status || 'healthy').toLowerCase();
+            const pctVal = isNaN(vol.usagePct) ? 0 : vol.usagePct;
 
-          return (
-            <div key={vol.id} className="volume-card">
-              <div className="vol-card-header">
-                <div className="vol-title-wrap">
-                  <Database size={16} className="vol-icon" />
-                  <div>
-                    <h4 className="vol-name">{vol.name}</h4>
-                    <span className="vol-type">{vol.type} &bull; {vol.mountPoint}</span>
+            return (
+              <div key={vol.id} className="volume-card">
+                <div className="vol-card-header">
+                  <div className="vol-title-wrap">
+                    <Database size={16} className="vol-icon" />
+                    <div>
+                      <h4 className="vol-name">{vol.name}</h4>
+                      <span className="vol-type">{vol.type} &bull; {vol.mountPoint}</span>
+                    </div>
+                  </div>
+
+                  <span className={`vol-status-badge ${statusLower}`}>
+                    {vol.status}
+                  </span>
+                </div>
+
+                <div className="vol-usage-row">
+                  <span className="usage-label">Saturation Level</span>
+                  <strong className={`usage-pct ${pctVal >= 90 ? 'red' : pctVal >= 80 ? 'amber' : 'green'}`}>{pctVal}%</strong>
+                </div>
+
+                <div className="vol-progress-bar">
+                  <div
+                    className={`vol-bar-fill ${pctVal >= 90 ? 'red' : pctVal >= 80 ? 'amber' : 'cyan'}`}
+                    style={{ width: `${Math.min(100, Math.max(0, pctVal))}%` }}
+                  />
+                </div>
+
+                <div className="vol-metric-boxes">
+                  <div className="sub-metric-card">
+                    <span className="sub-label">USED DISK</span>
+                    <strong className="sub-val">{vol.usedGB} GB</strong>
+                  </div>
+
+                  <div className="sub-metric-card">
+                    <span className="sub-label">FREE AVAILABLE</span>
+                    <strong className="sub-val green">{vol.freeGB} GB</strong>
                   </div>
                 </div>
 
-                <span className={`vol-status-badge ${statusLower}`}>
-                  {vol.status}
-                </span>
-              </div>
-
-              <div className="vol-usage-row">
-                <span className="usage-label">Saturation Level</span>
-                <strong className={`usage-pct ${pctVal >= 90 ? 'red' : pctVal >= 80 ? 'amber' : 'green'}`}>{pctVal}%</strong>
-              </div>
-
-              <div className="vol-progress-bar">
-                <div
-                  className={`vol-bar-fill ${pctVal >= 90 ? 'red' : pctVal >= 80 ? 'amber' : 'cyan'}`}
-                  style={{ width: `${Math.min(100, Math.max(0, pctVal))}%` }}
-                />
-              </div>
-
-              <div className="vol-metric-boxes">
-                <div className="sub-metric-card">
-                  <span className="sub-label">USED DISK</span>
-                  <strong className="sub-val">{vol.usedGB} GB</strong>
+                <div className="vol-card-footer">
+                  <CheckCircle2 size={14} className="footer-icon green" />
+                  <span>Auto-Remediation armed (Reactive threshold: {diskPolicy.reactiveThreshold}%)</span>
                 </div>
 
-                <div className="sub-metric-card">
-                  <span className="sub-label">FREE AVAILABLE</span>
-                  <strong className="sub-val green">{vol.freeGB} GB</strong>
-                </div>
+                <AdminSREPolicyControl category="Storage" component={vol.mountPoint === '/' ? 'root_disk' : vol.mountPoint === '/var/log' || String(vol.name).includes('var') ? 'var_log_disk' : 'root_disk'} compact />
               </div>
-
-              <div className="vol-card-footer">
-                <CheckCircle2 size={14} className="footer-icon green" />
-                <span>Auto-Remediation armed (Reactive threshold: {diskPolicy.reactiveThreshold}%)</span>
-              </div>
-
-              <AdminSREPolicyControl category="Storage" component={vol.mountPoint === '/' ? 'root_disk' : vol.mountPoint === '/var/log' || String(vol.name).includes('var') ? 'var_log_disk' : 'root_disk'} compact />
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── SRE REMEDIATION AUDIT TRAIL TABLE ── */}
       <div className="sre-audit-panel">
@@ -718,6 +690,40 @@ export default function SREDiskPage() {
 
       {/* ── SCOPED CSS STYLES FOR SRE DISK PAGE ── */}
       <style>{`
+        .empty-sre-card {
+          background: #111827;
+          border: 1px dashed #1f293d;
+          border-radius: 14px;
+          padding: 48px 24px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          gap: 12px;
+          margin-top: 16px;
+        }
+        .empty-icon.cyan { color: #38bdf8; }
+        .empty-title {
+          font-size: 18px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0;
+        }
+        .empty-desc {
+          font-size: 13px;
+          color: #94a3b8;
+          max-width: 520px;
+          margin: 0;
+          line-height: 1.5;
+        }
+        .empty-desc code {
+          background: #1e293b;
+          color: #38bdf8;
+          padding: 2px 6px;
+          border-radius: 4px;
+        }
+
         .sre-storage-fleet-root {
           padding: 24px 32px;
           min-height: 100vh;
