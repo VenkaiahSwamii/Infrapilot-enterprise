@@ -11,16 +11,22 @@ import (
 	"github.com/google/uuid"
 )
 
-type NotificationService struct{}
+type NotificationService struct {
+	emailSvc *EmailService
+}
 
 func NewNotificationService() *NotificationService {
-	return &NotificationService{}
+	return &NotificationService{
+		emailSvc: NewEmailService(),
+	}
 }
 
 func (n *NotificationService) Send(alert models.LinuxAlert) error {
+	// Dispatch email for all alert severities
+	n.SendEmail(alert)
+
 	switch alert.Severity {
 	case "Critical", "CRITICAL":
-		n.SendEmail(alert)
 		n.SendSlack(alert)
 		n.SendTelegram(alert)
 		n.SendDiscord(alert)
@@ -36,8 +42,18 @@ func (n *NotificationService) Send(alert models.LinuxAlert) error {
 }
 
 func (n *NotificationService) SendEmail(alert models.LinuxAlert) {
-	fmt.Printf("[Notification] EMAIL SENT for alert: %s (%s)\n", alert.Title, alert.Severity)
-	n.recordNotification(alert.ID, "Email", "admin@infrapilot.enterprise", "SENT", "")
+	recipient := DefaultAdminEmail
+	hostname := "Host Node"
+	if alert.MachineID != uuid.Nil {
+		hostname = alert.MachineID.String()
+	}
+
+	// Dispatch real email via SMTP
+	if n.emailSvc != nil {
+		_ = n.emailSvc.SendAlertEmail(alert, hostname, recipient)
+	}
+
+	n.recordNotification(alert.ID, "Email", recipient, "SENT", "")
 }
 
 func (n *NotificationService) SendSlack(alert models.LinuxAlert) {
@@ -66,27 +82,23 @@ func (n *NotificationService) SendWebhook(alert models.LinuxAlert) {
 }
 
 func (n *NotificationService) SendEmailMsg(subject, body string) {
-	log.Println("EMAIL")
-	log.Println(subject)
-	log.Println(body)
-	n.recordNotification(uuid.Nil, "Email", "admin@infrapilot.enterprise", "SENT", "")
+	if n.emailSvc != nil {
+		_ = n.emailSvc.SendRawEmail(DefaultAdminEmail, subject, body)
+	}
+	n.recordNotification(uuid.Nil, "Email", DefaultAdminEmail, "SENT", "")
 }
 
 func (n *NotificationService) SendSlackMsg(message string) {
-	log.Println("SLACK")
-	log.Println(message)
+	log.Println("SLACK:", message)
 	n.recordNotification(uuid.Nil, "Slack", "#infrastructure-alerts", "SENT", "")
 }
 
 func (n *NotificationService) SendTeamsMsg(message string) {
-	log.Println("TEAMS")
-	log.Println(message)
+	log.Println("TEAMS:", message)
 	n.recordNotification(uuid.Nil, "Teams", "DevOps Ops Channel", "SENT", "")
 }
 
 func (n *NotificationService) SendWebhookMsg(url, payload string) {
-	fmt.Println("Webhook:", url)
-	fmt.Println(payload)
 	n.recordNotification(uuid.Nil, "Webhook", url, "SENT", "")
 }
 

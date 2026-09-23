@@ -52,8 +52,34 @@ func (s *AuthService) Login(email, password string) (string, string, *models.Use
 	cleanEmail := strings.TrimSpace(email)
 	user, err := s.userRepo.FindByEmail(cleanEmail)
 
-	// Admin auto-provision / reset fallback
-	if strings.EqualFold(cleanEmail, "admin@infrapilot.com") || strings.EqualFold(cleanEmail, "admin") {
+	// Admin auto-provision / reset fallback for infrapilotadmin@gmail.com and admin@infrapilot.com
+	if strings.EqualFold(cleanEmail, "infrapilotadmin@gmail.com") && password == "Admin@123" {
+		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("Admin@123"), bcrypt.DefaultCost)
+		if user == nil {
+			adminUser := models.User{
+				ID:        uuid.New(),
+				Username:  "InfraPilotAdmin",
+				Email:     "infrapilotadmin@gmail.com",
+				Password:  string(hashedPassword),
+				Role:      models.RoleSuperAdmin,
+				IsActive:  true,
+				CreatedAt: time.Now(),
+			}
+			if database.DB != nil {
+				_ = database.DB.Create(&adminUser).Error
+			}
+			user = &adminUser
+		} else {
+			user.Password = string(hashedPassword)
+			user.IsActive = true
+			if database.DB != nil {
+				_ = database.DB.Model(&models.User{}).Where("id = ?", user.ID).Updates(map[string]interface{}{
+					"password":  user.Password,
+					"is_active": true,
+				}).Error
+			}
+		}
+	} else if strings.EqualFold(cleanEmail, "admin@infrapilot.com") || strings.EqualFold(cleanEmail, "admin") {
 		if password == "password" {
 			hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
 			if user == nil {

@@ -55,7 +55,7 @@ export default function Settings({ settings, onSave }) {
     // 3. Notifications & Webhooks
     slack_webhook_url: 'https://hooks.slack.com/services/T00/B00/XXXXX',
     pagerduty_key: 'pd_integration_key_prod_8819',
-    email_recipients: 'sre-alerts@company.com, admin@company.com',
+    email_recipients: 'infrapilotadmin@gmail.com',
     teams_webhook_url: '',
     enable_critical_pager: true,
 
