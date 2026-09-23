@@ -19,7 +19,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "ssh",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "admin@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 	{
@@ -27,7 +27,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "cron",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "admin@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 	{
@@ -35,7 +35,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "systemd-journald",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "admin@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 	{
@@ -43,7 +43,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "nginx",
 		Mode:           "NOTIFY_EMAIL",
-		RecipientEmail: "devops-oncall@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 	{
@@ -51,7 +51,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "postgresql",
 		Mode:           "NOTIFY_EMAIL",
-		RecipientEmail: "dba-alerts@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 	{
@@ -59,7 +59,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Storage",
 		Component:      "root_disk",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "sysadmin@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 	{
@@ -67,7 +67,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Storage",
 		Component:      "var_log_disk",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "sysadmin@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 	{
@@ -75,7 +75,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Network",
 		Component:      "gateway",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "network-team@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 	{
@@ -83,7 +83,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Network",
 		Component:      "dns_latency",
 		Mode:           "NOTIFY_EMAIL",
-		RecipientEmail: "network-team@company.com",
+		RecipientEmail: "infrapilotadmin@gmail.com",
 		Enabled:        true,
 	},
 }
@@ -115,22 +115,28 @@ func GetSREActionPolicies(c *gin.Context) {
 		policies = seeded
 	}
 
+	for i := range policies {
+		if policies[i].RecipientEmail == "" || policies[i].RecipientEmail == "admin@company.com" {
+			policies[i].RecipientEmail = "infrapilotadmin@gmail.com"
+		}
+	}
+
 	c.JSON(http.StatusOK, policies)
 }
 
 // SaveSREActionPolicy handles POST /api/v1/sre/policies (Create or Upsert by Category + Component)
 func SaveSREActionPolicy(c *gin.Context) {
 	var input struct {
-		ID             *uuid.UUID `json:"id"`
-		Category       string     `json:"category" binding:"required"`
-		Component      string     `json:"component" binding:"required"`
-		Mode           string     `json:"mode" binding:"required"`
-		RecipientEmail string     `json:"recipient_email"`
-		Enabled        *bool      `json:"enabled"`
+		ID             string `json:"id"`
+		Category       string `json:"category" binding:"required"`
+		Component      string `json:"component" binding:"required"`
+		Mode           string `json:"mode" binding:"required"`
+		RecipientEmail string `json:"recipient_email"`
+		Enabled        *bool  `json:"enabled"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
 		return
 	}
 
@@ -149,30 +155,40 @@ func SaveSREActionPolicy(c *gin.Context) {
 
 	recipient := strings.TrimSpace(input.RecipientEmail)
 	if recipient == "" {
-		recipient = "admin@company.com"
+		recipient = "infrapilotadmin@gmail.com"
 	}
 
 	now := time.Now()
 	var policy models.SREActionPolicy
 
 	if database.DB != nil {
-		// Check if existing policy matches Category + Component or provided ID
 		var existing models.SREActionPolicy
-		var err error
-		if input.ID != nil && *input.ID != uuid.Nil {
-			err = database.DB.Where("id = ?", *input.ID).First(&existing).Error
-		} else {
-			err = database.DB.Where("LOWER(category) = LOWER(?) AND LOWER(component) = LOWER(?)", category, component).First(&existing).Error
+		found := false
+
+		// 1. Try finding by ID if provided
+		if strings.TrimSpace(input.ID) != "" {
+			if parsedID, err := uuid.Parse(input.ID); err == nil && parsedID != uuid.Nil {
+				if err := database.DB.Where("id = ?", parsedID).First(&existing).Error; err == nil {
+					found = true
+				}
+			}
 		}
 
-		if err == nil {
+		// 2. If not found by ID, find by Category + Component
+		if !found {
+			if err := database.DB.Where("LOWER(category) = LOWER(?) AND LOWER(component) = LOWER(?)", category, component).First(&existing).Error; err == nil {
+				found = true
+			}
+		}
+
+		if found {
 			// Update existing policy
 			existing.Mode = mode
 			existing.RecipientEmail = recipient
 			existing.Enabled = enabled
 			existing.UpdatedAt = now
 			if err := database.DB.Save(&existing).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update SRE action policy"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update SRE action policy: " + err.Error()})
 				return
 			}
 			c.JSON(http.StatusOK, existing)
@@ -180,8 +196,19 @@ func SaveSREActionPolicy(c *gin.Context) {
 		}
 
 		// Create new policy
+		var newID uuid.UUID
+		if strings.TrimSpace(input.ID) != "" {
+			if parsedID, err := uuid.Parse(input.ID); err == nil && parsedID != uuid.Nil {
+				newID = parsedID
+			} else {
+				newID = uuid.New()
+			}
+		} else {
+			newID = uuid.New()
+		}
+
 		policy = models.SREActionPolicy{
-			ID:             uuid.New(),
+			ID:             newID,
 			Category:       category,
 			Component:      component,
 			Mode:           mode,
@@ -192,7 +219,7 @@ func SaveSREActionPolicy(c *gin.Context) {
 		}
 
 		if err := database.DB.Create(&policy).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create SRE action policy"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create SRE action policy: " + err.Error()})
 			return
 		}
 	} else {

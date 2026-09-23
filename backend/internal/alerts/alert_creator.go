@@ -4,14 +4,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
+	"infrapilot/backend/internal/services"
 	"infrapilot/backend/internal/websocket"
 
 	"github.com/google/uuid"
 )
+
+var (
+	alertEmailCooldown = make(map[string]time.Time)
+	alertEmailMu       sync.Mutex
+)
+
+// shouldSendAlertEmail returns true if an email has not been sent for this alert key in the specified interval
+func shouldSendAlertEmail(key string, interval time.Duration) bool {
+	alertEmailMu.Lock()
+	defer alertEmailMu.Unlock()
+	last, exists := alertEmailCooldown[key]
+	if !exists || time.Since(last) >= interval {
+		alertEmailCooldown[key] = time.Now()
+		return true
+	}
+	return false
+}
 
 // Global hub instance holder if set by application startup
 var hubInstance *websocket.Hub
@@ -60,6 +79,12 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 			existingAlert.MetricValue = value
 			existingAlert.Message = msg
 			existingAlert.UpdatedAt = now
+
+			key := fmt.Sprintf("%s:%s", machine.ID.String(), rule.Name)
+			if shouldSendAlertEmail(key, 3*time.Minute) {
+				go services.SendAlert(*existingAlert)
+			}
+
 			return nil
 		}
 
@@ -93,6 +118,11 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 
 		log.Printf("[Alert Engine] Machine %s Rule %s Current %.1f Threshold %.1f Result ALERT CREATED",
 			hostname, rule.Name, value, rule.Value)
+
+		key := fmt.Sprintf("%s:%s", machine.ID.String(), rule.Name)
+		if shouldSendAlertEmail(key, 3*time.Minute) {
+			go services.SendAlert(newAlert)
+		}
 
 		BroadcastAlertPayload(newAlert, hostname)
 		return nil
@@ -181,6 +211,12 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 			existing.Severity = alert.Severity
 			existing.Priority = alert.Priority
 			existing.UpdatedAt = now
+
+			key := fmt.Sprintf("%s:%s", machine.ID.String(), existing.Title)
+			if shouldSendAlertEmail(key, 3*time.Minute) {
+				go services.SendAlert(existing)
+			}
+
 			BroadcastAlertPayload(existing, hostname)
 			return nil
 		}
@@ -195,6 +231,12 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 
 	log.Printf("[Alert Engine] Machine %s Category %s Priority %s Result ALERT CREATED (%s)",
 		hostname, alert.Category, alert.Priority, alert.Title)
+
+	// Dispatch real-time SMTP Email & Multi-Channel Notifications
+	key := fmt.Sprintf("%s:%s", machine.ID.String(), alert.Title)
+	if shouldSendAlertEmail(key, 3*time.Minute) {
+		go services.SendAlert(*alert)
+	}
 
 	BroadcastAlertPayload(*alert, hostname)
 	return nil

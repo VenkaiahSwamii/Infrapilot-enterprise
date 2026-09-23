@@ -336,6 +336,7 @@ func Connect() {
 
 	seedDefaultAdmin(db)
 	cleanupDuplicateServers(db)
+	updateSREActionPoliciesRecipient(db)
 
 	logger.Info("PostgreSQL connected successfully",
 		"host", cfg.DBHost,
@@ -410,23 +411,45 @@ func cleanupDuplicateServers(db *gorm.DB) {
 func seedDefaultAdmin(db *gorm.DB) {
 	var user models.User
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
-	if err != nil {
-		return
+	if err == nil {
+		if err := db.Where("email = ?", "admin@infrapilot.com").First(&user).Error; err != nil {
+			adminUser := models.User{
+				ID:        uuid.New(),
+				Username:  "Admin",
+				Email:     "admin@infrapilot.com",
+				Password:  string(hashedPassword),
+				Role:      models.RoleSuperAdmin,
+				IsActive:  true,
+				CreatedAt: time.Now(),
+			}
+			_ = db.Create(&adminUser).Error
+		} else {
+			_ = db.Model(&models.User{}).Where("email = ?", "admin@infrapilot.com").Update("password", string(hashedPassword)).Error
+		}
 	}
 
-	if err := db.Where("email = ?", "admin@infrapilot.com").First(&user).Error; err != nil {
-		adminUser := models.User{
-			ID:        uuid.New(),
-			Username:  "Admin",
-			Email:     "admin@infrapilot.com",
-			Password:  string(hashedPassword),
-			Role:      models.RoleSuperAdmin,
-			IsActive:  true,
-			CreatedAt: time.Now(),
+	// Also ensure infrapilotadmin@gmail.com is seeded with Admin@123
+	hashedAdminPass, errAdmin := bcrypt.GenerateFromPassword([]byte("Admin@123"), bcrypt.DefaultCost)
+	if errAdmin == nil {
+		var enterpriseAdmin models.User
+		if err := db.Where("email = ?", "infrapilotadmin@gmail.com").First(&enterpriseAdmin).Error; err != nil {
+			newAdmin := models.User{
+				ID:        uuid.New(),
+				Username:  "InfraPilot Admin",
+				Email:     "infrapilotadmin@gmail.com",
+				Password:  string(hashedAdminPass),
+				Role:      models.RoleSuperAdmin,
+				IsActive:  true,
+				CreatedAt: time.Now(),
+			}
+			_ = db.Create(&newAdmin).Error
+		} else {
+			_ = db.Model(&models.User{}).Where("email = ?", "infrapilotadmin@gmail.com").Updates(map[string]interface{}{
+				"password":  string(hashedAdminPass),
+				"role":      models.RoleSuperAdmin,
+				"is_active": true,
+			}).Error
 		}
-		_ = db.Create(&adminUser).Error
-	} else {
-		_ = db.Model(&models.User{}).Where("email = ?", "admin@infrapilot.com").Update("password", string(hashedPassword)).Error
 	}
 }
 
@@ -449,6 +472,21 @@ func cleanLegacyUniqueConstraints(db *gorm.DB) {
 			dropSQL := fmt.Sprintf(`ALTER TABLE "%s" DROP CONSTRAINT IF EXISTS "%s";`, res.TableName, res.ConstraintName)
 			_ = db.Exec(dropSQL).Error
 		}
+	}
+}
+
+func updateSREActionPoliciesRecipient(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	if db.Migrator().HasTable("sre_action_policies") {
+		_ = db.Exec(`
+			UPDATE sre_action_policies 
+			SET recipient_email = 'infrapilotadmin@gmail.com' 
+			WHERE recipient_email IS NULL 
+			   OR recipient_email = '' 
+			   OR recipient_email = 'admin@company.com';
+		`).Error
 	}
 }
 

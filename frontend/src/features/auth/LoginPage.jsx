@@ -67,7 +67,7 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@infrapilot.com"
+              placeholder="infrapilotadmin@gmail.com"
               required
               autoFocus
             />
@@ -80,7 +80,7 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              placeholder="Admin@123"
               required
             />
           </div>
@@ -92,7 +92,7 @@ export default function LoginPage() {
 
         <div className="login-footer">
           <p style={{ margin: '0 0 4px 0', color: '#64748b', fontSize: '11px' }}>
-            Default credentials: <strong style={{ color: '#94a3b8' }}>admin@infrapilot.com</strong> / <strong style={{ color: '#94a3b8' }}>password</strong>
+            Default credentials: <strong style={{ color: '#94a3b8' }}>infrapilotadmin@gmail.com</strong> / <strong style={{ color: '#94a3b8' }}>Admin@123</strong>
           </p>
           <p style={{ margin: 0 }}>InfraPilot Enterprise v1.0</p>
         </div>
