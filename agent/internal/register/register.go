@@ -38,9 +38,18 @@ func RegisterAgent(backendURL string, payload map[string]interface{}, enrollment
 		return nil, fmt.Errorf("backend returned status code %d", resp.StatusCode)
 	}
 
-	var result map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	var rawResult map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&rawResult); err != nil {
 		return nil, err
+	}
+
+	result := make(map[string]string)
+	for k, v := range rawResult {
+		if s, ok := v.(string); ok {
+			result[k] = s
+		} else if v != nil {
+			result[k] = fmt.Sprintf("%v", v)
+		}
 	}
 
 	return result, nil

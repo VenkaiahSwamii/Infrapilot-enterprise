@@ -67,6 +67,9 @@ func (h *ServerHandler) EnrollServer(c *gin.Context) {
 		ip = req.IPAddress
 	}
 
+	// Valid enterprise enrollment token automatically lifts any prior decommission block
+	_ = utils.UndecommissionHost(database.DB, uuid.Nil, req.Hostname, ip)
+
 	machineID := uuid.New()
 	if req.MachineID != "" {
 		parsed, parseErr := uuid.Parse(req.MachineID)
@@ -103,15 +106,15 @@ func (h *ServerHandler) EnrollServer(c *gin.Context) {
 		return
 	}
 
+	orgID := token.OrganizationID
+	if orgID == "" {
+		orgID = "default"
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"machine_id":      server.ID.String(),
 		"api_key":         server.APIKey,
-		"organization_id": token.OrganizationID,
-		"config": gin.H{
-			"metrics_interval_seconds":   5,
-			"heartbeat_interval_seconds": 15,
-			"log_collection_enabled":     true,
-		},
+		"organization_id": orgID,
 	})
 }
 
@@ -128,6 +131,9 @@ func (h *ServerHandler) RegisterServer(c *gin.Context) {
 	if ip == "" {
 		ip = req.IPAddress
 	}
+
+	// Active registration automatically clears prior decommission blocks
+	_ = utils.UndecommissionHost(database.DB, uuid.Nil, req.Hostname, ip)
 
 	if req.MachineID != "" {
 		macID, err := uuid.Parse(req.MachineID)
