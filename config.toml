@@ -42,8 +42,8 @@ export_aggregated_metrics = true
 
 # 2. Edge Agent (infrapilot-agent) Configuration
 [agent]
-server_address = "localhost:50051"
-backend_url = "http://localhost:8080"
+server_address = "192.168.1.86:50051"
+backend_url = "http://192.168.1.86:8080"
 machine_id = ""
 api_key = ""
 enrollment_token = ""

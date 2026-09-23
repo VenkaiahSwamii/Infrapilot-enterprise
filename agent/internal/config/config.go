@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -171,8 +172,59 @@ func syncTLSConfig(cfg *Config) {
 	}
 }
 
+// FindConfigFile searches for a configuration file across multiple candidate directories:
+// 1. Exact path provided (if non-empty and exists)
+// 2. Current working directory: ./<filename>
+// 3. Directory containing the running executable: <execDir>/<filename>
+// 4. Standard installation directory (e.g., C:\Program Files\InfraPilot on Windows, /etc/infrapilot or /opt/infrapilot on Linux)
+func FindConfigFile(filename string) string {
+	if filename == "" {
+		filename = "config.toml"
+	}
+	if filepath.IsAbs(filename) {
+		if _, err := os.Stat(filename); err == nil {
+			return filename
+		}
+	}
+	// Check current working directory
+	if _, err := os.Stat(filename); err == nil {
+		return filename
+	}
+
+	// Check alongside running executable
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		candidate := filepath.Join(exeDir, filename)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	// Check OS-specific standard directories
+	if runtime.GOOS == "windows" {
+		progFiles := os.Getenv("ProgramFiles")
+		if progFiles == "" {
+			progFiles = `C:\Program Files`
+		}
+		candidate := filepath.Join(progFiles, "InfraPilot", filename)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	} else {
+		for _, dir := range []string{"/etc/infrapilot", "/opt/infrapilot"} {
+			candidate := filepath.Join(dir, filename)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+
+	return filename
+}
+
 func LoadConfig(filePath string) (*Config, error) {
-	file, err := os.Open(filePath)
+	resolved := FindConfigFile(filePath)
+	file, err := os.Open(resolved)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +247,8 @@ func LoadConfig(filePath string) (*Config, error) {
 }
 
 func LoadConfigTOML(filePath string) (*Config, error) {
-	file, err := os.Open(filePath)
+	resolved := FindConfigFile(filePath)
+	file, err := os.Open(resolved)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +266,8 @@ func LoadConfigTOML(filePath string) (*Config, error) {
 }
 
 func LoadConfigJSON(filePath string) (*Config, error) {
-	file, err := os.Open(filePath)
+	resolved := FindConfigFile(filePath)
+	file, err := os.Open(resolved)
 	if err != nil {
 		return nil, err
 	}

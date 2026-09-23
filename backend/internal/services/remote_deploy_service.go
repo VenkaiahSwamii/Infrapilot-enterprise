@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/utils"
@@ -348,7 +349,7 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	addLog("Connecting via SSH transport to %s:%d...", target.Host, port)
 
 	var client *ssh.Client
-	config, err := s.buildSSHConfig(target)
+	sshConfig, err := s.buildSSHConfig(target)
 	if err != nil {
 		updateStep(0, "failed", err.Error(), "", time.Since(step1Start))
 		addLog("[ERROR] Credential configuration error: %v", err)
@@ -360,7 +361,7 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	}
 
 	addr := fmt.Sprintf("%s:%d", target.Host, port)
-	client, err = ssh.Dial("tcp", addr, config)
+	client, err = ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
 		if (target.Host == "127.0.0.1" || target.Host == "localhost" || target.Host == "::1") && port == 22 {
 			addLog("[INFO] Local loopback transport established for host %s", target.Host)
@@ -433,14 +434,11 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 
 	serverURL := strings.TrimRight(target.ServerURL, "/")
 	if serverURL == "" || strings.Contains(serverURL, "localhost") || strings.Contains(serverURL, "127.0.0.1") {
-		if strings.HasPrefix(target.Host, "172.30.") {
-			serverURL = "http://172.30.112.1:8080"
-		} else if strings.HasPrefix(target.Host, "192.168.160.") {
-			serverURL = "http://192.168.160.1:8080"
-		} else if strings.HasPrefix(target.Host, "192.168.159.") {
-			serverURL = "http://192.168.159.1:8080"
+		cfg := config.Get()
+		if cfg.BackendURL != "" {
+			serverURL = strings.TrimRight(cfg.BackendURL, "/")
 		} else {
-			serverURL = "http://192.168.1.86:8080"
+			serverURL = "http://127.0.0.1:8080"
 		}
 	}
 
@@ -455,9 +453,14 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	var installOut string
 	if client != nil {
 		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
-			// Windows target provisioning via PowerShell/OpenSSH
-			psDownloadCmd := fmt.Sprintf(`powershell -ExecutionPolicy Bypass -Command "iwr -useb '%s/api/v1/agent/install.ps1' -OutFile '$env:ProgramFiles\InfraPilot\install.ps1'; & '$env:ProgramFiles\InfraPilot\install.ps1' -ServerURL '%s' -EnrollToken '%s'"`, serverURL, serverURL, enrollToken)
-			installOut, _ = runSSHCommand(client, psDownloadCmd)
+			// Windows target provisioning via PowerShell/OpenSSH (in-memory scriptblock execution)
+			psDownloadCmd := fmt.Sprintf(`powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((iwr -useb '%s/api/v1/agent/install.ps1').Content)) -ServerURL '%s' -EnrollToken '%s'"`, serverURL, serverURL, enrollToken)
+			installOut, err = runSSHCommand(client, psDownloadCmd)
+			if err != nil || strings.Contains(installOut, "Error") || strings.Contains(installOut, "Exception") {
+				addLog("[WARN] In-memory bootstrap attempt output: %s. Initiating temp script fallback...", installOut)
+				tempCmd := fmt.Sprintf(`powershell -ExecutionPolicy Bypass -Command "iwr -useb '%s/api/v1/agent/install.ps1' -OutFile \"$env:TEMP\install.ps1\"; & \"$env:TEMP\install.ps1\" -ServerURL '%s' -EnrollToken '%s'"`, serverURL, serverURL, enrollToken)
+				installOut, _ = runSSHCommand(client, tempCmd)
+			}
 		} else {
 			// Linux target non-root systemd installer execution
 			installScriptCmd := fmt.Sprintf(`curl -fsSL "%s/api/v1/agent/install.sh" | sudo SERVER_URL="%s" ENROLL_TOKEN="%s" bash`, serverURL, serverURL, enrollToken)

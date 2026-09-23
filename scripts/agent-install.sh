@@ -5,7 +5,7 @@
 # ==============================================================================
 set -euo pipefail
 
-SERVER_URL="${SERVER_URL:-http://192.168.1.2:8080}"
+SERVER_URL="${SERVER_URL:-http://192.168.1.86:8080}"
 ENROLL_TOKEN="${ENROLL_TOKEN:-}"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/infrapilot"

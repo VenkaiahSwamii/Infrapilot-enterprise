@@ -21,24 +21,42 @@ func NewConfigStore(configPath string) *ConfigStore {
 
 // DefaultConfigPath returns the default path for config.json, isolating per-OS if needed
 func DefaultConfigPath() string {
+	osSpecificName := fmt.Sprintf("config_%s.json", runtime.GOOS)
+	if resolved := FindConfigFile(osSpecificName); resolved != osSpecificName {
+		if _, err := os.Stat(resolved); err == nil {
+			return resolved
+		}
+	}
+	if resolved := FindConfigFile("config.json"); resolved != "config.json" {
+		if _, err := os.Stat(resolved); err == nil {
+			return resolved
+		}
+	}
+
+	// If running alongside executable in an installed directory or custom folder
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		if !strings.Contains(strings.ToLower(exeDir), "system32") {
+			return filepath.Join(exeDir, "config.json")
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		progFiles := os.Getenv("ProgramFiles")
+		if progFiles == "" {
+			progFiles = `C:\Program Files`
+		}
+		installDir := filepath.Join(progFiles, "InfraPilot")
+		if _, err := os.Stat(installDir); err == nil {
+			return filepath.Join(installDir, "config.json")
+		}
+	}
+
 	wd, err := os.Getwd()
 	if err != nil {
 		return "config.json"
 	}
-	osSpecific := filepath.Join(wd, fmt.Sprintf("config_%s.json", runtime.GOOS))
-	if _, err := os.Stat(osSpecific); err == nil {
-		return osSpecific
-	}
-	baseConfig := filepath.Join(wd, "config.json")
-	if data, err := os.ReadFile(baseConfig); err == nil {
-		var peek struct {
-			OS string `json:"os"`
-		}
-		if err := json.Unmarshal(data, &peek); err == nil && peek.OS != "" && !strings.EqualFold(peek.OS, runtime.GOOS) {
-			return osSpecific
-		}
-	}
-	return baseConfig
+	return filepath.Join(wd, "config.json")
 }
 
 // EnterpriseConfig is the runtime configuration for the agent

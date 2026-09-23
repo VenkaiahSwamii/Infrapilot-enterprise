@@ -3,7 +3,7 @@
 # Installs agent as a native Windows Service (InfraPilotAgent)
 # ==============================================================================
 param(
-    [string]$ServerURL = "http://192.168.1.2:8080",
+    [string]$ServerURL = "http://192.168.1.86:8080",
     [string]$EnrollToken = ""
 )
 
@@ -35,7 +35,17 @@ try {
     Invoke-WebRequest -Uri $BinaryURL -OutFile $BinaryPath -UseBasicParsing
 } catch {
     $FallbackURL = "$ServerURL/downloads/infrapilot-agent.exe"
-    Invoke-WebRequest -Uri $FallbackURL -OutFile $BinaryPath -UseBasicParsing
+    try {
+        Invoke-WebRequest -Uri $FallbackURL -OutFile $BinaryPath -UseBasicParsing
+    } catch {
+        $LocalCandidates = @("C:\Users\abhis\Infrapilot-enterprise\infrapilot-agent.exe", "C:\Users\abhis\Infrapilot-enterprise\agent\agent.exe", ".\infrapilot-agent.exe")
+        foreach ($cand in $LocalCandidates) {
+            if (Test-Path $cand) {
+                Copy-Item -Path $cand -Destination $BinaryPath -Force
+                break
+            }
+        }
+    }
 }
 
 # 3. Download CA Certificate

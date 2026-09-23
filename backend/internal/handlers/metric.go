@@ -505,6 +505,9 @@ func (h *MetricHandler) GetMachineMetrics(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query historical metrics"})
 		return
 	}
+	if len(metrics) == 0 {
+		metrics, _ = h.metricService.GetMachineMetrics(machineUUID)
+	}
 
 	c.JSON(http.StatusOK, metrics)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -148,6 +149,9 @@ func RunAPI() error {
 
 	// Robustly locate InfraPilot-Release, scripts, and installer directories
 	releaseCandidates := []string{
+		"..",
+		"../agent",
+		"./agent",
 		"../InfraPilot-Release",
 		"./InfraPilot-Release",
 		"../../InfraPilot-Release",
@@ -169,15 +173,20 @@ func RunAPI() error {
 	serveDownloadScript := func(c *gin.Context, scriptName string) {
 		serverParam := c.Query("server")
 		if serverParam == "" {
-			scheme := "http"
-			if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
-				scheme = "https"
+			cfg := config.Get()
+			if cfg.BackendURL != "" {
+				serverParam = cfg.BackendURL
+			} else {
+				scheme := "http"
+				if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+					scheme = "https"
+				}
+				host := c.Request.Host
+				if host == "" {
+					host = "localhost:8080"
+				}
+				serverParam = fmt.Sprintf("%s://%s", scheme, host)
 			}
-			host := c.Request.Host
-			if host == "" {
-				host = "192.168.1.2:8080"
-			}
-			serverParam = fmt.Sprintf("%s://%s", scheme, host)
 		}
 		serverParam = strings.TrimRight(serverParam, "/")
 
@@ -188,6 +197,7 @@ func RunAPI() error {
 				if err == nil {
 					contentStr := string(contentBytes)
 					// Dynamically template backend URL so piped one-liners execute immediately with target server
+					contentStr = strings.ReplaceAll(contentStr, "http://192.168.1.86:8080", serverParam)
 					contentStr = strings.ReplaceAll(contentStr, "http://192.168.1.2:8080", serverParam)
 					contentStr = strings.ReplaceAll(contentStr, "http://localhost:8080", serverParam)
 					c.Header("Content-Type", "text/plain; charset=utf-8")
@@ -222,6 +232,24 @@ func RunAPI() error {
 				if stat, err := os.Stat(cp); err == nil && !stat.IsDir() {
 					c.Header("Content-Type", "application/x-x509-ca-cert")
 					c.File(cp)
+					return
+				}
+			}
+		}
+		if relPath == "infrapilot-agent-windows-amd64.exe" || relPath == "infrapilot-agent.exe" || relPath == "agent.exe" {
+			agentCandidates := []string{
+				"../infrapilot-agent.exe",
+				"./infrapilot-agent.exe",
+				"../agent/agent.exe",
+				"./agent/agent.exe",
+				"infrapilot-agent.exe",
+				"agent.exe",
+			}
+			for _, ac := range agentCandidates {
+				if stat, err := os.Stat(ac); err == nil && !stat.IsDir() {
+					c.Header("Content-Type", "application/octet-stream")
+					c.Header("Accept-Ranges", "bytes")
+					c.File(ac)
 					return
 				}
 			}
@@ -406,6 +434,12 @@ func startUDPDiscoveryListener() {
 }
 
 func getPrimaryHostIP() string {
+	cfg := config.Get()
+	if cfg != nil && cfg.BackendURL != "" {
+		if u, err := url.Parse(cfg.BackendURL); err == nil && u.Hostname() != "" {
+			return u.Hostname()
+		}
+	}
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
 		for _, address := range addrs {
@@ -416,5 +450,5 @@ func getPrimaryHostIP() string {
 			}
 		}
 	}
-	return "192.168.1.86"
+	return "127.0.0.1"
 }

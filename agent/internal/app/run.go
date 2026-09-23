@@ -45,26 +45,35 @@ func RunAgent() {
 		}
 	}
 
+	// Load config.toml as single source of truth for network endpoints & enrollment token
+	var tomlCfg *config.Config
+	if t, err := config.LoadConfig("config.toml"); err == nil && t != nil {
+		tomlCfg = t
+	} else if y, err := config.LoadConfig("config.yaml"); err == nil && y != nil {
+		tomlCfg = y
+	}
+
+	// If config.json already exists and config.toml specifies a backend_url, ensure they stay in sync
+	if cfg != nil && tomlCfg != nil && tomlCfg.BackendURL != "" && cfg.Server != tomlCfg.BackendURL {
+		log.Printf("Updating agent backend URL from config.toml: %s -> %s", cfg.Server, tomlCfg.BackendURL)
+		cfg.Server = tomlCfg.BackendURL
+		_ = store.Save(cfg)
+	}
+
 	if cfg == nil || cfg.MachineID == "" || cfg.APIKey == "" {
 		// config.json does not exist or lacks credentials, run agent self-registration/enrollment
 		log.Println("Agent credentials missing or incomplete. Enrolling machine with backend...")
 
 		backendURL := "http://localhost:8080"
-		if cfg != nil && cfg.Server != "" {
+		if tomlCfg != nil && tomlCfg.BackendURL != "" {
+			backendURL = tomlCfg.BackendURL
+		} else if cfg != nil && cfg.Server != "" {
 			backendURL = cfg.Server
 		}
+
 		enrollmentToken := ""
-		// Check config.toml to get the server URL if it exists
-		if tomlCfg, tomlErr := config.LoadConfig("config.toml"); tomlErr == nil {
-			if tomlCfg.BackendURL != "" {
-				backendURL = tomlCfg.BackendURL
-			}
+		if tomlCfg != nil {
 			enrollmentToken = tomlCfg.EnrollmentToken
-		} else if yamlCfg, yamlErr := config.LoadConfig("config.yaml"); yamlErr == nil {
-			if yamlCfg.BackendURL != "" {
-				backendURL = yamlCfg.BackendURL
-			}
-			enrollmentToken = yamlCfg.EnrollmentToken
 		}
 
 		metrics, err := collector.GetMetrics()
@@ -112,11 +121,11 @@ func RunAgent() {
 		log.Println("Configuration saved in config.json")
 	}
 
-	// Initialize AppConfig in config package, preserving config.toml if present
-	if tomlCfg, err := config.LoadConfig("config.toml"); err == nil && tomlCfg != nil {
+	// Initialize AppConfig in config package, preserving config.toml as source of truth
+	if tomlCfg != nil {
 		config.AppConfig = tomlCfg
 		if cfg != nil {
-			if cfg.Server != "" {
+			if config.AppConfig.BackendURL == "" && cfg.Server != "" {
 				config.AppConfig.BackendURL = cfg.Server
 			}
 			if cfg.MachineID != "" {
