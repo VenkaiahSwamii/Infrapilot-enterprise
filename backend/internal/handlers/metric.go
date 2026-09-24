@@ -46,6 +46,8 @@ type MetricsRequest struct {
 	MemoryUsage         float64                          `json:"memory_usage"`
 	DiskPercent         float64                          `json:"disk_percent"`
 	DiskUsage           float64                          `json:"disk_usage"`
+	DiskTotal           uint64                           `json:"disk_total"`
+	DiskUsed            uint64                           `json:"disk_used"`
 	UploadMbps          float64                          `json:"upload_mbps"`
 	DownloadMbps        float64                          `json:"download_mbps"`
 	Uptime              uint64                           `json:"uptime"`
@@ -282,6 +284,8 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		CPUUsage:            req.CPUUsage,
 		MemoryPercent:       memPct,
 		DiskPercent:         diskPct,
+		DiskTotal:           req.DiskTotal,
+		DiskUsed:            req.DiskUsed,
 		UploadMbps:          req.UploadMbps,
 		DownloadMbps:        req.DownloadMbps,
 		Uptime:              req.Uptime,

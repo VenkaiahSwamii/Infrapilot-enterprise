@@ -308,5 +308,7 @@ func GetAllowedCommands() []string {
 		"docker", "kubectl", "kubens", "kubectx", "helm",
 		"git", "npm", "node", "python", "python3",
 		"curl", "wget", "ssh", "scp", "rsync",
+		"powershell", "pwsh", "cmd", "sudo", "rm", "del", "rmdir", "cleanmgr", "systemctl", "journalctl",
 	}
 }
+

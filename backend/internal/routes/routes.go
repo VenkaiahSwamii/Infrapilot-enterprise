@@ -649,6 +649,7 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.GET("/remediation-jobs/:id", handlers.GetRemediationJobByID)
 			protected.POST("/remediation-jobs/:id/retry", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator), handlers.RetryRemediationJobHandler)
 			protected.POST("/remediation/test", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator), handlers.TestRemediationHandler)
+			protected.POST("/remediation/execute-disk-cleanup", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator), handlers.ExecuteDiskCleanupHandler)
 
 			// Sprint 7.9: Enterprise Workflow & Runbook Automation Engine
 			protected.GET("/workflows", handlers.GetWorkflows)
@@ -720,6 +721,7 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 		api.GET("/commands/pending", handlers.GetPendingCommands)
 		api.POST("/commands/result", handlers.PostCommandResult)
 		api.POST("/agent/commands/result", handlers.PostCommandResult)
+
 
 		// Sprint 6.6: Terminal Command public routes
 		api.POST("/agent/terminal/execute", handlers.ExecuteTerminalCommand)

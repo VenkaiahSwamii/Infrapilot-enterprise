@@ -295,6 +295,41 @@ func RetryRemediationJobHandler(c *gin.Context) {
 	})
 }
 
+type ExecuteDiskCleanupReq struct {
+	MachineID  string `json:"machine_id"`
+	MountPoint string `json:"mount_point"`
+	DryRun     bool   `json:"dry_run"`
+}
+
+// ExecuteDiskCleanupHandler executes real deep safe disk cleanup on node/machine
+func ExecuteDiskCleanupHandler(c *gin.Context) {
+	var req ExecuteDiskCleanupReq
+	_ = c.ShouldBindJSON(&req)
+
+	var mUUID uuid.UUID
+	if req.MachineID != "" {
+		if parsed, err := uuid.Parse(req.MachineID); err == nil {
+			mUUID = parsed
+		} else if database.DB != nil {
+			var m models.Server
+			if err := database.DB.Where("id::text LIKE ? OR LOWER(hostname) = LOWER(?)", req.MachineID+"%", req.MachineID).First(&m).Error; err == nil {
+				mUUID = m.ID
+			}
+		}
+	}
+
+	result, err := services.ExecuteRealDiskCleanup(mUUID, req.MountPoint, req.DryRun)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   fmt.Sprintf("Disk cleanup encountered an error: %v", err),
+			"success": false,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 // TestRemediationHandler executes a test remediation action
 func TestRemediationHandler(c *gin.Context) {
 	var req TestRemediationRequest
@@ -307,11 +342,25 @@ func TestRemediationHandler(c *gin.Context) {
 	if parsed, err := uuid.Parse(req.MachineID); err == nil {
 		mUUID = parsed
 	} else if database.DB != nil {
-		var m models.Machine
+		var m models.Server
 		if err := database.DB.Where("id::text LIKE ? OR LOWER(hostname) = LOWER(?)", req.MachineID+"%", req.MachineID).First(&m).Error; err == nil {
 			mUUID = m.ID
 		}
 	}
+
+	// If the requested action is cleanup_disk, also execute real cleanup
+	if req.ActionType == "cleanup_disk" {
+		cleanupRes, _ := services.ExecuteRealDiskCleanup(mUUID, "auto", false)
+		if cleanupRes != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"message": cleanupRes.Message,
+				"cleanup": cleanupRes,
+				"success": true,
+			})
+			return
+		}
+	}
+
 	testAlert := models.LinuxAlert{
 		ID:        uuid.New(),
 		MachineID: mUUID,
@@ -330,3 +379,4 @@ func TestRemediationHandler(c *gin.Context) {
 		"job":     job,
 	})
 }
+

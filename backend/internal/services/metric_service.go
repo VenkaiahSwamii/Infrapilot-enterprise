@@ -33,6 +33,8 @@ type SaveMetricInput struct {
 	CPUUsage            float64
 	MemoryPercent       float64
 	DiskPercent         float64
+	DiskTotal           uint64
+	DiskUsed            uint64
 	UploadMbps          float64
 	DownloadMbps        float64
 	Uptime              uint64
@@ -215,6 +217,30 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 		}
 	}
 
+	// Determine authoritative DiskTotal and DiskUsed bytes
+	finalDiskTotal := input.DiskTotal
+	finalDiskUsed := input.DiskUsed
+
+	if (finalDiskTotal == 0 || finalDiskUsed == 0) && len(input.Filesystems) > 0 {
+		var rootFS *FilesystemInput
+		for idx := range input.Filesystems {
+			mp := strings.ToLower(input.Filesystems[idx].MountPoint)
+			if mp == "/" || mp == "c:" || mp == "c:\\" || strings.HasPrefix(mp, "c:") {
+				rootFS = &input.Filesystems[idx]
+				break
+			}
+		}
+		if rootFS == nil {
+			rootFS = &input.Filesystems[0]
+		}
+		if finalDiskTotal == 0 {
+			finalDiskTotal = rootFS.Total
+		}
+		if finalDiskUsed == 0 {
+			finalDiskUsed = rootFS.Used
+		}
+	}
+
 	// Save detailed metric to DB
 	metric := &models.Metric{
 		ID:             uuid.New(),
@@ -236,6 +262,8 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 		CPUCores:       input.CPUCores,
 		TotalMemory:    input.TotalMemory,
 		FreeMemory:     input.FreeMemory,
+		DiskTotal:      finalDiskTotal,
+		DiskUsed:       finalDiskUsed,
 	}
 
 	// Save metric
@@ -272,10 +300,10 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 			machine.TotalMemoryGB = memGB
 		}
 	}
-	var totalDiskBytes uint64
-	if len(input.Filesystems) > 0 {
+	var totalDiskBytes uint64 = metric.DiskTotal
+	if totalDiskBytes == 0 && len(input.Filesystems) > 0 {
 		for _, fs := range input.Filesystems {
-			if fs.MountPoint == "/" || strings.EqualFold(fs.MountPoint, "c:") {
+			if fs.MountPoint == "/" || strings.EqualFold(fs.MountPoint, "c:") || strings.HasPrefix(strings.ToLower(fs.MountPoint), "c:") {
 				totalDiskBytes = fs.Total
 				break
 			}
