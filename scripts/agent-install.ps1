@@ -28,7 +28,17 @@ if (-not (Test-Path $CertsDir)) {
     New-Item -ItemType Directory -Force -Path $CertsDir | Out-Null
 }
 
-# 2. Download Windows Agent Binary
+# 2. Stop existing service and processes to prevent file-locking during binary update
+$ExistingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($ExistingService) {
+    Write-Host "[+] Stopping existing $ServiceName service..." -ForegroundColor Yellow
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+Stop-Process -Name "infrapilot-agent" -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
+
+# 3. Download Windows Agent Binary
 Write-Host "[+] Downloading InfraPilot Agent binary from $ServerURL..." -ForegroundColor Green
 $BinaryURL = "$ServerURL/downloads/infrapilot-agent-windows-amd64.exe"
 try {
@@ -48,7 +58,7 @@ try {
     }
 }
 
-# 3. Download CA Certificate
+# 4. Download CA Certificate
 Write-Host "[+] Fetching CA Certificate for encrypted TLS communication..." -ForegroundColor Green
 try {
     Invoke-WebRequest -Uri "$ServerURL/downloads/ca.crt" -OutFile $CertPath -UseBasicParsing
@@ -56,7 +66,7 @@ try {
     "" | Out-File -FilePath $CertPath -Encoding ascii
 }
 
-# 4. Write Configuration File
+# 5. Write Configuration File
 Write-Host "[+] Writing agent configuration ($ConfigPath)..." -ForegroundColor Green
 $Hostname = $env:COMPUTERNAME
 $ConfigContent = @"
@@ -84,12 +94,10 @@ enabled = true
 
 Set-Content -Path $ConfigPath -Value $ConfigContent -Encoding UTF8
 
-# 5. Stop existing service if running
-$ExistingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($ExistingService) {
-    Write-Host "[+] Stopping existing $ServiceName service..." -ForegroundColor Yellow
-    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
+# Remove stale config.json to allow fresh token enrollment
+$JsonConfig = "$InstallDir\config.json"
+if (Test-Path $JsonConfig) {
+    Remove-Item -Path $JsonConfig -Force -ErrorAction SilentlyContinue
 }
 
 # 6. Register & Start Windows Service
@@ -100,10 +108,25 @@ if (-not $ExistingService) {
                 -DisplayName "InfraPilot Enterprise Telemetry Agent" `
                 -Description "Collects metrics, logs, and system health telemetries for InfraPilot Enterprise." `
                 -StartupType Automatic | Out-Null
+} else {
+    # Ensure binary path and arguments are updated on existing service
+    & sc.exe config $ServiceName binPath= "`"$BinaryPath`" --config `"$ConfigPath`"" | Out-Null
 }
 
 Write-Host "[+] Starting $ServiceName..." -ForegroundColor Green
-Start-Service -Name $ServiceName
+$ServiceStarted = $false
+for ($i = 0; $i -lt 5; $i++) {
+    try {
+        Start-Service -Name $ServiceName -ErrorAction Stop
+        $ServiceStarted = $true
+        break
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+if (-not $ServiceStarted) {
+    Write-Host "[!] Service start attempt timed out, checking status..." -ForegroundColor Yellow
+}
 
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host "   ✅ InfraPilot Windows Agent Successfully Installed!  " -ForegroundColor Green

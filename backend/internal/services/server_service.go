@@ -103,9 +103,8 @@ func (s *ServerService) PublishEvent(e events.Event) {
 }
 
 func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*models.Server, error) {
-	if utils.IsHostDecommissioned(database.DB, input.ID, input.Hostname, input.IPAddress) {
-		return nil, errors.New("machine has been permanently deleted and decommissioned by administrator")
-	}
+	// Any active registration automatically lifts prior decommission blocks
+	_ = utils.UndecommissionHost(database.DB, input.ID, input.Hostname, input.IPAddress)
 
 	server, err := s.serverRepo.FindExistingServer(input.ID, input.Hostname, input.IPAddress, input.MACAddress, input.OS)
 	if err == nil && server != nil {

@@ -3,6 +3,8 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -445,6 +447,32 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	enrollToken := target.EnrollToken
 	if enrollToken == "" {
 		enrollToken = "ip_enroll_" + utils.GenerateEnrollmentToken()
+	}
+
+	// Pre-register enrollment token in database so remote agent enrollment succeeds seamlessly
+	if database.DB != nil && enrollToken != "" {
+		hash := sha256.Sum256([]byte(enrollToken))
+		hashStr := hex.EncodeToString(hash[:])
+		var existingTok models.EnrollmentToken
+		if err := database.DB.Where("token = ? OR token_hash = ?", enrollToken, hashStr).First(&existingTok).Error; err != nil {
+			prefix := enrollToken
+			if len(prefix) > 12 {
+				prefix = prefix[:12]
+			}
+			newToken := models.EnrollmentToken{
+				ID:             uuid.New(),
+				OrganizationID: "default",
+				Name:           "Push Deployment Token",
+				Token:          enrollToken,
+				TokenPrefix:    prefix,
+				TokenHash:      hashStr,
+				MaxUses:        100,
+				UsedCount:      0,
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+			}
+			_ = database.DB.Create(&newToken)
+		}
 	}
 
 	addLog("Configuring agent telemetry endpoint: %s", serverURL)

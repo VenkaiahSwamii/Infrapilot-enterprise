@@ -2,8 +2,12 @@ package app
 
 import (
 	"context"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"infrapilot/agent/internal/cache"
@@ -22,11 +26,18 @@ import (
 
 
 func RunAgent() {
+	cfgPath := config.DefaultConfigPath()
+	logDir := filepath.Join(filepath.Dir(cfgPath), "logs")
+	_ = os.MkdirAll(logDir, 0755)
+	if logFile, err := os.OpenFile(filepath.Join(logDir, "agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+		log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+	}
+
 	log.Println("Starting InfraPilot Monitoring Agent...")
 
-	cache.Init("offline_queue.json")
+	cache.Init(filepath.Join(filepath.Dir(cfgPath), "offline_queue.json"))
 
-	store := config.NewConfigStore(config.DefaultConfigPath())
+	store := config.NewConfigStore(cfgPath)
 
 	var cfg *config.EnterpriseConfig
 
@@ -45,12 +56,32 @@ func RunAgent() {
 		}
 	}
 
-	// Load config.toml as single source of truth for network endpoints & enrollment token
+	// Load configuration, honoring --config flag or existing AppConfig if already initialized
 	var tomlCfg *config.Config
-	if t, err := config.LoadConfig("config.toml"); err == nil && t != nil {
-		tomlCfg = t
-	} else if y, err := config.LoadConfig("config.yaml"); err == nil && y != nil {
-		tomlCfg = y
+	if config.AppConfig != nil && config.AppConfig.BackendURL != "" {
+		tomlCfg = config.AppConfig
+	} else {
+		for i, arg := range os.Args {
+			if (arg == "--config" || arg == "-config") && i+1 < len(os.Args) {
+				if t, err := config.LoadConfig(os.Args[i+1]); err == nil && t != nil {
+					tomlCfg = t
+					break
+				}
+			} else if strings.HasPrefix(arg, "--config=") {
+				cfgFile := strings.TrimPrefix(arg, "--config=")
+				if t, err := config.LoadConfig(cfgFile); err == nil && t != nil {
+					tomlCfg = t
+					break
+				}
+			}
+		}
+		if tomlCfg == nil {
+			if t, err := config.LoadConfig("config.toml"); err == nil && t != nil {
+				tomlCfg = t
+			} else if y, err := config.LoadConfig("config.yaml"); err == nil && y != nil {
+				tomlCfg = y
+			}
+		}
 	}
 
 	// If config.json already exists and config.toml specifies a backend_url, ensure they stay in sync
@@ -60,10 +91,8 @@ func RunAgent() {
 		_ = store.Save(cfg)
 	}
 
-	if cfg == nil || cfg.MachineID == "" || cfg.APIKey == "" {
+	for cfg == nil || cfg.MachineID == "" || cfg.APIKey == "" {
 		// config.json does not exist or lacks credentials, run agent self-registration/enrollment
-		log.Println("Agent credentials missing or incomplete. Enrolling machine with backend...")
-
 		backendURL := "http://localhost:8080"
 		if tomlCfg != nil && tomlCfg.BackendURL != "" {
 			backendURL = tomlCfg.BackendURL
@@ -76,9 +105,13 @@ func RunAgent() {
 			enrollmentToken = tomlCfg.EnrollmentToken
 		}
 
+		log.Printf("Agent credentials missing. Enrolling machine with backend at %s...", backendURL)
+
 		metrics, err := collector.GetMetrics()
 		if err != nil {
-			log.Fatalf("Failed to fetch initial system metrics for enrollment: %v", err)
+			log.Printf("Failed to fetch initial system metrics for enrollment: %v. Retrying in 5s...", err)
+			time.Sleep(5 * time.Second)
+			continue
 		}
 
 		// Sprint 6.5 Enrollment Request Payload
@@ -100,7 +133,9 @@ func RunAgent() {
 		// Perform enrollment call using the isolated register package
 		result, regErr := register.RegisterAgent(backendURL, regPayload, enrollmentToken)
 		if regErr != nil {
-			log.Fatalf("Enrollment failed: %v", regErr)
+			log.Printf("Enrollment attempt failed: %v. Retrying in 5 seconds...", regErr)
+			time.Sleep(5 * time.Second)
+			continue
 		}
 
 		cfg = &config.EnterpriseConfig{
@@ -114,11 +149,12 @@ func RunAgent() {
 		}
 
 		if err := store.Save(cfg); err != nil {
-			log.Fatalf("Failed to save config.json: %v", err)
+			log.Printf("Warning: Failed to save config.json: %v", err)
 		}
 
 		log.Println("Enrollment successful. Machine ID:", cfg.MachineID)
 		log.Println("Configuration saved in config.json")
+		break
 	}
 
 	// Initialize AppConfig in config package, preserving config.toml as source of truth
