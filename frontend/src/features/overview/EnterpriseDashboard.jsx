@@ -558,15 +558,19 @@ export default function EnterpriseDashboard() {
         fsUsedBytes = Number(primaryFs.used || primaryFs.used_bytes || 0);
       }
 
-      const totalDiskGb = fsTotalBytes > 0
-        ? parseGB(fsTotalBytes)
-        : (m.total_disk_gb ? Number(m.total_disk_gb) : (live.disk_total ? parseGB(live.disk_total) : (m.disk_total ? parseGB(m.disk_total) : 0)));
-
+      const rawDiskTotal = live.disk_total ?? m.disk_total ?? (m.total_disk_gb ? m.total_disk_gb * 1024 * 1024 * 1024 : 0);
       const rawDiskUsed = live.disk_used ?? m.disk_used;
-      const usedDiskGb = (isOnline && fsUsedBytes > 0)
-        ? parseGB(fsUsedBytes)
-        : (isOnline && rawDiskUsed)
+
+      const totalDiskGb = (isOnline && rawDiskTotal > 0)
+        ? parseGB(rawDiskTotal)
+        : (fsTotalBytes > 0)
+        ? parseGB(fsTotalBytes)
+        : (m.total_disk_gb ? Number(m.total_disk_gb) : 0);
+
+      const usedDiskGb = (isOnline && rawDiskUsed > 0)
         ? parseGB(rawDiskUsed)
+        : (isOnline && fsUsedBytes > 0)
+        ? parseGB(fsUsedBytes)
         : ((isOnline && disk > 0 && totalDiskGb > 0) ? (disk / 100) * totalDiskGb : 0);
       const diskValStr = isBlocked ? 'Stopped' : (totalDiskGb > 0 ? `${formatGB(usedDiskGb)} / ${formatGB(totalDiskGb)} GB` : (isOnline ? `${formatGB(usedDiskGb)} GB` : '-'));
 

@@ -218,9 +218,18 @@ func (a *AgentController) FindAllowlistedFiles() ([]string, error) {
 		cacheDirs = []string{tempDir}
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
 			cacheDirs = append(cacheDirs, filepath.Join(localAppData, "Temp"))
+			cacheDirs = append(cacheDirs, filepath.Join(localAppData, "CrashDumps"))
+			cacheDirs = append(cacheDirs, filepath.Join(localAppData, "Microsoft", "Windows", "INetCache"))
+			cacheDirs = append(cacheDirs, filepath.Join(localAppData, "go-build"))
+			cacheDirs = append(cacheDirs, filepath.Join(localAppData, "npm-cache"))
+			cacheDirs = append(cacheDirs, filepath.Join(localAppData, "pip", "cache"))
 		}
 		if winDir := os.Getenv("SystemRoot"); winDir != "" {
 			cacheDirs = append(cacheDirs, filepath.Join(winDir, "Temp"))
+		}
+	} else {
+		if home := os.Getenv("HOME"); home != "" {
+			cacheDirs = append(cacheDirs, filepath.Join(home, ".cache"))
 		}
 	}
 
@@ -238,6 +247,18 @@ func (a *AgentController) FindAllowlistedFiles() ([]string, error) {
 
 func (a *AgentController) IsFileInUse(path string) bool {
 	if runtime.GOOS == "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			return true
+		}
+		if info.IsDir() {
+			f, err := os.Open(path)
+			if err != nil {
+				return true
+			}
+			f.Close()
+			return false
+		}
 		file, err := os.OpenFile(path, os.O_RDWR, 0)
 		if err != nil {
 			return true // In use or locked
@@ -254,13 +275,25 @@ func (a *AgentController) DeleteFile(path string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	size := info.Size()
+	var size int64
+	if info.IsDir() {
+		_ = filepath.Walk(path, func(_ string, fi os.FileInfo, err error) error {
+			if err == nil && fi != nil && !fi.IsDir() {
+				size += fi.Size()
+			}
+			return nil
+		})
+	} else {
+		size = info.Size()
+	}
+
 	err = os.RemoveAll(path)
 	if err != nil {
 		return 0, err
 	}
 	return size, nil
 }
+
 
 // --- LatencyController Implementation ---
 

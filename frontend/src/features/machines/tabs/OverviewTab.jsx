@@ -127,10 +127,10 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
     ? parseGB(fsTotalBytes)
     : (machine?.total_disk_gb ? Number(machine.total_disk_gb) : 0));
 
-  const usedDiskGb = fsUsedBytes > 0
-    ? parseGB(fsUsedBytes)
-    : rawDiskUsed
+  const usedDiskGb = rawDiskUsed > 0
     ? parseGB(rawDiskUsed)
+    : fsUsedBytes > 0
+    ? parseGB(fsUsedBytes)
     : (totalDiskGb > 0 ? (diskVal / 100) * totalDiskGb : 0);
 
   const actualDiskPct = totalDiskGb > 0 ? (usedDiskGb / totalDiskGb) * 100 : (diskVal || 0);

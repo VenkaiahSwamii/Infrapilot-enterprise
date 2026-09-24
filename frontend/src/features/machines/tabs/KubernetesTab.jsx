@@ -959,8 +959,8 @@ export default function KubernetesTab({ machine }) {
                   const isRunning = status.toLowerCase() === 'running';
                   const isCrash = status.toLowerCase().includes('crashloop');
                   const isPending = status.toLowerCase().includes('pending');
-                  const node = pod.node || pod.node_name || 'k8s-worker-01';
-                  const ip = pod.ip || pod.pod_ip || '10.244.1.42';
+                  const node = pod.node || pod.node_name || '--';
+                  const ip = pod.ip || pod.pod_ip || '--';
                   const restarts = pod.restarts ?? pod.restart_count ?? 0;
 
                   return (
@@ -1554,11 +1554,11 @@ export default function KubernetesTab({ machine }) {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
                       <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Pod IP</span>
-                      <strong style={{ fontSize: '12px', color: '#38bdf8', fontFamily: 'monospace' }}>{inspectPod.ip || inspectPod.pod_ip || '10.244.1.42'}</strong>
+                      <strong style={{ fontSize: '12px', color: '#38bdf8', fontFamily: 'monospace' }}>{inspectPod.ip || inspectPod.pod_ip || '--'}</strong>
                     </div>
                     <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
                       <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Assigned Node</span>
-                      <strong style={{ fontSize: '12px', color: '#f1f5f9', fontFamily: 'monospace' }}>{inspectPod.node || inspectPod.node_name || 'k8s-worker-01'}</strong>
+                      <strong style={{ fontSize: '12px', color: '#f1f5f9', fontFamily: 'monospace' }}>{inspectPod.node || inspectPod.node_name || '--'}</strong>
                     </div>
                   </div>
 

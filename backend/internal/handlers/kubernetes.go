@@ -101,6 +101,12 @@ func GetKubernetesOverview(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"kubernetes_installed": false,
 			"cluster_status":       "Kubernetes Not Installed",
+			"total_nodes":          0,
+			"ready_nodes":          0,
+			"total_pods":           0,
+			"running_pods":         0,
+			"nodes":                []interface{}{},
+			"pods":                 []interface{}{},
 		})
 		return
 	}
@@ -110,25 +116,25 @@ func GetKubernetesOverview(c *gin.Context) {
 		_ = database.DB.Where("machine_id = ?", machineUUID).Order("sampled_at desc").First(&record).Error
 	}
 
-	nodes := getDefaultKubernetesNodes()
-	pods := getDefaultKubernetesPods()
+	var nodes []KubernetesNode
+	var pods []models.KubernetesPod
 
 	if record.NodesJSON != "" {
-		var parsedNodes []KubernetesNode
-		if err := json.Unmarshal([]byte(record.NodesJSON), &parsedNodes); err == nil && len(parsedNodes) > 0 {
-			nodes = parsedNodes
-		}
+		_ = json.Unmarshal([]byte(record.NodesJSON), &nodes)
+	}
+	if record.PodsJSON != "" {
+		_ = json.Unmarshal([]byte(record.PodsJSON), &pods)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"machine_id":         machineUUID,
-		"cluster_name":       "infrapilot-k8s-prod",
-		"kubernetes_version": "v1.28.2",
+		"cluster_name":       "k8s-cluster",
+		"kubernetes_version": "v1.28",
 		"cluster_status":     "Healthy",
 		"total_nodes":        len(nodes),
 		"ready_nodes":        len(nodes),
 		"total_pods":         len(pods),
-		"running_pods":       len(pods) - 1,
+		"running_pods":       len(pods),
 		"sampled_at":         time.Now().Format(time.RFC3339),
 		"nodes":              nodes,
 		"pods":               pods,
@@ -137,19 +143,47 @@ func GetKubernetesOverview(c *gin.Context) {
 
 // Legacy API endpoints
 func GetKubernetesNodes(c *gin.Context) {
-	c.JSON(http.StatusOK, getDefaultKubernetesNodes())
+	if database.DB != nil {
+		var nodes []models.KubernetesNode
+		if err := database.DB.Find(&nodes).Error; err == nil {
+			c.JSON(http.StatusOK, nodes)
+			return
+		}
+	}
+	c.JSON(http.StatusOK, []models.KubernetesNode{})
 }
 
 func GetKubernetesPods(c *gin.Context) {
-	c.JSON(http.StatusOK, getDefaultKubernetesPods())
+	if database.DB != nil {
+		var pods []models.KubernetesPod
+		if err := database.DB.Find(&pods).Error; err == nil {
+			c.JSON(http.StatusOK, pods)
+			return
+		}
+	}
+	c.JSON(http.StatusOK, []models.KubernetesPod{})
 }
 
 func GetKubernetesDeployments(c *gin.Context) {
-	c.JSON(http.StatusOK, getDefaultKubernetesDeployments())
+	if database.DB != nil {
+		var deps []models.KubernetesDeployment
+		if err := database.DB.Find(&deps).Error; err == nil {
+			c.JSON(http.StatusOK, deps)
+			return
+		}
+	}
+	c.JSON(http.StatusOK, []models.KubernetesDeployment{})
 }
 
 func GetKubernetesServices(c *gin.Context) {
-	c.JSON(http.StatusOK, getDefaultKubernetesServices())
+	if database.DB != nil {
+		var svcs []models.KubernetesService
+		if err := database.DB.Find(&svcs).Error; err == nil {
+			c.JSON(http.StatusOK, svcs)
+			return
+		}
+	}
+	c.JSON(http.StatusOK, []models.KubernetesService{})
 }
 
 func GetKubernetesPodLogs(c *gin.Context) {
@@ -244,196 +278,174 @@ spec:
 func GetKubernetesClusters(c *gin.Context) {
 	db := database.DB
 	if db == nil {
-		c.JSON(http.StatusOK, getDefaultClusters())
+		c.JSON(http.StatusOK, []models.KubernetesCluster{})
 		return
 	}
 
 	var clusters []models.KubernetesCluster
-	if err := db.Find(&clusters).Error; err != nil || len(clusters) == 0 {
-		c.JSON(http.StatusOK, getDefaultClusters())
-		return
-	}
-
+	_ = db.Find(&clusters).Error
 	c.JSON(http.StatusOK, clusters)
 }
 
 // GET /api/v1/kubernetes/nodes/:clusterId
 func GetKubernetesNodesForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesNodesFull())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesNode{})
 		return
 	}
 
 	var nodes []models.KubernetesNode
-	if err := db.Where("cluster_id = ?", clusterUUID).Find(&nodes).Error; err != nil || len(nodes) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesNodesFull())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Find(&nodes).Error
+	} else {
+		_ = db.Find(&nodes).Error
 	}
-
 	c.JSON(http.StatusOK, nodes)
 }
 
 // GET /api/v1/kubernetes/pods/:clusterId
 func GetKubernetesPodsForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesPodsFull())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesPod{})
 		return
 	}
 
 	var pods []models.KubernetesPod
-	if err := db.Where("cluster_id = ?", clusterUUID).Find(&pods).Error; err != nil || len(pods) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesPodsFull())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Find(&pods).Error
+	} else {
+		_ = db.Find(&pods).Error
 	}
-
 	c.JSON(http.StatusOK, pods)
 }
 
 // GET /api/v1/kubernetes/deployments/:clusterId
 func GetKubernetesDeploymentsForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesDeploymentsFull())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesDeployment{})
 		return
 	}
 
 	var deployments []models.KubernetesDeployment
-	if err := db.Where("cluster_id = ?", clusterUUID).Find(&deployments).Error; err != nil || len(deployments) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesDeploymentsFull())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Find(&deployments).Error
+	} else {
+		_ = db.Find(&deployments).Error
 	}
-
 	c.JSON(http.StatusOK, deployments)
 }
 
 // GET /api/v1/kubernetes/statefulsets/:clusterId
 func GetKubernetesStatefulSetsForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesStatefulSets())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesStatefulSet{})
 		return
 	}
 
 	var statefulsets []models.KubernetesStatefulSet
-	if err := db.Where("cluster_id = ?", clusterUUID).Find(&statefulsets).Error; err != nil || len(statefulsets) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesStatefulSets())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Find(&statefulsets).Error
+	} else {
+		_ = db.Find(&statefulsets).Error
 	}
-
 	c.JSON(http.StatusOK, statefulsets)
 }
 
 // GET /api/v1/kubernetes/daemonsets/:clusterId
 func GetKubernetesDaemonSetsForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesDaemonSets())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesDaemonSet{})
 		return
 	}
 
 	var daemonsets []models.KubernetesDaemonSet
-	if err := db.Where("cluster_id = ?", clusterUUID).Find(&daemonsets).Error; err != nil || len(daemonsets) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesDaemonSets())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Find(&daemonsets).Error
+	} else {
+		_ = db.Find(&daemonsets).Error
 	}
-
 	c.JSON(http.StatusOK, daemonsets)
 }
 
 // GET /api/v1/kubernetes/services/:clusterId
 func GetKubernetesServicesForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesServicesFull())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesService{})
 		return
 	}
 
 	var services []models.KubernetesService
-	if err := db.Where("cluster_id = ?", clusterUUID).Find(&services).Error; err != nil || len(services) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesServicesFull())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Find(&services).Error
+	} else {
+		_ = db.Find(&services).Error
 	}
-
 	c.JSON(http.StatusOK, services)
 }
 
 // GET /api/v1/kubernetes/namespaces/:clusterId
 func GetKubernetesNamespacesForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesNamespaces())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesNamespace{})
 		return
 	}
 
 	var namespaces []models.KubernetesNamespace
-	if err := db.Where("cluster_id = ?", clusterUUID).Find(&namespaces).Error; err != nil || len(namespaces) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesNamespaces())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Find(&namespaces).Error
+	} else {
+		_ = db.Find(&namespaces).Error
 	}
-
 	c.JSON(http.StatusOK, namespaces)
 }
 
 // GET /api/v1/kubernetes/storage/:clusterId
 func GetKubernetesStorageForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesStorage())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesStorage{})
 		return
 	}
 
 	var storage []models.KubernetesStorage
-	if err := db.Where("cluster_id = ?", clusterUUID).Find(&storage).Error; err != nil || len(storage) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesStorage())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Find(&storage).Error
+	} else {
+		_ = db.Find(&storage).Error
 	}
-
 	c.JSON(http.StatusOK, storage)
 }
 
 // GET /api/v1/kubernetes/events/:clusterId
 func GetKubernetesEventsForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
-	clusterUUID, err := uuid.Parse(clusterId)
-
 	db := database.DB
-	if db == nil || err != nil {
-		c.JSON(http.StatusOK, getDefaultKubernetesEvents())
+	if db == nil {
+		c.JSON(http.StatusOK, []models.KubernetesEvent{})
 		return
 	}
 
 	var events []models.KubernetesEvent
-	if err := db.Where("cluster_id = ?", clusterUUID).Order("time desc").Limit(100).Find(&events).Error; err != nil || len(events) == 0 {
-		c.JSON(http.StatusOK, getDefaultKubernetesEvents())
-		return
+	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
+		_ = db.Where("cluster_id = ?", clusterUUID).Order("time desc").Limit(100).Find(&events).Error
+	} else {
+		_ = db.Order("time desc").Limit(100).Find(&events).Error
 	}
-
 	c.JSON(http.StatusOK, events)
 }
 
@@ -514,437 +526,57 @@ func generateMockPodLogs(podName string, namespace string, tail int) []string {
 }
 
 func getDefaultClusters() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":                   "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"server_id":            "0efc7e0f-27f9-4f1f-846a-7a3d2df9cfd6",
-			"name":                 "Production-K8s",
-			"version":              "v1.28.2",
-			"api_version":          "v1",
-			"provider":             "k8s-local",
-			"status":               "Healthy",
-			"cluster_id":           "k8s-cluster-prod",
-			"control_plane_status": "Healthy",
-			"created_at":           time.Now().Add(-120 * 24 * time.Hour),
-			"updated_at":           time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesNodesFull() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":                "2433ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":        "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":              "k8s-control-01",
-			"role":              "control-plane",
-			"cpu":               14.5,
-			"memory":            42.8,
-			"disk":              18.3,
-			"os":                "Ubuntu 22.04 LTS",
-			"kernel":            "5.15.0-88-generic",
-			"container_runtime": "containerd://1.6.22",
-			"status":            "Ready",
-			"created_at":        time.Now().Add(-120 * 24 * time.Hour),
-			"updated_at":        time.Now(),
-		},
-		map[string]interface{}{
-			"id":                "6413ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":        "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":              "k8s-worker-01",
-			"role":              "worker",
-			"cpu":               42.1,
-			"memory":            68.4,
-			"disk":              34.1,
-			"os":                "Ubuntu 22.04 LTS",
-			"kernel":            "5.15.0-88-generic",
-			"container_runtime": "containerd://1.6.22",
-			"status":            "Ready",
-			"created_at":        time.Now().Add(-120 * 24 * time.Hour),
-			"updated_at":        time.Now(),
-		},
-		map[string]interface{}{
-			"id":                "6413ea1d-f8bf-49f3-80b6-14c114389df2",
-			"cluster_id":        "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":              "k8s-worker-02",
-			"role":              "worker",
-			"cpu":               38.6,
-			"memory":            59.1,
-			"disk":              29.5,
-			"os":                "Ubuntu 22.04 LTS",
-			"kernel":            "5.15.0-88-generic",
-			"container_runtime": "containerd://1.6.22",
-			"status":            "Ready",
-			"created_at":        time.Now().Add(-120 * 24 * time.Hour),
-			"updated_at":        time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesPodsFull() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":            "d153ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":    "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":          "api-gateway-6f987c88b9-x2p8q",
-			"namespace":     "prod",
-			"node":          "k8s-worker-01",
-			"status":        "Running",
-			"phase":         "Running",
-			"reason":        "",
-			"cpu":           12.4,
-			"memory":        128.5,
-			"restart_count": 0,
-			"age":           "14d",
-			"created_at":    time.Now().Add(-14 * 24 * time.Hour),
-			"updated_at":    time.Now(),
-		},
-		map[string]interface{}{
-			"id":            "d153ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":    "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":          "auth-service-59756b5467-k9m4l",
-			"namespace":     "prod",
-			"node":          "k8s-worker-02",
-			"status":        "Running",
-			"phase":         "Running",
-			"reason":        "",
-			"cpu":           8.1,
-			"memory":        96.0,
-			"restart_count": 0,
-			"age":           "30d",
-			"created_at":    time.Now().Add(-30 * 24 * time.Hour),
-			"updated_at":    time.Now(),
-		},
-		map[string]interface{}{
-			"id":            "d153ea1d-f8bf-49f3-80b6-14c114389df2",
-			"cluster_id":    "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":          "metrics-collector-7d84b96799-p4s2n",
-			"namespace":     "monitoring",
-			"node":          "k8s-worker-01",
-			"status":        "Running",
-			"phase":         "Running",
-			"reason":        "",
-			"cpu":           18.2,
-			"memory":        210.4,
-			"restart_count": 1,
-			"age":           "60d",
-			"created_at":    time.Now().Add(-60 * 24 * time.Hour),
-			"updated_at":    time.Now(),
-		},
-		map[string]interface{}{
-			"id":            "d153ea1d-f8bf-49f3-80b6-14c114389df3",
-			"cluster_id":    "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":          "payment-processor-85d8f95c44-v7k8z",
-			"namespace":     "prod",
-			"node":          "k8s-worker-02",
-			"status":        "CrashLoopBackOff",
-			"phase":         "Failed",
-			"reason":        "OOMKilled",
-			"cpu":           0.0,
-			"memory":        512.0,
-			"restart_count": 14,
-			"age":           "2d",
-			"created_at":    time.Now().Add(-2 * 24 * time.Hour),
-			"updated_at":    time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesDeploymentsFull() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":                 "e903ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":         "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":               "api-gateway",
-			"namespace":          "prod",
-			"desired_replicas":   3,
-			"available_replicas": 3,
-			"updated_replicas":   3,
-			"ready_replicas":     3,
-			"created_at":         time.Now().Add(-14 * 24 * time.Hour),
-			"updated_at":         time.Now(),
-		},
-		map[string]interface{}{
-			"id":                 "e903ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":         "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":               "auth-service",
-			"namespace":          "prod",
-			"desired_replicas":   2,
-			"available_replicas": 2,
-			"updated_replicas":   2,
-			"ready_replicas":     2,
-			"created_at":         time.Now().Add(-30 * 24 * time.Hour),
-			"updated_at":         time.Now(),
-		},
-		map[string]interface{}{
-			"id":                 "e903ea1d-f8bf-49f3-80b6-14c114389df2",
-			"cluster_id":         "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":               "metrics-collector",
-			"namespace":          "monitoring",
-			"desired_replicas":   2,
-			"available_replicas": 2,
-			"updated_replicas":   2,
-			"ready_replicas":     2,
-			"created_at":         time.Now().Add(-60 * 24 * time.Hour),
-			"updated_at":         time.Now(),
-		},
-		map[string]interface{}{
-			"id":                 "e903ea1d-f8bf-49f3-80b6-14c114389df3",
-			"cluster_id":         "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":               "web-dashboard",
-			"namespace":          "frontend",
-			"desired_replicas":   4,
-			"available_replicas": 4,
-			"updated_replicas":   4,
-			"ready_replicas":     4,
-			"created_at":         time.Now().Add(-10 * 24 * time.Hour),
-			"updated_at":         time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesStatefulSets() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":               "f103ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":       "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":             "postgres-db",
-			"namespace":        "database",
-			"desired_replicas": 3,
-			"ready_replicas":   3,
-			"current_revision": "postgres-db-577db744b",
-			"update_revision":  "postgres-db-577db744b",
-			"created_at":       time.Now().Add(-45 * 24 * time.Hour),
-			"updated_at":       time.Now(),
-		},
-		map[string]interface{}{
-			"id":               "f103ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":       "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":             "redis-cache",
-			"namespace":        "cache",
-			"desired_replicas": 2,
-			"ready_replicas":   2,
-			"current_revision": "redis-cache-7d498b8c",
-			"update_revision":  "redis-cache-7d498b8c",
-			"created_at":       time.Now().Add(-45 * 24 * time.Hour),
-			"updated_at":       time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesDaemonSets() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":               "a203ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":       "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":             "kube-proxy",
-			"namespace":        "kube-system",
-			"desired_replicas": 3,
-			"ready_replicas":   3,
-			"available":        3,
-			"misscheduled":     0,
-			"created_at":       time.Now().Add(-120 * 24 * time.Hour),
-			"updated_at":       time.Now(),
-		},
-		map[string]interface{}{
-			"id":               "a203ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":       "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":             "fluentd-logging",
-			"namespace":        "logging",
-			"desired_replicas": 3,
-			"ready_replicas":   3,
-			"available":        3,
-			"misscheduled":     0,
-			"created_at":       time.Now().Add(-20 * 24 * time.Hour),
-			"updated_at":       time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesServicesFull() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":          "b303ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":  "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":        "kubernetes",
-			"namespace":   "default",
-			"type":        "ClusterIP",
-			"cluster_ip":  "10.96.0.1",
-			"external_ip": "<none>",
-			"ports":       "443/TCP",
-			"endpoints":   "192.168.1.10:6443",
-			"status":      "Active",
-			"created_at":  time.Now().Add(-120 * 24 * time.Hour),
-			"updated_at":  time.Now(),
-		},
-		map[string]interface{}{
-			"id":          "b303ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":  "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":        "api-gateway-svc",
-			"namespace":   "prod",
-			"type":        "LoadBalancer",
-			"cluster_ip":  "10.96.14.82",
-			"external_ip": "198.51.100.45",
-			"ports":       "80:30080/TCP, 443:30443/TCP",
-			"endpoints":   "10.244.1.4:8080,10.244.2.3:8080",
-			"status":      "Active",
-			"created_at":  time.Now().Add(-14 * 24 * time.Hour),
-			"updated_at":  time.Now(),
-		},
-		map[string]interface{}{
-			"id":          "b303ea1d-f8bf-49f3-80b6-14c114389df2",
-			"cluster_id":  "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":        "auth-service-svc",
-			"namespace":   "prod",
-			"type":        "ClusterIP",
-			"cluster_ip":  "10.96.88.102",
-			"external_ip": "<none>",
-			"ports":       "8080/TCP",
-			"endpoints":   "10.244.2.5:8080",
-			"status":      "Active",
-			"created_at":  time.Now().Add(-30 * 24 * time.Hour),
-			"updated_at":  time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesNamespaces() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":           "c403ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":   "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":         "default",
-			"status":       "Active",
-			"pod_count":    2,
-			"cpu_usage":    0.8,
-			"memory_usage": 128.0,
-			"created_at":   time.Now().Add(-120 * 24 * time.Hour),
-			"updated_at":   time.Now(),
-		},
-		map[string]interface{}{
-			"id":           "c403ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":   "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":         "kube-system",
-			"status":       "Active",
-			"pod_count":    8,
-			"cpu_usage":    4.2,
-			"memory_usage": 512.0,
-			"created_at":   time.Now().Add(-120 * 24 * time.Hour),
-			"updated_at":   time.Now(),
-		},
-		map[string]interface{}{
-			"id":           "c403ea1d-f8bf-49f3-80b6-14c114389df2",
-			"cluster_id":   "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"name":         "prod",
-			"status":       "Active",
-			"pod_count":    15,
-			"cpu_usage":    24.5,
-			"memory_usage": 2048.0,
-			"created_at":   time.Now().Add(-45 * 24 * time.Hour),
-			"updated_at":   time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesStorage() []interface{} {
-	return []interface{}{
-		map[string]interface{}{
-			"id":             "9903ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":     "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"type":           "PV",
-			"name":           "pv-database-storage",
-			"namespace":      "",
-			"capacity":       "100Gi",
-			"storage_class":  "standard",
-			"status":         "Bound",
-			"reclaim_policy": "Retain",
-			"requested":      "",
-			"used":           "",
-			"created_at":     time.Now().Add(-45 * 24 * time.Hour),
-			"updated_at":     time.Now(),
-		},
-		map[string]interface{}{
-			"id":             "9903ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":     "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"type":           "PVC",
-			"name":           "pvc-postgres-data",
-			"namespace":      "database",
-			"capacity":       "",
-			"storage_class":  "standard",
-			"status":         "Bound",
-			"reclaim_policy": "",
-			"requested":      "50Gi",
-			"used":           "32Gi (64%)",
-			"created_at":     time.Now().Add(-45 * 24 * time.Hour),
-			"updated_at":     time.Now(),
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesEvents() []interface{} {
-	now := time.Now()
-	return []interface{}{
-		map[string]interface{}{
-			"id":              "8803ea1d-f8bf-49f3-80b6-14c114389df0",
-			"cluster_id":      "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"namespace":       "prod",
-			"time":            now.Add(-2 * time.Minute),
-			"type":            "Normal",
-			"reason":          "ScalingReplicaSet",
-			"message":         "Scaled replica set api-gateway-6f987c88b9 to 3",
-			"source":          "deployment-controller",
-			"involved_object": "Deployment/api-gateway",
-			"created_at":      now.Add(-2 * time.Minute),
-			"updated_at":      now,
-		},
-		map[string]interface{}{
-			"id":              "8803ea1d-f8bf-49f3-80b6-14c114389df1",
-			"cluster_id":      "0f81d11b-7a3d-4c3e-8fbf-b89a32e6db2f",
-			"namespace":       "prod",
-			"time":            now.Add(-5 * time.Minute),
-			"type":            "Warning",
-			"reason":          "FailedScheduling",
-			"message":         "0/3 nodes are available: 3 Insufficient memory.",
-			"source":          "default-scheduler",
-			"involved_object": "Pod/payment-processor-85d8f95c44-v7k8z",
-			"created_at":      now.Add(-5 * time.Minute),
-			"updated_at":      now,
-		},
-	}
+	return []interface{}{}
 }
 
 func getDefaultKubernetesNodes() []KubernetesNode {
-	return []KubernetesNode{
-		{Name: "k8s-control-01", Status: "Ready", Role: "control-plane", Version: "v1.28.2", InternalIP: "192.168.1.10", CPUUsagePercent: 14.5, MemoryUsageBytes: 4294967296, Ready: true},
-		{Name: "k8s-worker-01", Status: "Ready", Role: "worker", Version: "v1.28.2", InternalIP: "192.168.1.11", CPUUsagePercent: 42.1, MemoryUsageBytes: 8589934592, Ready: true},
-		{Name: "k8s-worker-02", Status: "Ready", Role: "worker", Version: "v1.28.2", InternalIP: "192.168.1.12", CPUUsagePercent: 38.6, MemoryUsageBytes: 7516192768, Ready: true},
-	}
+	return []KubernetesNode{}
 }
 
 func getDefaultKubernetesPods() []map[string]interface{} {
-	return []map[string]interface{}{
-		{"name": "api-gateway-6f987c88b9-x2p8q", "namespace": "prod", "node": "k8s-worker-01", "status": "Running", "phase": "Running", "cpu_usage": 12.4, "memory_usage": 128.5, "restarts": 0},
-		{"name": "auth-service-59756b5467-k9m4l", "namespace": "prod", "node": "k8s-worker-02", "status": "Running", "phase": "Running", "cpu_usage": 8.1, "memory_usage": 96.0, "restarts": 0},
-		{"name": "metrics-collector-7d84b96799-p4s2n", "namespace": "monitoring", "node": "k8s-worker-01", "status": "Running", "phase": "Running", "cpu_usage": 18.2, "memory_usage": 210.4, "restarts": 1},
-		{"name": "coredns-5dd5756b68-b8t62", "namespace": "kube-system", "node": "k8s-control-01", "status": "Running", "phase": "Running", "cpu_usage": 2.5, "memory_usage": 34.0, "restarts": 0},
-		{"name": "payment-processor-85d8f95c44-v7k8z", "namespace": "prod", "node": "k8s-worker-02", "status": "CrashLoopBackOff", "phase": "Failed", "reason": "OOMKilled", "cpu_usage": 0.0, "memory_usage": 512.0, "restarts": 14},
-	}
+	return []map[string]interface{}{}
 }
 
 func getDefaultKubernetesDeployments() []map[string]interface{} {
-	return []map[string]interface{}{
-		{"name": "api-gateway", "namespace": "prod", "desired": 3, "available": 3, "image": "infrapilot/gateway:v2.1", "strategy": "RollingUpdate", "created_at": time.Now().Add(-14 * 24 * time.Hour).Format(time.RFC3339)},
-		{"name": "auth-service", "namespace": "prod", "desired": 2, "available": 2, "image": "infrapilot/auth:v1.8", "strategy": "RollingUpdate", "created_at": time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339)},
-		{"name": "metrics-collector", "namespace": "monitoring", "desired": 2, "available": 2, "image": "infrapilot/collector:v3.0", "strategy": "RollingUpdate", "created_at": time.Now().Add(-60 * 24 * time.Hour).Format(time.RFC3339)},
-		{"name": "web-dashboard", "namespace": "frontend", "desired": 4, "available": 4, "image": "infrapilot/dashboard:v2.4", "strategy": "RollingUpdate", "created_at": time.Now().Add(-10 * 24 * time.Hour).Format(time.RFC3339)},
-	}
+	return []map[string]interface{}{}
 }
 
 func getDefaultKubernetesServices() []map[string]interface{} {
-	return []map[string]interface{}{
-		{"name": "kubernetes", "namespace": "default", "type": "ClusterIP", "cluster_ip": "10.96.0.1", "external_ip": "<none>", "ports": "443/TCP"},
-		{"name": "api-gateway-svc", "namespace": "prod", "type": "LoadBalancer", "cluster_ip": "10.96.14.82", "external_ip": "198.51.100.45", "ports": "80:30080/TCP, 443:30443/TCP"},
-		{"name": "auth-service-svc", "namespace": "prod", "type": "ClusterIP", "cluster_ip": "10.96.88.102", "external_ip": "<none>", "ports": "8080/TCP"},
-		{"name": "kube-dns", "namespace": "kube-system", "type": "ClusterIP", "cluster_ip": "10.96.0.10", "external_ip": "<none>", "ports": "53/UDP, 53/TCP"},
-	}
+	return []map[string]interface{}{}
 }

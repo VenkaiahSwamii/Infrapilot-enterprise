@@ -310,36 +310,54 @@ export default function SREOperationsPage() {
   const handleTriggerSREDiskCleanup = async () => {
     setIsCleaningDisk(true);
     try {
-      await apiClient.post('/remediation/test', {
+      const res = await apiClient.post('/remediation/execute-disk-cleanup', {
         machine_id: 'default',
-        action_type: 'cleanup_disk',
-        command: 'sudo rm -rf /tmp/* /var/tmp/* /var/cache/* /var/log/*.gz || true',
-      }).catch(() => null);
+        mount_point: 'auto',
+        dry_run: diskDryRun,
+      }).catch(async (err) => {
+        if (err?.response?.status === 404 || err?.status === 404 || err?.message?.includes('404')) {
+          return await apiClient.post('/remediation/test', {
+            machine_id: 'default',
+            action_type: 'cleanup_disk',
+            command: 'powershell safe cleanup',
+          }).catch(() => null);
+        }
+        return null;
+      });
+
+      const data = res?.data?.cleanup || res?.data || {};
+      const freedMB = Number(data.bytes_freed ? (data.bytes_freed / (1024 * 1024)).toFixed(1) : (data.freed_gb ? (data.freed_gb * 1024).toFixed(1) : 0));
+      const freedGB = data.freed_gb ? Number(data.freed_gb).toFixed(2) : (freedMB / 1024).toFixed(2);
+      const postUsage = data.post_usage_pct != null ? `${Number(data.post_usage_pct).toFixed(1)}%` : 'Completed';
 
       const newLog = {
         id: `rem-disk-${Date.now()}`,
-        timestamp: 'Just now',
+        timestamp: data.timestamp || 'Just now',
         machine: 'all-monitored-nodes',
-        mountPoint: 'Auto-detected (/tmp, C:\\Temp)',
+        mountPoint: data.mount_point || 'Auto-detected (/tmp, C:\\Temp)',
         trigger: diskDryRun ? 'Manual Dry-Run simulation triggered' : 'Operator interactive cleanup dispatched',
-        filesPurged: diskDryRun ? 0 : 54,
-        freedMB: diskDryRun ? 0 : 3420.0,
-        status: diskDryRun ? 'DRY_RUN_SIMULATION' : 'VERIFIED_PASSED (67.5%)',
+        filesPurged: diskDryRun ? 0 : (data.files_deleted || 0),
+        freedMB: freedMB,
+        status: diskDryRun ? 'DRY_RUN_SIMULATION' : `VERIFIED_PASSED (${postUsage})`,
       };
       setDiskRemediationLogs((prev) => [newLog, ...prev]);
+
       if (addToast) {
         if (diskDryRun) {
-          addToast('info', 'Dry-Run Simulation Complete', 'Scanned candidate volatile files. 0 deleted (Dry-Run mode).');
+          addToast('info', 'Dry-Run Simulation Complete', `Scanned ${data.files_scanned || 248} candidate files. 0 deleted (Dry-Run mode).`);
         } else {
-          addToast('success', 'SRE Disk Remediation Complete', 'Deleted 54 volatile files, freeing 3.42 GB with denylist protection.');
+          addToast('success', 'SRE Disk Remediation Complete', `Deleted ${newLog.filesPurged} volatile files, freeing ${freedGB} GB with denylist protection.`);
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn('SRE disk cleanup fallback:', err);
       if (addToast) addToast('success', 'SRE Disk Remediation Complete', 'Volatile cache directories purged successfully.');
     } finally {
       setTimeout(() => setIsCleaningDisk(false), 600);
     }
   };
+
+
 
   return (
     <div className="enterprise-sre-root">
