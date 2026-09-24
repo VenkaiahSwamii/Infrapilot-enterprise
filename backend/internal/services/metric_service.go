@@ -29,6 +29,7 @@ func NewMetricService(metricRepo *repository.MetricRepository, machineRepo *repo
 }
 
 type SaveMetricInput struct {
+	MachineID           uuid.UUID
 	APIKey              string
 	CPUUsage            float64
 	MemoryPercent       float64
@@ -155,8 +156,16 @@ func isSameOSFamily(os1, os2 string) bool {
 func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *models.Machine, error) {
 	var machine *models.Machine
 
+	// 0. Match directly by explicit MachineID
+	if input.MachineID != uuid.Nil && database.DB != nil {
+		var mByID models.Machine
+		if err := database.DB.Where("id = ?", input.MachineID).First(&mByID).Error; err == nil {
+			machine = &mByID
+		}
+	}
+
 	// 1. Match by Hostname (if OS family is compatible)
-	if input.Hostname != "" && database.DB != nil {
+	if machine == nil && input.Hostname != "" && database.DB != nil {
 		var machines []models.Machine
 		if err := database.DB.Where("LOWER(hostname) = LOWER(?)", input.Hostname).Find(&machines).Error; err == nil {
 			for i := range machines {
@@ -248,10 +257,11 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 		"hostname":   metric.Hostname,
 		"ip_address": metric.IPAddress,
 		"os":         metric.OS,
-		"status":     "ONLINE",
-		"online":     true,
-		"last_seen":  metric.CreatedAt,
-		"updated_at": time.Now(),
+		"status":      "ONLINE",
+		"online":      true,
+		"retry_count": 0,
+		"last_seen":   metric.CreatedAt,
+		"updated_at":  time.Now().UTC(),
 	}
 	if input.Kernel != "" {
 		updates["kernel"] = input.Kernel
@@ -323,6 +333,7 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 	machine.OS = metric.OS
 	machine.Status = "ONLINE"
 	machine.Online = true
+	machine.RetryCount = 0
 	machine.LastSeen = metric.CreatedAt
 
 	if isLinuxMachine(machine, input) {

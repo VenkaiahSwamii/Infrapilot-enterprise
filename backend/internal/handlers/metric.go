@@ -278,6 +278,7 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 	}
 
 	input := services.SaveMetricInput{
+		MachineID:           machine.ID,
 		APIKey:              apiKey,
 		CPUUsage:            req.CPUUsage,
 		MemoryPercent:       memPct,
@@ -387,6 +388,9 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 	// Publish MetricReceivedEvent to the Event Bus
 	metricEvent := events.MetricReceivedEvent{
 		MachineID: machine.ID.String(),
+		Hostname:  persistedMachine.Hostname,
+		IPAddress: persistedMachine.IPAddress,
+		OS:        persistedMachine.OS,
 		CPU:       input.CPUUsage,
 		Memory:    input.MemoryPercent,
 		Disk:      input.DiskPercent,

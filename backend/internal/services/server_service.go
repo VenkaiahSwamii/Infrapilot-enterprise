@@ -276,6 +276,7 @@ func (s *ServerService) Heartbeat(id uuid.UUID) error {
 	server.LastSeen = time.Now().UTC()
 	server.Status = "ONLINE"
 	server.Online = true
+	server.RetryCount = 0
 	if err := s.serverRepo.UpdateServer(server); err != nil {
 		return err
 	}

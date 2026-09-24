@@ -498,7 +498,13 @@ export default function EnterpriseDashboard() {
       let lastSeenDiff = Infinity;
       if (lastSeenStr) {
         const t = new Date(lastSeenStr).getTime();
-        if (!isNaN(t)) lastSeenDiff = Math.abs(Date.now() - t);
+        if (!isNaN(t)) {
+          lastSeenDiff = Math.abs(Date.now() - t);
+        } else if (statusUpper === 'ONLINE' || statusUpper === 'CONNECTED' || m.online === true) {
+          lastSeenDiff = 0;
+        }
+      } else if (statusUpper === 'ONLINE' || statusUpper === 'CONNECTED' || m.online === true) {
+        lastSeenDiff = 0;
       }
 
       // Truly ONLINE only if NOT blocked, status is ONLINE, and heartbeat seen within 90 seconds
