@@ -564,11 +564,8 @@ export default function EnterpriseDashboard() {
         : ((isOnline && disk > 0 && totalDiskGb > 0) ? (disk / 100) * totalDiskGb : 0);
       const diskValStr = isBlocked ? 'Stopped' : (totalDiskGb > 0 ? `${formatGB(usedDiskGb)} / ${formatGB(totalDiskGb)} GB` : (isOnline ? `${formatGB(usedDiskGb)} GB` : '-'));
 
-      // Real CPU values (Active Cores / Total Cores)
-      const rawCores = live.cpu_cores ?? live.cores ?? (Array.isArray(live.cpu_per_core) && live.cpu_per_core.length > 0 ? live.cpu_per_core.length : null) ?? m.cpu_cores ?? m.CPUCores;
-      const cores = Number(rawCores) > 0 ? Number(rawCores) : (m.os === 'windows' ? 4 : 2);
-      const usedCores = (isOnline && cpu > 0) ? ((cpu / 100) * cores).toFixed(1) : '0.0';
-      const cpuValStr = isBlocked ? `0.0 / ${cores} Cores (Stopped)` : (isOnline ? `${usedCores} / ${cores} Cores` : `0.0 / ${cores} Cores`);
+      // CPU presentation (Percentage)
+      const cpuValStr = isBlocked ? 'Stopped' : (isOnline ? `${cpu.toFixed(1)}%` : '-');
 
       const rawUploadVal = isOnline ? (live.upload_mbps !== undefined ? live.upload_mbps : (live.upload !== undefined ? live.upload : (m.upload_mbps !== undefined ? m.upload_mbps : m.upload))) : 0;
       const rawDownloadVal = isOnline ? (live.download_mbps !== undefined ? live.download_mbps : (live.download !== undefined ? live.download : (m.download_mbps !== undefined ? m.download_mbps : m.download))) : 0;

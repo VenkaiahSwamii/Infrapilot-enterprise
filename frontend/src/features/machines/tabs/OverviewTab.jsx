@@ -248,7 +248,6 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
                   </svg>
                   <div className="gauge-val cyan-text">{cpuVal.toFixed(1)}%</div>
                 </div>
-                <div className="gauge-sub">Cores: {cpuCores != null ? cpuCores : '--'}</div>
                 {cpuFreqMhz ? (
                   <div className="gauge-sub">{(Number(cpuFreqMhz) > 100 ? (cpuFreqMhz / 1000).toFixed(2) : Number(cpuFreqMhz).toFixed(2))} GHz</div>
                 ) : null}
