@@ -29,13 +29,8 @@ func NewMetricService(metricRepo *repository.MetricRepository, machineRepo *repo
 }
 
 type SaveMetricInput struct {
-<<<<<<< HEAD
 	MachineID           uuid.UUID `json:"machine_id"`
 	APIKey              string    `json:"api_key"`
-=======
-	MachineID           uuid.UUID
-	APIKey              string
->>>>>>> a5d32794eb81b23a58962aa78cde43f57fb95790
 	CPUUsage            float64
 	MemoryPercent       float64
 	DiskPercent         float64
@@ -163,11 +158,7 @@ func isSameOSFamily(os1, os2 string) bool {
 func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *models.Machine, error) {
 	var machine *models.Machine
 
-<<<<<<< HEAD
 	// 0. Match by explicit MachineID if provided
-=======
-	// 0. Match directly by explicit MachineID
->>>>>>> a5d32794eb81b23a58962aa78cde43f57fb95790
 	if input.MachineID != uuid.Nil && database.DB != nil {
 		var mByID models.Machine
 		if err := database.DB.Where("id = ?", input.MachineID).First(&mByID).Error; err == nil {
