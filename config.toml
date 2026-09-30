@@ -126,7 +126,8 @@ flush_interval_seconds = 5
 
 # 4. Enterprise Alerting & Notification Policies
 [alerts]
-email_enabled = false
+email_enabled = true
+admin_email = "infrapilotadmin@gmail.com"  # Destination for alert emails (can be changed to any address)
 cooldown_minutes = 15
 send_resolved_emails = false
 consecutive_breaches_required = 2

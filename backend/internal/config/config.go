@@ -96,11 +96,12 @@ type Config struct {
 
 // AlertsConfig controls email and notification rate-limiting and auto-resolution behavior
 type AlertsConfig struct {
-	EmailEnabled                bool `yaml:"email_enabled" toml:"email_enabled" env:"ALERTS_EMAIL_ENABLED"`
-	CooldownMinutes             int  `yaml:"cooldown_minutes" toml:"cooldown_minutes" env:"ALERTS_COOLDOWN_MINUTES"`
-	SendResolvedEmails          bool `yaml:"send_resolved_emails" toml:"send_resolved_emails" env:"ALERTS_SEND_RESOLVED_EMAILS"`
-	ConsecutiveBreachesRequired int  `yaml:"consecutive_breaches_required" toml:"consecutive_breaches_required" env:"ALERTS_BREACHES_REQUIRED"`
-	ConsecutiveNormalRequired   int  `yaml:"consecutive_normal_required" toml:"consecutive_normal_required" env:"ALERTS_NORMAL_REQUIRED"`
+	EmailEnabled                bool   `yaml:"email_enabled" toml:"email_enabled" env:"ALERTS_EMAIL_ENABLED"`
+	AdminEmail                  string `yaml:"admin_email" toml:"admin_email" env:"ADMIN_EMAIL"`
+	CooldownMinutes             int    `yaml:"cooldown_minutes" toml:"cooldown_minutes" env:"ALERTS_COOLDOWN_MINUTES"`
+	SendResolvedEmails          bool   `yaml:"send_resolved_emails" toml:"send_resolved_emails" env:"ALERTS_SEND_RESOLVED_EMAILS"`
+	ConsecutiveBreachesRequired int    `yaml:"consecutive_breaches_required" toml:"consecutive_breaches_required" env:"ALERTS_BREACHES_REQUIRED"`
+	ConsecutiveNormalRequired   int    `yaml:"consecutive_normal_required" toml:"consecutive_normal_required" env:"ALERTS_NORMAL_REQUIRED"`
 }
 
 var globalConfig *Config
@@ -201,6 +202,7 @@ func Load() {
 		// Alerts defaults
 		Alerts: AlertsConfig{
 			EmailEnabled:                getBool("ALERTS_EMAIL_ENABLED", false),
+			AdminEmail:                  getEnv("ADMIN_EMAIL", "infrapilotadmin@gmail.com"),
 			CooldownMinutes:             getInt("ALERTS_COOLDOWN_MINUTES", 15),
 			SendResolvedEmails:          getBool("ALERTS_SEND_RESOLVED_EMAILS", false),
 			ConsecutiveBreachesRequired: getInt("ALERTS_BREACHES_REQUIRED", 2),
@@ -232,11 +234,12 @@ func Load() {
 					} `toml:"database"`
 				} `toml:"server"`
 				Alerts struct {
-					EmailEnabled                *bool `toml:"email_enabled"`
-					CooldownMinutes             int   `toml:"cooldown_minutes"`
-					SendResolvedEmails          *bool `toml:"send_resolved_emails"`
-					ConsecutiveBreachesRequired int   `toml:"consecutive_breaches_required"`
-					ConsecutiveNormalRequired   int   `toml:"consecutive_normal_required"`
+					EmailEnabled                *bool  `toml:"email_enabled"`
+					AdminEmail                  string `toml:"admin_email"`
+					CooldownMinutes             int    `toml:"cooldown_minutes"`
+					SendResolvedEmails          *bool  `toml:"send_resolved_emails"`
+					ConsecutiveBreachesRequired int    `toml:"consecutive_breaches_required"`
+					ConsecutiveNormalRequired   int    `toml:"consecutive_normal_required"`
 				} `toml:"alerts"`
 			}
 			if err := toml.Unmarshal(data, &tomlCfg); err == nil {
@@ -263,6 +266,9 @@ func Load() {
 				}
 				if tomlCfg.Alerts.EmailEnabled != nil {
 					globalConfig.Alerts.EmailEnabled = *tomlCfg.Alerts.EmailEnabled
+				}
+				if tomlCfg.Alerts.AdminEmail != "" {
+					globalConfig.Alerts.AdminEmail = tomlCfg.Alerts.AdminEmail
 				}
 				if tomlCfg.Alerts.CooldownMinutes > 0 {
 					globalConfig.Alerts.CooldownMinutes = tomlCfg.Alerts.CooldownMinutes

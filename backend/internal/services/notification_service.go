@@ -3,8 +3,11 @@ package services
 import (
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 
@@ -43,6 +46,14 @@ func (n *NotificationService) Send(alert models.LinuxAlert) error {
 
 func (n *NotificationService) SendEmail(alert models.LinuxAlert) {
 	recipient := DefaultAdminEmail
+	cfg := config.Get()
+	if cfg.Alerts.AdminEmail != "" {
+		recipient = cfg.Alerts.AdminEmail
+	}
+	if envRec := strings.TrimSpace(os.Getenv("ADMIN_EMAIL")); envRec != "" {
+		recipient = envRec
+	}
+
 	hostname := "Host Node"
 	if alert.MachineID != uuid.Nil {
 		hostname = alert.MachineID.String()

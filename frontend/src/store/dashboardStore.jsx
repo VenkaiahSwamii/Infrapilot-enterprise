@@ -21,7 +21,11 @@ export function DashboardStoreProvider({ children }) {
 
   const addToast = useCallback((type, title, message) => {
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, type, title, message }]);
+    setToasts((prev) => {
+      // Keep only up to 2 existing toasts so the new one brings it to max 3
+      const capped = prev.length >= 3 ? prev.slice(prev.length - 2) : prev;
+      return [...capped, { id, type, title, message }];
+    });
     setTimeout(() => {
       removeToast(id);
     }, 5000);

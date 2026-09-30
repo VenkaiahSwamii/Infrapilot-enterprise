@@ -31,9 +31,16 @@ func CheckServiceHealth(machine models.Machine, metric models.Metric, input serv
 		"systemd-resolved": "System DNS Resolver",
 	}
 
+	isWindows := strings.EqualFold(machine.OS, "windows") || strings.Contains(strings.ToLower(machine.OS), "win")
+
 	for _, svc := range input.Services {
 		svcName := strings.ToLower(strings.TrimSpace(svc.Name))
 		svcStatus := strings.ToLower(strings.TrimSpace(svc.Status))
+
+		// Skip Linux-specific daemons on Windows hosts
+		if isWindows && (svcName == "sshd" || svcName == "ssh" || svcName == "cron" || svcName == "crond" || svcName == "journald" || svcName == "systemd-journald" || svcName == "systemd-resolved") {
+			continue
+		}
 
 		if description, isCritical := criticalServices[svcName]; isCritical {
 			if svcStatus == "stopped" || svcStatus == "failed" || svcStatus == "inactive" || svcStatus == "dead" || svcStatus == "exited" {

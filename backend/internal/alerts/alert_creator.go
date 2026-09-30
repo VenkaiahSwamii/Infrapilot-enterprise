@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,14 @@ var (
 	breachCounters   = make(map[string]int)
 	normalCounters   = make(map[string]int)
 )
+
+// ResetBreachCounter clears breach and normal counters for an alert key
+func ResetBreachCounter(key string) {
+	breachCountersMu.Lock()
+	delete(breachCounters, key)
+	delete(normalCounters, key)
+	breachCountersMu.Unlock()
+}
 
 // shouldSendAlertEmail returns true if an email has not been sent for this alert key in the specified interval
 func shouldSendAlertEmail(key string, interval time.Duration) bool {
@@ -261,6 +270,38 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 			return nil
 		}
 	}
+
+	// Choice 2: Instant Alerts for Discrete Failures (Services / Security),
+	// Hysteresis Confirmation (2 consecutive breaches) for Continuous Metrics (CPU, RAM, Disk, Latency)
+	isDiscreteFailure := strings.EqualFold(alert.Category, "Service") ||
+		strings.EqualFold(alert.Type, "service_status") ||
+		strings.EqualFold(alert.Category, "Security")
+
+	alertKey := fmt.Sprintf("%s:%s:%s", machine.ID.String(), alert.Category, alert.Component)
+
+	if !isDiscreteFailure {
+		cfg := config.Get()
+		reqBreaches := cfg.Alerts.ConsecutiveBreachesRequired
+		if reqBreaches <= 0 {
+			reqBreaches = 2
+		}
+
+		breachCountersMu.Lock()
+		breachCounters[alertKey]++
+		bCount := breachCounters[alertKey]
+		breachCountersMu.Unlock()
+
+		if bCount < reqBreaches {
+			log.Printf("[Alert Engine] Machine %s Alert '%s' breached threshold (check %d/%d) - waiting for sustained breach",
+				hostname, alert.Title, bCount, reqBreaches)
+			return nil
+		}
+	}
+
+	// Breach confirmed (or Instant Choice 2 failure): reset counter & create alert
+	breachCountersMu.Lock()
+	delete(breachCounters, alertKey)
+	breachCountersMu.Unlock()
 
 	if database.DB != nil {
 		if err := database.DB.Create(alert).Error; err != nil {

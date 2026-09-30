@@ -85,11 +85,7 @@ export function useWebSocketConnection() {
           );
         } else if (message.event === 'alert.resolved') {
           resolveAlert(payload.id);
-          dispatchToast(
-            'success',
-            `✅ Resolved: ${payload.title}`,
-            `Server: ${payload.hostname || 'Unknown'} has returned to normal.`
-          );
+          // Silent resolution: updates store and clears badges without popping toast banners
         } else if (message.event === 'alert.updated') {
           // Silent telemetry update for existing active alert: update in store without popping toast
           addAlert(payload);
@@ -109,11 +105,7 @@ export function useWebSocketConnection() {
         } else if (message.type === 'alert') {
           if (message.status === 'RESOLVED') {
             resolveAlert(message.id);
-            dispatchToast(
-              'success',
-              `✅ Resolved: ${message.title || 'System Alert'}`,
-              `Server: ${message.hostname || 'Unknown'} has returned to normal.`
-            );
+            // Silent resolution: updates store and clears badges without popping toast banners
           } else {
             addAlert(message);
             dispatchToast(

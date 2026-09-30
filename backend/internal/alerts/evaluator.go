@@ -69,6 +69,16 @@ var DefaultRules = []models.AlertRule{
 	},
 }
 
+// isDefaultRule checks if an alert rule is one of the built-in fallback DefaultRules
+func isDefaultRule(rule models.AlertRule) bool {
+	for _, d := range DefaultRules {
+		if d.ID == rule.ID {
+			return true
+		}
+	}
+	return false
+}
+
 // GetEnabledRules loads enabled rules from cache or PostgreSQL database.
 func (c *RuleCache) GetEnabledRules() []models.AlertRule {
 	c.mu.RLock()
@@ -143,10 +153,10 @@ func EvaluateMetrics(machine models.Machine, metric models.Metric, optionalInput
 		hostname = machine.ID.String()
 	}
 
-	// 1. Evaluate Dynamic Alert Rules
+	// 1. Evaluate Dynamic Alert Rules (skip fallback default rules to prevent duplicate alerts since GenerateLinuxAlerts covers them with richer detail)
 	rules := globalRuleCache.GetEnabledRules()
 	for _, rule := range rules {
-		if !rule.IsEnabled {
+		if !rule.IsEnabled || isDefaultRule(rule) {
 			continue
 		}
 
@@ -247,6 +257,10 @@ func EvaluateMetrics(machine models.Machine, metric models.Metric, optionalInput
 
 				// Re-arm email cooldown so any subsequent failure immediately notifies developers
 				services.ResetAlertEmailCooldown(activeAlert.MachineID, activeAlert.Category, activeAlert.Title)
+
+				// Clear breach counter for this alert key upon auto-resolution
+				alertKey := fmt.Sprintf("%s:%s:%s", activeAlert.MachineID.String(), activeAlert.Category, activeAlert.Component)
+				ResetBreachCounter(alertKey)
 
 				BroadcastAlertPayload(activeAlert, hostname, true)
 			}
