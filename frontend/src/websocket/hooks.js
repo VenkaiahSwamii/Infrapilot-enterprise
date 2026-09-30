@@ -32,14 +32,33 @@ export function useWebSocketConnection() {
     addToast,
   };
 
+  const recentToastsRef = useRef(new Map());
+
+  const dispatchToast = (type, title, messageText) => {
+    const key = `${type}:${title}:${messageText}`;
+    const now = Date.now();
+    const lastTime = recentToastsRef.current.get(key) || 0;
+    if (now - lastTime < 15000) {
+      // Suppress identical toast within 15 seconds
+      return;
+    }
+    recentToastsRef.current.set(key, now);
+    if (recentToastsRef.current.size > 50) {
+      for (const [k, t] of recentToastsRef.current.entries()) {
+        if (now - t > 30000) recentToastsRef.current.delete(k);
+      }
+    }
+    callbacksRef.current.addToast(type, title, messageText);
+  };
+
   useEffect(() => {
     wsClientInstance.onStatusChangeCallback = (status) => {
       callbacksRef.current.setWsStatus(status);
       if (status !== prevStatus.current) {
         if (status === 'Connected') {
-          callbacksRef.current.addToast('success', 'System Connected', 'WebSocket connection established successfully.');
+          dispatchToast('success', 'System Connected', 'WebSocket connection established successfully.');
         } else {
-          callbacksRef.current.addToast('warning', 'System Offline', 'Lost connection to backend. Retrying...');
+          dispatchToast('warning', 'System Offline', 'Lost connection to backend. Retrying...');
         }
         prevStatus.current = status;
       }
@@ -52,46 +71,52 @@ export function useWebSocketConnection() {
     };
 
     wsClientInstance.onMetricsUpdateCallback = (message) => {
-      const { updateServerMetrics, addAlert, resolveAlert, addToast, fetchServers } = callbacksRef.current;
+      const { updateServerMetrics, addAlert, resolveAlert, fetchServers } = callbacksRef.current;
       if (message.event) {
         const payload = message.payload;
         if (message.event === 'metric.updated') {
           updateServerMetrics(message.server_id, payload);
         } else if (message.event === 'alert.created') {
           addAlert(payload);
-          addToast(
+          dispatchToast(
             payload.severity === 'Critical' ? 'critical' : 'warning',
             `🚨 Alert: ${payload.title}`,
             `Server: ${payload.hostname || 'Unknown'} - ${payload.description}`
           );
         } else if (message.event === 'alert.resolved') {
           resolveAlert(payload.id);
-          addToast(
+          dispatchToast(
             'success',
             `✅ Resolved: ${payload.title}`,
             `Server: ${payload.hostname || 'Unknown'} has returned to normal.`
           );
+        } else if (message.event === 'alert.updated') {
+          // Silent telemetry update for existing active alert: update in store without popping toast
+          addAlert(payload);
         } else if (message.event === 'server.online') {
           fetchServers();
-          addToast('success', 'Server Online', `Server ${payload.hostname} is now online.`);
+          dispatchToast('success', 'Server Online', `Server ${payload.hostname} is now online.`);
         } else if (message.event === 'server.offline') {
           fetchServers();
-          addToast('warning', 'Server Offline', `Server ${payload.hostname} has gone offline.`);
+          dispatchToast('warning', 'Server Offline', `Server ${payload.hostname} has gone offline.`);
         }
       } else {
         if (message.type === 'metrics_update') {
           updateServerMetrics(message.machine_id, message);
+        } else if (message.type === 'alert_update') {
+          // Silent telemetry update: no toast
+          addAlert(message);
         } else if (message.type === 'alert') {
           if (message.status === 'RESOLVED') {
             resolveAlert(message.id);
-            addToast(
+            dispatchToast(
               'success',
               `✅ Resolved: ${message.title || 'System Alert'}`,
               `Server: ${message.hostname || 'Unknown'} has returned to normal.`
             );
           } else {
             addAlert(message);
-            addToast(
+            dispatchToast(
               message.severity === 'Critical' ? 'critical' : 'warning',
               `🚨 Alert: ${message.title || 'System Alert'}`,
               `Server: ${message.hostname || 'Unknown'} - ${message.description || message.message || 'Alert threshold triggered.'}`

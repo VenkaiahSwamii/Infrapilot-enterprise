@@ -124,3 +124,10 @@ ssl_verify = true
 batch_size = 100
 flush_interval_seconds = 5
 
+# 4. Enterprise Alerting & Notification Policies
+[alerts]
+email_enabled = false
+cooldown_minutes = 15
+send_resolved_emails = false
+consecutive_breaches_required = 2
+consecutive_normal_required = 2

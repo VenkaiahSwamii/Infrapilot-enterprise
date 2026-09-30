@@ -8,11 +8,33 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
+
+	"github.com/google/uuid"
 )
+
+var (
+	emailCooldownMu  sync.Mutex
+	emailCooldownMap = make(map[string]time.Time)
+)
+
+// ResetAlertEmailCooldown re-arms the email alert trigger when an issue is resolved,
+// ensuring that any subsequent failure immediately notifies developers.
+func ResetAlertEmailCooldown(machineID uuid.UUID, category, title string) {
+	key := fmt.Sprintf("%s:%s", machineID.String(), title)
+	if category != "" {
+		key = fmt.Sprintf("%s:%s:%s", machineID.String(), category, title)
+	}
+	emailCooldownMu.Lock()
+	delete(emailCooldownMap, key)
+	emailCooldownMu.Unlock()
+	log.Printf("[EmailService] Alert email cooldown re-armed for '%s' on machine %s", title, machineID.String())
+}
 
 const (
 	DefaultAdminEmail = "infrapilotadmin@gmail.com"
@@ -31,6 +53,45 @@ func NewEmailService() *EmailService {
 
 // SendAlertEmail dispatches an email for any system alert directly to targetEmail or DefaultAdminEmail
 func (s *EmailService) SendAlertEmail(alert models.LinuxAlert, hostname string, targetEmail string) error {
+	cfg := config.Get()
+
+	// 1. Check Master Alert Email Toggle
+	if !cfg.Alerts.EmailEnabled {
+		log.Printf("[EmailService] Alert email suppressed: alerts.email_enabled is false (alert: '%s' on %s)", alert.Title, hostname)
+		return nil
+	}
+
+	// 2. Check Resolution Email Policy
+	isResolved := strings.Contains(strings.ToUpper(alert.Title), "[RESOLVED]") || strings.EqualFold(alert.Status, "RESOLVED")
+	if isResolved && !cfg.Alerts.SendResolvedEmails {
+		log.Printf("[EmailService] Auto-resolution email suppressed: alerts.send_resolved_emails is false (alert: '%s' on %s)", alert.Title, hostname)
+		return nil
+	}
+
+	// 3. Thread-safe Rate-Limiting Cooldown Window
+	cooldownMinutes := cfg.Alerts.CooldownMinutes
+	if cooldownMinutes <= 0 {
+		cooldownMinutes = 15
+	}
+	cooldown := time.Duration(cooldownMinutes) * time.Minute
+
+	key := fmt.Sprintf("%s:%s", alert.MachineID.String(), alert.Title)
+	if alert.Category != "" {
+		key = fmt.Sprintf("%s:%s:%s", alert.MachineID.String(), alert.Category, alert.Title)
+	}
+
+	emailCooldownMu.Lock()
+	lastSent, exists := emailCooldownMap[key]
+	if exists && time.Since(lastSent) < cooldown {
+		remaining := cooldown - time.Since(lastSent)
+		emailCooldownMu.Unlock()
+		log.Printf("[EmailService] Alert email suppressed: in cooldown window (%s remaining) for '%s' on %s",
+			remaining.Round(time.Second), alert.Title, hostname)
+		return nil
+	}
+	emailCooldownMap[key] = time.Now()
+	emailCooldownMu.Unlock()
+
 	recipient := DefaultAdminEmail
 	if strings.TrimSpace(targetEmail) != "" {
 		recipient = strings.TrimSpace(targetEmail)

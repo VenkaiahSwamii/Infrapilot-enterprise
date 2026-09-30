@@ -69,7 +69,8 @@ func CheckSecurityHealth(machine models.Machine, metric models.Metric, input ser
 		}
 	}
 
-	if sshFound && sshDown {
+	isWindows := strings.EqualFold(machine.OS, "windows") || strings.Contains(strings.ToLower(machine.OS), "win")
+	if !isWindows && sshFound && sshDown {
 		alerts = append(alerts, models.LinuxAlert{
 			Title:              "SSH Service Down",
 			Description:        "SSH remote daemon service is stopped or inactive, blocking secure admin access",

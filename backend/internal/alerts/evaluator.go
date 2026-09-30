@@ -245,7 +245,10 @@ func EvaluateMetrics(machine models.Machine, metric models.Metric, optionalInput
 				resolvedAlert.Description = fmt.Sprintf("Issue resolved on %s: %s telemetry normalized to safe baseline", hostname, activeAlert.Category)
 				go services.SendAlert(resolvedAlert)
 
-				BroadcastAlertPayload(activeAlert, hostname)
+				// Re-arm email cooldown so any subsequent failure immediately notifies developers
+				services.ResetAlertEmailCooldown(activeAlert.MachineID, activeAlert.Category, activeAlert.Title)
+
+				BroadcastAlertPayload(activeAlert, hostname, true)
 			}
 		}
 	}

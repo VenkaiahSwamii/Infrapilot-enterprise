@@ -89,6 +89,18 @@ type Config struct {
 	TLSKeyPath  string `yaml:"tls_key_path" env:"TLS_KEY_PATH"`
 	TLSCAPath   string `yaml:"tls_ca_path" env:"TLS_CA_PATH"`
 	TLSPort     string `yaml:"tls_port" env:"TLS_PORT"`
+
+	// Alerts & Notifications Policy
+	Alerts AlertsConfig `yaml:"alerts" toml:"alerts"`
+}
+
+// AlertsConfig controls email and notification rate-limiting and auto-resolution behavior
+type AlertsConfig struct {
+	EmailEnabled                bool `yaml:"email_enabled" toml:"email_enabled" env:"ALERTS_EMAIL_ENABLED"`
+	CooldownMinutes             int  `yaml:"cooldown_minutes" toml:"cooldown_minutes" env:"ALERTS_COOLDOWN_MINUTES"`
+	SendResolvedEmails          bool `yaml:"send_resolved_emails" toml:"send_resolved_emails" env:"ALERTS_SEND_RESOLVED_EMAILS"`
+	ConsecutiveBreachesRequired int  `yaml:"consecutive_breaches_required" toml:"consecutive_breaches_required" env:"ALERTS_BREACHES_REQUIRED"`
+	ConsecutiveNormalRequired   int  `yaml:"consecutive_normal_required" toml:"consecutive_normal_required" env:"ALERTS_NORMAL_REQUIRED"`
 }
 
 var globalConfig *Config
@@ -185,6 +197,15 @@ func Load() {
 		TLSKeyPath:  getEnv("TLS_KEY_PATH", "certs/server.key"),
 		TLSCAPath:   getEnv("TLS_CA_PATH", "certs/ca.crt"),
 		TLSPort:     getEnv("TLS_PORT", "8443"),
+
+		// Alerts defaults
+		Alerts: AlertsConfig{
+			EmailEnabled:                getBool("ALERTS_EMAIL_ENABLED", false),
+			CooldownMinutes:             getInt("ALERTS_COOLDOWN_MINUTES", 15),
+			SendResolvedEmails:          getBool("ALERTS_SEND_RESOLVED_EMAILS", false),
+			ConsecutiveBreachesRequired: getInt("ALERTS_BREACHES_REQUIRED", 2),
+			ConsecutiveNormalRequired:   getInt("ALERTS_NORMAL_REQUIRED", 2),
+		},
 	}
 
 	// Try loading config.toml if available
@@ -210,6 +231,13 @@ func Load() {
 						SSLMode string `toml:"sslmode"`
 					} `toml:"database"`
 				} `toml:"server"`
+				Alerts struct {
+					EmailEnabled                *bool `toml:"email_enabled"`
+					CooldownMinutes             int   `toml:"cooldown_minutes"`
+					SendResolvedEmails          *bool `toml:"send_resolved_emails"`
+					ConsecutiveBreachesRequired int   `toml:"consecutive_breaches_required"`
+					ConsecutiveNormalRequired   int   `toml:"consecutive_normal_required"`
+				} `toml:"alerts"`
 			}
 			if err := toml.Unmarshal(data, &tomlCfg); err == nil {
 				if tomlCfg.Server.BackendURL != "" {
@@ -232,6 +260,21 @@ func Load() {
 				}
 				if len(tomlCfg.Server.AllowedOrigins) > 0 {
 					globalConfig.CORSOrigins = tomlCfg.Server.AllowedOrigins
+				}
+				if tomlCfg.Alerts.EmailEnabled != nil {
+					globalConfig.Alerts.EmailEnabled = *tomlCfg.Alerts.EmailEnabled
+				}
+				if tomlCfg.Alerts.CooldownMinutes > 0 {
+					globalConfig.Alerts.CooldownMinutes = tomlCfg.Alerts.CooldownMinutes
+				}
+				if tomlCfg.Alerts.SendResolvedEmails != nil {
+					globalConfig.Alerts.SendResolvedEmails = *tomlCfg.Alerts.SendResolvedEmails
+				}
+				if tomlCfg.Alerts.ConsecutiveBreachesRequired > 0 {
+					globalConfig.Alerts.ConsecutiveBreachesRequired = tomlCfg.Alerts.ConsecutiveBreachesRequired
+				}
+				if tomlCfg.Alerts.ConsecutiveNormalRequired > 0 {
+					globalConfig.Alerts.ConsecutiveNormalRequired = tomlCfg.Alerts.ConsecutiveNormalRequired
 				}
 			}
 			break

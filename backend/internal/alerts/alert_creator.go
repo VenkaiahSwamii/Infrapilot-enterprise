@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/services"
@@ -18,6 +19,10 @@ import (
 var (
 	alertEmailCooldown = make(map[string]time.Time)
 	alertEmailMu       sync.Mutex
+
+	breachCountersMu sync.Mutex
+	breachCounters   = make(map[string]int)
+	normalCounters   = make(map[string]int)
 )
 
 // shouldSendAlertEmail returns true if an email has not been sent for this alert key in the specified interval
@@ -64,7 +69,24 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 		hostname = machine.ID.String()
 	}
 
+	ruleKey := fmt.Sprintf("%s:%s", machine.ID.String(), rule.ID.String())
+	cfg := config.Get()
+	reqBreaches := cfg.Alerts.ConsecutiveBreachesRequired
+	if reqBreaches <= 0 {
+		reqBreaches = 2
+	}
+	reqNormal := cfg.Alerts.ConsecutiveNormalRequired
+	if reqNormal <= 0 {
+		reqNormal = 2
+	}
+
 	if isAlerting {
+		breachCountersMu.Lock()
+		normalCounters[ruleKey] = 0
+		breachCounters[ruleKey]++
+		bCount := breachCounters[ruleKey]
+		breachCountersMu.Unlock()
+
 		if hasOpenAlert {
 			// Update the existing active alert in-place with latest telemetry without duplicating
 			now := time.Now()
@@ -81,7 +103,14 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 			existingAlert.UpdatedAt = now
 
 			// Alert is already active: update in-place telemetry without re-sending repeat email notifications while unresolved
-			BroadcastAlertPayload(*existingAlert, hostname)
+			BroadcastAlertPayload(*existingAlert, hostname, false)
+			return nil
+		}
+
+		// Require sustained breach before creating a new alert (prevents transient blip alerts)
+		if bCount < reqBreaches {
+			log.Printf("[Alert Engine] Machine %s Rule %s Metric %.1f breached threshold (check %d/%d) - waiting for sustained breach",
+				hostname, rule.Name, value, bCount, reqBreaches)
 			return nil
 		}
 
@@ -119,12 +148,24 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 		// Send EXACTLY ONE alert notification when initial issue triggers
 		go services.SendAlert(newAlert)
 
-		BroadcastAlertPayload(newAlert, hostname)
+		BroadcastAlertPayload(newAlert, hostname, true)
 		return nil
 	}
 
 	// Not alerting: check if open alert needs auto-resolution
 	if hasOpenAlert {
+		breachCountersMu.Lock()
+		breachCounters[ruleKey] = 0
+		normalCounters[ruleKey]++
+		nCount := normalCounters[ruleKey]
+		breachCountersMu.Unlock()
+
+		if nCount < reqNormal {
+			log.Printf("[Alert Engine] Machine %s Rule %s Metric %.1f normalized (check %d/%d) - waiting for sustained normal before auto-resolving",
+				hostname, rule.Name, value, nCount, reqNormal)
+			return nil
+		}
+
 		now := time.Now()
 		resolutionNote := "Auto resolved: Metric returned to normal levels"
 		existingAlert.Status = "RESOLVED"
@@ -155,7 +196,10 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 		resolvedAlert.Description = fmt.Sprintf("Issue resolved on %s: metric value %.1f returned to normal levels (threshold: %.1f)", hostname, value, rule.Value)
 		go services.SendAlert(resolvedAlert)
 
-		BroadcastAlertPayload(*existingAlert, hostname)
+		// Re-arm email cooldown so any subsequent failure immediately notifies developers
+		services.ResetAlertEmailCooldown(existingAlert.MachineID, existingAlert.Category, existingAlert.Title)
+
+		BroadcastAlertPayload(*existingAlert, hostname, true)
 		return nil
 	}
 
@@ -213,7 +257,7 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 			existing.Priority = alert.Priority
 			existing.UpdatedAt = now
 
-			BroadcastAlertPayload(existing, hostname)
+			BroadcastAlertPayload(existing, hostname, false)
 			return nil
 		}
 	}
@@ -231,14 +275,36 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 	// Dispatch EXACTLY ONE real-time SMTP Email & Multi-Channel Notification for initial creation
 	go services.SendAlert(*alert)
 
-	BroadcastAlertPayload(*alert, hostname)
+	BroadcastAlertPayload(*alert, hostname, true)
 	return nil
 }
 
 // BroadcastAlertPayload sends real-time alert data to WebSocket subscribers.
-func BroadcastAlertPayload(alert models.LinuxAlert, hostname string) {
+// If isNewOrResolved is false (for in-place metric updates), it publishes "alert.updated"
+// so the UI dashboard can update values silently without firing a notification toast.
+func BroadcastAlertPayload(alert models.LinuxAlert, hostname string, isNewOrResolved ...bool) {
+	isInitialOrFinal := false
+	if len(isNewOrResolved) > 0 {
+		isInitialOrFinal = isNewOrResolved[0]
+	} else {
+		isInitialOrFinal = (alert.Status == "RESOLVED")
+	}
+
+	eventType := "alert.updated"
+	msgType := "alert_update"
+	if isInitialOrFinal {
+		if alert.Status == "RESOLVED" {
+			eventType = "alert.resolved"
+			msgType = "alert"
+		} else {
+			eventType = "alert.created"
+			msgType = "alert"
+		}
+	}
+
 	payload := map[string]interface{}{
-		"type":                 "alert",
+		"type":                 msgType,
+		"event":                eventType,
 		"id":                   alert.ID.String(),
 		"machine_id":           alert.MachineID.String(),
 		"rule_id":              alert.RuleID.String(),
@@ -266,24 +332,14 @@ func BroadcastAlertPayload(alert models.LinuxAlert, hostname string) {
 
 	// 1. Broadcast via global WebSocket hub
 	if websocket.WS != nil {
-		websocket.WS.Broadcast(payload)
-
-		// Publish structured event to global room (serverID: "")
-		if alert.Status == "RESOLVED" {
-			websocket.PublishEvent("alert.resolved", "", payload)
-		} else {
-			websocket.PublishEvent("alert.created", "", payload)
-		}
+		websocket.PublishEvent(eventType, "", payload)
 	}
 
 	// 2. Broadcast via injected Hub if available
 	if hubInstance != nil {
 		eventObj := map[string]interface{}{
-			"event":   "alert.created",
+			"event":   eventType,
 			"payload": payload,
-		}
-		if alert.Status == "RESOLVED" {
-			eventObj["event"] = "alert.resolved"
 		}
 		jsonData, err := json.Marshal(eventObj)
 		if err == nil {
