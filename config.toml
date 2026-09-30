@@ -117,7 +117,7 @@ security = true
 [splunk]
 enabled = false
 hec_url = "https://splunk.yourdomain.com:8088/services/collector/event"
-token = "YOUR_SPLUNK_HEC_TOKEN_HERE"
+token = "c203f6be-443d-4984-8758-eb29bef"
 index = "infrapilot_enterprise"
 sourcetype = "infrapilot:json"
 ssl_verify = true
