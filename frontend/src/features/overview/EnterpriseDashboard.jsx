@@ -131,7 +131,7 @@ export default function EnterpriseDashboard() {
   const [liveMetrics, setLiveMetrics] = useState({});
   const [alerts, setAlerts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('online');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [viewMode, setViewMode] = useState('table');
   const [timeRange, setTimeRange] = useState('Last 6 Hours');
   const [currentPage, setCurrentPage] = useState(1);

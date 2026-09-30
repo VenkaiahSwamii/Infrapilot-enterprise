@@ -240,6 +240,11 @@ func EvaluateMetrics(machine models.Machine, metric models.Metric, optionalInput
 				log.Printf("[Alert Engine] Machine %s Category %s Alert '%s' Result AUTO RESOLVED (Metric Normalized)",
 					hostname, activeAlert.Category, activeAlert.Title)
 
+				resolvedAlert := activeAlert
+				resolvedAlert.Title = fmt.Sprintf("[RESOLVED] %s", activeAlert.Title)
+				resolvedAlert.Description = fmt.Sprintf("Issue resolved on %s: %s telemetry normalized to safe baseline", hostname, activeAlert.Category)
+				go services.SendAlert(resolvedAlert)
+
 				BroadcastAlertPayload(activeAlert, hostname)
 			}
 		}

@@ -172,7 +172,7 @@ func ExecuteRealDiskCleanupWithDirs(mID uuid.UUID, targetMount string, dryRun bo
 	totGB := float64(postTotal) / (1024 * 1024 * 1024)
 
 	statusStr := "VERIFIED_PASSED"
-	if postPct > 90.0 {
+	if len(customDirs) == 0 && postPct > 90.0 {
 		if bytesFreed > 0 {
 			statusStr = "PARTIAL_RECLEANED"
 		} else {
