@@ -23,8 +23,9 @@ func APIKeyAuthMiddleware() gin.HandlerFunc {
 
 		if apiKey != "" {
 			if err := database.DB.Where("api_key = ?", apiKey).First(&server).Error; err == nil {
-				server.LastSeen = time.Now()
-				database.DB.Model(&server).Update("last_seen", time.Now())
+				now := time.Now().UTC()
+				server.LastSeen = now
+				database.DB.Model(&server).Updates(map[string]interface{}{"last_seen": now, "retry_count": 0})
 				c.Set("server", &server)
 				c.Set("machine", &server)
 				c.Set("api_key", apiKey)
@@ -32,8 +33,9 @@ func APIKeyAuthMiddleware() gin.HandlerFunc {
 				return
 			}
 			if err := database.DB.Where("api_key = ?", apiKey).First(&machine).Error; err == nil {
-				machine.LastSeen = time.Now()
-				database.DB.Model(&machine).Update("last_seen", time.Now())
+				now := time.Now().UTC()
+				machine.LastSeen = now
+				database.DB.Model(&machine).Updates(map[string]interface{}{"last_seen": now, "retry_count": 0})
 				c.Set("server", &machine)
 				c.Set("machine", &machine)
 				c.Set("api_key", apiKey)

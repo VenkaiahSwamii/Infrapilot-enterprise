@@ -436,16 +436,41 @@ func startUDPDiscoveryListener() {
 func getPrimaryHostIP() string {
 	cfg := config.Get()
 	if cfg != nil && cfg.BackendURL != "" {
-		if u, err := url.Parse(cfg.BackendURL); err == nil && u.Hostname() != "" {
+		if u, err := url.Parse(cfg.BackendURL); err == nil && u.Hostname() != "" && u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" {
 			return u.Hostname()
+		}
+	}
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			name := strings.ToLower(iface.Name)
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			if strings.Contains(name, "vmnet") || strings.Contains(name, "virtual") ||
+				strings.Contains(name, "vbox") || strings.Contains(name, "vethernet") ||
+				strings.Contains(name, "bluetooth") {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, address := range addrs {
+				if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+					if ip4 := ipnet.IP.To4(); ip4 != nil && !ip4.IsLinkLocalUnicast() {
+						return ip4.String()
+					}
+				}
+			}
 		}
 	}
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
 		for _, address := range addrs {
 			if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-				if ipnet.IP.To4() != nil {
-					return ipnet.IP.String()
+				if ip4 := ipnet.IP.To4(); ip4 != nil && !ip4.IsLinkLocalUnicast() {
+					return ip4.String()
 				}
 			}
 		}

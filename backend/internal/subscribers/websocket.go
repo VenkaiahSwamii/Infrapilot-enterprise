@@ -24,6 +24,9 @@ func SendWebSocket(e events.Event) {
 		payload = map[string]interface{}{
 			"type":          "metric.received",
 			"machine_id":    ev.MachineID,
+			"hostname":      ev.Hostname,
+			"ip_address":    ev.IPAddress,
+			"os":            ev.OS,
 			"cpu_usage":     ev.CPU,
 			"memory_usage":  ev.Memory,
 			"disk_usage":    ev.Disk,

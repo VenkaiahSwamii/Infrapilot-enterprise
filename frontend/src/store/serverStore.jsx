@@ -85,19 +85,21 @@ export function ServerStoreProvider({ children }) {
       setServers((prevServers) => {
         const formatted = incomingData.map((fresh) => {
           const existing = (prevServers || []).find((p) => isSameMachine(p, fresh));
+          const rawLastSeen = fresh.last_seen || (existing && existing.last_seen) || new Date().toISOString();
           return {
             ...(existing || {}),
             ...fresh,
             _store_id: getMachineId(fresh),
             status: fresh.status || (existing && existing.status) || 'ONLINE',
-            last_seen: fresh.last_seen
+            last_seen: rawLastSeen,
+            formatted_last_seen: fresh.last_seen
               ? new Date(fresh.last_seen).toLocaleTimeString('en-US', {
                   hour: '2-digit',
                   minute: '2-digit',
                   second: '2-digit',
                   hour12: true,
                 })
-              : (existing && existing.last_seen) || 'Just now',
+              : (existing && existing.formatted_last_seen) || 'Just now',
           };
         });
         return deduplicateServers(formatted);
@@ -174,12 +176,14 @@ export function ServerStoreProvider({ children }) {
 
     // Update machine record in-place by robust identity
     setServers((prevServers) => {
+      const targetIdStr = String(rawMetrics.machine_id || rawMetrics.id || targetServerId || '').toLowerCase().trim();
       const existingIndex = prevServers.findIndex((s) => {
+        const sId = String(s.id || s.ID || s.machine_id || '').toLowerCase().trim();
         return (
-          (s.id && rawMetrics.id && s.id === rawMetrics.id) ||
+          (sId && targetIdStr && sId === targetIdStr) ||
           getMachineId(s) === normalizedId ||
           (rawMetrics.ip_address && s.ip_address === rawMetrics.ip_address) ||
-          (rawMetrics.hostname && stringsEqualFold(s.hostname, rawMetrics.hostname) && rawMetrics.os && stringsEqualFold(s.os, rawMetrics.os))
+          (rawMetrics.hostname && stringsEqualFold(s.hostname, rawMetrics.hostname))
         );
       });
 
@@ -197,7 +201,8 @@ export function ServerStoreProvider({ children }) {
               memory_total: normalizedMetric.memory_total || s.memory_total,
               disk_total: normalizedMetric.disk_total || s.disk_total,
               cpu_cores: normalizedMetric.cpu_cores || s.cpu_cores,
-              last_seen: formattedTime,
+              last_seen: timestamp,
+              formatted_last_seen: formattedTime,
               status: 'ONLINE',
             };
           }
@@ -221,7 +226,8 @@ export function ServerStoreProvider({ children }) {
         memory_total: normalizedMetric.memory_total,
         disk_total: normalizedMetric.disk_total,
         cpu_cores: normalizedMetric.cpu_cores,
-        last_seen: formattedTime,
+        last_seen: timestamp,
+        formatted_last_seen: formattedTime,
       };
 
       return deduplicateServers([...prevServers, newEntry]);
