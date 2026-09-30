@@ -80,11 +80,8 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 			existingAlert.Message = msg
 			existingAlert.UpdatedAt = now
 
-			key := fmt.Sprintf("%s:%s", machine.ID.String(), rule.Name)
-			if shouldSendAlertEmail(key, 3*time.Minute) {
-				go services.SendAlert(*existingAlert)
-			}
-
+			// Alert is already active: update in-place telemetry without re-sending repeat email notifications while unresolved
+			BroadcastAlertPayload(*existingAlert, hostname)
 			return nil
 		}
 
@@ -119,10 +116,8 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 		log.Printf("[Alert Engine] Machine %s Rule %s Current %.1f Threshold %.1f Result ALERT CREATED",
 			hostname, rule.Name, value, rule.Value)
 
-		key := fmt.Sprintf("%s:%s", machine.ID.String(), rule.Name)
-		if shouldSendAlertEmail(key, 3*time.Minute) {
-			go services.SendAlert(newAlert)
-		}
+		// Send EXACTLY ONE alert notification when initial issue triggers
+		go services.SendAlert(newAlert)
 
 		BroadcastAlertPayload(newAlert, hostname)
 		return nil
@@ -153,6 +148,12 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 
 		log.Printf("[Alert Engine] Machine %s Rule %s Current %.1f Threshold %.1f Result AUTO RESOLVED",
 			hostname, rule.Name, value, rule.Value)
+
+		// Dispatch single Resolution Notification so user is notified that the issue was resolved
+		resolvedAlert := *existingAlert
+		resolvedAlert.Title = fmt.Sprintf("[RESOLVED] %s", existingAlert.Title)
+		resolvedAlert.Description = fmt.Sprintf("Issue resolved on %s: metric value %.1f returned to normal levels (threshold: %.1f)", hostname, value, rule.Value)
+		go services.SendAlert(resolvedAlert)
 
 		BroadcastAlertPayload(*existingAlert, hostname)
 		return nil
@@ -198,7 +199,7 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 		}
 
 		if err == nil {
-			// Alert already exists and is active -> update latest metric value and message in-place!
+			// Alert already exists and is active -> update latest metric value and message in-place without duplicate notifications
 			database.DB.Model(&models.LinuxAlert{}).Where("id = ?", existing.ID).Updates(map[string]interface{}{
 				"metric_value": alert.MetricValue,
 				"message":      alert.Message,
@@ -211,11 +212,6 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 			existing.Severity = alert.Severity
 			existing.Priority = alert.Priority
 			existing.UpdatedAt = now
-
-			key := fmt.Sprintf("%s:%s", machine.ID.String(), existing.Title)
-			if shouldSendAlertEmail(key, 3*time.Minute) {
-				go services.SendAlert(existing)
-			}
 
 			BroadcastAlertPayload(existing, hostname)
 			return nil
@@ -232,11 +228,8 @@ func ProcessGeneratedAlert(machine models.Machine, alert *models.LinuxAlert) err
 	log.Printf("[Alert Engine] Machine %s Category %s Priority %s Result ALERT CREATED (%s)",
 		hostname, alert.Category, alert.Priority, alert.Title)
 
-	// Dispatch real-time SMTP Email & Multi-Channel Notifications
-	key := fmt.Sprintf("%s:%s", machine.ID.String(), alert.Title)
-	if shouldSendAlertEmail(key, 3*time.Minute) {
-		go services.SendAlert(*alert)
-	}
+	// Dispatch EXACTLY ONE real-time SMTP Email & Multi-Channel Notification for initial creation
+	go services.SendAlert(*alert)
 
 	BroadcastAlertPayload(*alert, hostname)
 	return nil

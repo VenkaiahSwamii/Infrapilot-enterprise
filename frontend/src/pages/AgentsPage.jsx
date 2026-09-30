@@ -34,7 +34,7 @@ export default function AgentsPage() {
   const { servers, liveMetricsMap, loading, fetchServers } = useServerStore();
 
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('online');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [osFilter, setOsFilter] = useState('all');
   const [copiedId, setCopiedId] = useState(null);
   const [showDeployModal, setShowDeployModal] = useState(false);
