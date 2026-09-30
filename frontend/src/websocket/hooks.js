@@ -34,18 +34,18 @@ export function useWebSocketConnection() {
 
   const recentToastsRef = useRef(new Map());
 
-  const dispatchToast = (type, title, messageText) => {
-    const key = `${type}:${title}:${messageText}`;
+  const dispatchToast = (type, title, messageText, customKey = null, cooldownMs = 15000) => {
+    const key = customKey || `${type}:${title}:${messageText}`;
     const now = Date.now();
     const lastTime = recentToastsRef.current.get(key) || 0;
-    if (now - lastTime < 15000) {
-      // Suppress identical toast within 15 seconds
+    if (now - lastTime < cooldownMs) {
+      // Suppress repeated toast within cooldown window (e.g. 5 minutes for alerts)
       return;
     }
     recentToastsRef.current.set(key, now);
-    if (recentToastsRef.current.size > 50) {
+    if (recentToastsRef.current.size > 100) {
       for (const [k, t] of recentToastsRef.current.entries()) {
-        if (now - t > 30000) recentToastsRef.current.delete(k);
+        if (now - t > 600000) recentToastsRef.current.delete(k);
       }
     }
     callbacksRef.current.addToast(type, title, messageText);
@@ -78,14 +78,22 @@ export function useWebSocketConnection() {
           updateServerMetrics(message.server_id, payload);
         } else if (message.event === 'alert.created') {
           addAlert(payload);
+          const serverName = payload.hostname || payload.machine_id || 'Unknown';
+          const alertKey = `alert:${serverName}:${payload.title}`;
           dispatchToast(
             payload.severity === 'Critical' ? 'critical' : 'warning',
             `🚨 Alert: ${payload.title}`,
-            `Server: ${payload.hostname || 'Unknown'} - ${payload.description}`
+            `Server: ${serverName} - ${payload.description}`,
+            alertKey,
+            300000 // 5-minute UI toast cooldown
           );
         } else if (message.event === 'alert.resolved') {
           resolveAlert(payload.id);
-          // Silent resolution: updates store and clears badges without popping toast banners
+          // Re-arm UI toast cooldown upon resolution so any new failure alerts immediately
+          const serverName = payload.hostname || payload.machine_id || 'Unknown';
+          if (payload.title) {
+            recentToastsRef.current.delete(`alert:${serverName}:${payload.title}`);
+          }
         } else if (message.event === 'alert.updated') {
           // Silent telemetry update for existing active alert: update in store without popping toast
           addAlert(payload);
@@ -105,13 +113,20 @@ export function useWebSocketConnection() {
         } else if (message.type === 'alert') {
           if (message.status === 'RESOLVED') {
             resolveAlert(message.id);
-            // Silent resolution: updates store and clears badges without popping toast banners
+            const serverName = message.hostname || message.machine_id || 'Unknown';
+            if (message.title) {
+              recentToastsRef.current.delete(`alert:${serverName}:${message.title}`);
+            }
           } else {
             addAlert(message);
+            const serverName = message.hostname || message.machine_id || 'Unknown';
+            const alertKey = `alert:${serverName}:${message.title || 'System Alert'}`;
             dispatchToast(
               message.severity === 'Critical' ? 'critical' : 'warning',
               `🚨 Alert: ${message.title || 'System Alert'}`,
-              `Server: ${message.hostname || 'Unknown'} - ${message.description || message.message || 'Alert threshold triggered.'}`
+              `Server: ${serverName} - ${message.description || message.message || 'Alert threshold triggered.'}`,
+              alertKey,
+              300000 // 5-minute UI toast cooldown
             );
           }
         } else if (message.type === 'machine_status_changed' || message.type === 'machine_status') {
