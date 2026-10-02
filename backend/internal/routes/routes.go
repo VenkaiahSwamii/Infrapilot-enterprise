@@ -16,6 +16,7 @@ import (
 	"infrapilot/backend/internal/repository"
 	"infrapilot/backend/internal/search"
 	"infrapilot/backend/internal/services"
+	"infrapilot/backend/internal/synthetic"
 	"infrapilot/backend/internal/tracing"
 	"infrapilot/backend/internal/websocket"
 
@@ -294,12 +295,15 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 				autoGroup.GET("/runbooks", automationHandler.GetRunbooks)
 			}
 
-			// Sprint v1.1.1: Centralized Log Collection Service
+			// Centralized Log Collection & Analysis Engine
 			logsGroup := protected.Group("/logs")
 			{
 				logsGroup.POST("", logsHandler.IngestLogs)
 				logsGroup.GET("", logsHandler.GetLogs)
 				logsGroup.GET("/search", logsHandler.GetLogs)
+				logsGroup.GET("/stats", logsHandler.GetLogStats)
+				logsGroup.GET("/patterns", logsHandler.GetLogPatterns)
+				logsGroup.GET("/:id/correlations", logsHandler.GetLogCorrelations)
 			}
 			protected.GET("/machines/:id/logs", logsHandler.GetMachineLogs)
 
@@ -714,6 +718,25 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.GET("/search/saved", searchHandler.GetSavedSearches)
 			protected.DELETE("/search/saved/:id", searchHandler.DeleteSavedSearch)
 			protected.POST("/search/ai", searchHandler.AISearch)
+
+			// Synthetic Monitoring Engine
+			syntheticRepo := synthetic.NewRepository()
+			syntheticService := synthetic.NewService(syntheticRepo, hub)
+			syntheticHandler := synthetic.NewHandler(syntheticService)
+			syntheticScheduler := synthetic.NewScheduler(syntheticService)
+			syntheticScheduler.Start()
+
+			syntheticGroup := protected.Group("/synthetic")
+			{
+				syntheticGroup.GET("/stats", syntheticHandler.GetOverviewStats)
+				syntheticGroup.GET("/tests", syntheticHandler.GetAllTests)
+				syntheticGroup.POST("/tests", syntheticHandler.CreateTest)
+				syntheticGroup.GET("/tests/:id", syntheticHandler.GetTestByID)
+				syntheticGroup.PUT("/tests/:id", syntheticHandler.UpdateTest)
+				syntheticGroup.DELETE("/tests/:id", syntheticHandler.DeleteTest)
+				syntheticGroup.POST("/tests/:id/run", syntheticHandler.RunTestNow)
+				syntheticGroup.GET("/tests/:id/results", syntheticHandler.GetTestResults)
+			}
 		}
 
 		// Public agent command execution routes (polled/updated by headless agent via API key)

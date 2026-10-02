@@ -18,6 +18,7 @@ import {
   Zap,
   Terminal,
   Network,
+  Globe,
 } from 'lucide-react';
 
 import { useAlertStore } from '../../store/alertStore.jsx';
@@ -30,6 +31,7 @@ export default function Sidebar({ collapsed, userProfile }) {
   const navItems = useMemo(() => [
     { id: 'overview', label: 'Overview', icon: Home, path: '/' },
     { id: 'terminal', label: 'Fleet Terminal', icon: Terminal, path: '/terminal', badge: 'CLI', badgeColor: '#0284c7' },
+    { id: 'synthetic', label: 'Synthetic Probes', icon: Globe, path: '/synthetic', badge: 'PROBE', badgeColor: '#6366f1' },
     { id: 'sre', label: 'SRE Disk Space', icon: HardDrive, path: '/sre-disk', badge: 'DISK', badgeColor: '#d97706' },
     { id: 'sre', label: 'Crash & Service Health', icon: Zap, path: '/sre-crash', badge: 'SRE', badgeColor: '#e11d48' },
     { id: 'sre', label: 'Latency & Gateway', icon: Radio, path: '/sre-latency', badge: 'SLO', badgeColor: '#7c3aed' },

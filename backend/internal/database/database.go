@@ -283,6 +283,8 @@ func Connect() {
 		&models.Incident{},
 		&models.IncidentTimeline{},
 		&models.IncidentAlert{},
+		&models.SyntheticTest{},
+		&models.SyntheticTestResult{},
 		&models.RemediationPolicy{},
 		&models.RemediationJob{},
 		&models.Workflow{},

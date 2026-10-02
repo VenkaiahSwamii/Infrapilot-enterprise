@@ -71,17 +71,33 @@ func (h *Handler) IngestLogs(c *gin.Context) {
 }
 
 func (h *Handler) GetLogs(c *gin.Context) {
-	level := c.Query("level")
-	source := c.Query("source")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
 	query := c.Query("query")
 	if query == "" {
 		query = c.Query("q")
 	}
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	filter := LogFilter{
+		MachineID:     c.Query("machine_id"),
+		Hostname:      c.Query("hostname"),
+		Platform:      c.Query("platform"),
+		OS:            c.Query("os"),
+		Level:         c.Query("level"),
+		Source:        c.Query("source"),
+		Service:       c.Query("service"),
+		ContainerName: c.Query("container_name"),
+		PodName:       c.Query("pod_name"),
+		Namespace:     c.Query("namespace"),
+		ClusterName:   c.Query("cluster_name"),
+		TimeRange:     c.Query("time_range"),
+		Query:         query,
+		Limit:         limit,
+		Offset:        offset,
+	}
 
-	logs, total, err := h.service.GetLogs(level, source, query, limit, offset)
+	logs, total, err := h.service.GetLogs(filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -119,4 +135,52 @@ func (h *Handler) GetMachineLogs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"logs": logs, "total": total})
+}
+
+func (h *Handler) GetLogStats(c *gin.Context) {
+	filter := LogFilter{
+		MachineID: c.Query("machine_id"),
+		TimeRange: c.Query("time_range"),
+	}
+
+	stats, err := h.service.GetLogStats(filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+func (h *Handler) GetLogPatterns(c *gin.Context) {
+	filter := LogFilter{
+		MachineID: c.Query("machine_id"),
+		TimeRange: c.Query("time_range"),
+		Level:     c.Query("level"),
+	}
+
+	patterns, err := h.service.GetLogPatterns(filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"patterns": patterns, "total": len(patterns)})
+}
+
+func (h *Handler) GetLogCorrelations(c *gin.Context) {
+	idStr := c.Param("id")
+	logID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid log ID UUID format"})
+		return
+	}
+
+	correlations, err := h.service.GetLogCorrelations(logID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, correlations)
 }

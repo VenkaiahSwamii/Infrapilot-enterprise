@@ -53,10 +53,22 @@ func (s *Service) IngestBatch(entries []models.Log) error {
 	return nil
 }
 
-func (s *Service) GetLogs(level, source, query string, limit, offset int) ([]models.Log, int64, error) {
-	return s.repo.GetLogs(level, source, query, limit, offset)
+func (s *Service) GetLogs(filter LogFilter) ([]models.Log, int64, error) {
+	return s.repo.GetLogs(filter)
 }
 
 func (s *Service) GetMachineLogs(machineID uuid.UUID, level, source, query string, limit, offset int) ([]models.Log, int64, error) {
 	return s.repo.GetLogsByMachine(machineID, level, source, query, limit, offset)
+}
+
+func (s *Service) GetLogStats(filter LogFilter) (*LogStats, error) {
+	return s.repo.GetLogStats(filter)
+}
+
+func (s *Service) GetLogPatterns(filter LogFilter) ([]LogPattern, error) {
+	return s.repo.GetLogPatterns(filter)
+}
+
+func (s *Service) GetLogCorrelations(logID uuid.UUID) (*LogCorrelations, error) {
+	return s.repo.GetLogCorrelations(logID)
 }
