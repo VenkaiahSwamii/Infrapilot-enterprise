@@ -16,6 +16,7 @@ import (
 	"infrapilot/backend/internal/repository"
 	"infrapilot/backend/internal/search"
 	"infrapilot/backend/internal/services"
+	"infrapilot/backend/internal/network"
 	"infrapilot/backend/internal/synthetic"
 	"infrapilot/backend/internal/tracing"
 	"infrapilot/backend/internal/websocket"
@@ -736,6 +737,26 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 				syntheticGroup.DELETE("/tests/:id", syntheticHandler.DeleteTest)
 				syntheticGroup.POST("/tests/:id/run", syntheticHandler.RunTestNow)
 				syntheticGroup.GET("/tests/:id/results", syntheticHandler.GetTestResults)
+			}
+
+			// Network Monitoring Engine
+			networkRepo := network.NewRepository()
+			networkService := network.NewService(networkRepo, hub)
+			networkHandler := network.NewHandler(networkService)
+			networkScheduler := network.NewScheduler(networkService)
+			networkScheduler.Start()
+
+			networkGroup := protected.Group("/network")
+			{
+				networkGroup.GET("/stats", networkHandler.GetOverviewStats)
+				networkGroup.GET("/checks", networkHandler.GetAllChecks)
+				networkGroup.POST("/checks", networkHandler.CreateCheck)
+				networkGroup.GET("/checks/:id", networkHandler.GetCheckByID)
+				networkGroup.PUT("/checks/:id", networkHandler.UpdateCheck)
+				networkGroup.DELETE("/checks/:id", networkHandler.DeleteCheck)
+				networkGroup.POST("/checks/:id/run", networkHandler.RunCheckNow)
+				networkGroup.GET("/checks/:id/metrics", networkHandler.GetCheckMetrics)
+				networkGroup.GET("/hosts", networkHandler.GetHostNetworkViews)
 			}
 		}
 

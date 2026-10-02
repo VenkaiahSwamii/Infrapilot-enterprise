@@ -285,6 +285,8 @@ func Connect() {
 		&models.IncidentAlert{},
 		&models.SyntheticTest{},
 		&models.SyntheticTestResult{},
+		&models.NetworkCheck{},
+		&models.NetworkMetric{},
 		&models.RemediationPolicy{},
 		&models.RemediationJob{},
 		&models.Workflow{},

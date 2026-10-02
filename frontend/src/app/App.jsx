@@ -29,6 +29,7 @@ import SRELatencyPage from '../features/sre/SRELatencyPage.jsx';
 import FleetTerminalPage from '../features/logs/FleetTerminalPage.jsx';
 import SyntheticMonitoringPage from '../features/synthetic/SyntheticMonitoringPage.jsx';
 import SyntheticTestDetailsPage from '../features/synthetic/SyntheticTestDetailsPage.jsx';
+import NetworkMonitoringPage from '../features/network/NetworkMonitoringPage.jsx';
 
 // Analytics & Reports
 import AnalyticsSuite from '../features/analytics/AnalyticsSuite.jsx';
@@ -66,6 +67,7 @@ export default function App() {
                 <Route path="terminal" element={<FleetTerminalPage />} />
                 <Route path="synthetic" element={<SyntheticMonitoringPage />} />
                 <Route path="synthetic/:id" element={<SyntheticTestDetailsPage />} />
+                <Route path="network" element={<NetworkMonitoringPage />} />
                 <Route path="sre-disk" element={<SREDiskPage />} />
                 <Route path="sre-crash" element={<SRECrashPage />} />
                 <Route path="sre-latency" element={<SRELatencyPage />} />
