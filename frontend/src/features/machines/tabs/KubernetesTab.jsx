@@ -153,8 +153,8 @@ export default function KubernetesTab({ machine }) {
       if (eventsRes.status === 'fulfilled' && Array.isArray(eventsRes.value)) setEvents(eventsRes.value);
 
       // Record Time Series Data Point
-      const totalCpu = currentPods.reduce((acc, p) => acc + (p.cpu_percent || (p.cpu_usage ? parseFloat(p.cpu_usage) : Math.random() * 4 + 1)), 0);
-      const totalMem = currentPods.reduce((acc, p) => acc + (p.memory_used_bytes || (p.memory_usage ? parseFloat(p.memory_usage) : Math.random() * 50 + 80)), 0);
+      const totalCpu = currentPods.reduce((acc, p) => acc + (p.cpu_percent || (p.cpu_usage ? parseFloat(p.cpu_usage) : 0)), 0);
+      const totalMem = currentPods.reduce((acc, p) => acc + (p.memory_used_bytes || (p.memory_usage ? parseFloat(p.memory_usage) : 0)), 0);
 
       setTimeSeriesData(prev => {
         const next = [...prev, {
@@ -312,8 +312,8 @@ export default function KubernetesTab({ machine }) {
       }
     });
 
-    const totalNodes = nodes.length || 3;
-    const readyNodes = nodes.filter(n => n.ready !== false && String(n.status).toLowerCase() !== 'notready').length || totalNodes;
+    const totalNodes = nodes.length;
+    const readyNodes = nodes.filter(n => n.ready !== false && String(n.status).toLowerCase() !== 'notready').length;
 
     return { totalPods, runningPods, highLoadPods, crashLoopPods, failedPods, pendingPods, totalNodes, readyNodes, totalCpu, totalMem };
   }, [pods, nodes]);
@@ -689,10 +689,10 @@ export default function KubernetesTab({ machine }) {
           </div>
           <div style={{ marginTop: '6px' }}>
             <div style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9' }}>
-              {overview?.cluster_name || 'infrapilot-k8s-prod'}
+              {overview?.cluster_name || (nodes.length > 0 ? 'k8s-cluster' : 'No Cluster Connected')}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', fontFamily: 'monospace' }}>
-              Kubernetes {overview?.kubernetes_version || 'v1.28.2'} • HA Control Plane
+              {overview?.kubernetes_version ? `Kubernetes ${overview.kubernetes_version} • HA Control Plane` : (nodes.length > 0 ? 'Kubernetes Active' : 'Kubernetes Unreachable')}
             </div>
           </div>
         </div>
@@ -713,7 +713,7 @@ export default function KubernetesTab({ machine }) {
             {stats.readyNodes} <span style={{ fontSize: '14px', color: 'var(--muted)', fontWeight: 500 }}>/ {stats.totalNodes} Ready</span>
           </div>
           <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '11px', fontWeight: 600, color: '#38bdf8' }}>
-            <span>1 Control Plane • {Math.max(stats.totalNodes - 1, 1)} Workers</span>
+            <span>{stats.totalNodes > 0 ? `${stats.readyNodes} Ready / ${stats.totalNodes} Total Nodes` : '0 Nodes Monitored'}</span>
           </div>
         </div>
 
@@ -754,12 +754,12 @@ export default function KubernetesTab({ machine }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '4px' }}>
             <div>
-              <div style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9' }}>{deployments.length || 4}</div>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9' }}>{deployments.length}</div>
               <div style={{ fontSize: '11px', color: 'var(--muted)' }}>Deployments</div>
             </div>
             <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--border-soft)' }} />
             <div>
-              <div style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9' }}>{services.length || 5}</div>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9' }}>{services.length}</div>
               <div style={{ fontSize: '11px', color: 'var(--muted)' }}>Services</div>
             </div>
             <div style={{ width: '1px', height: '24px', backgroundColor: 'var(--border-soft)' }} />

@@ -87,15 +87,6 @@ func (r *postgresRepository) DeleteTest(id uuid.UUID) error {
 
 func (r *postgresRepository) GetTestByID(id uuid.UUID) (*models.SyntheticTest, error) {
 	if database.DB == nil {
-		tests := mockTests()
-		for _, t := range tests {
-			if t.ID == id {
-				return &t, nil
-			}
-		}
-		if len(tests) > 0 {
-			return &tests[0], nil
-		}
 		return nil, nil
 	}
 	var test models.SyntheticTest
@@ -107,21 +98,18 @@ func (r *postgresRepository) GetTestByID(id uuid.UUID) (*models.SyntheticTest, e
 
 func (r *postgresRepository) GetAllTests() ([]models.SyntheticTest, error) {
 	if database.DB == nil {
-		return mockTests(), nil
+		return []models.SyntheticTest{}, nil
 	}
 	var tests []models.SyntheticTest
 	if err := database.DB.Order("created_at desc").Find(&tests).Error; err != nil {
 		return nil, err
-	}
-	if len(tests) == 0 {
-		return mockTests(), nil
 	}
 	return tests, nil
 }
 
 func (r *postgresRepository) GetEnabledTests() ([]models.SyntheticTest, error) {
 	if database.DB == nil {
-		return mockTests(), nil
+		return []models.SyntheticTest{}, nil
 	}
 	var tests []models.SyntheticTest
 	if err := database.DB.Where("enabled = ?", true).Find(&tests).Error; err != nil {
@@ -162,7 +150,7 @@ func (r *postgresRepository) SaveResult(result *models.SyntheticTestResult) erro
 
 func (r *postgresRepository) GetTestResults(testID uuid.UUID, timeRange string, limit int) ([]models.SyntheticTestResult, error) {
 	if database.DB == nil {
-		return mockResults(testID), nil
+		return []models.SyntheticTestResult{}, nil
 	}
 	var results []models.SyntheticTestResult
 	db := database.DB.Model(&models.SyntheticTestResult{}).Where("test_id = ?", testID)
@@ -180,10 +168,6 @@ func (r *postgresRepository) GetTestResults(testID uuid.UUID, timeRange string, 
 
 	if err := db.Order("timestamp desc").Limit(limit).Find(&results).Error; err != nil {
 		return nil, err
-	}
-
-	if len(results) == 0 {
-		return mockResults(testID), nil
 	}
 
 	return results, nil

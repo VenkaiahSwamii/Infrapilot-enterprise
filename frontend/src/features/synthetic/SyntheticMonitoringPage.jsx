@@ -12,9 +12,6 @@ import {
   Clock,
   Trash2,
   Edit,
-  ExternalLink,
-  ShieldCheck,
-  Zap,
   Activity,
 } from 'lucide-react';
 import { getOverviewStats, getAllTests, deleteSyntheticTest, runSyntheticTestNow } from '../../api/synthetic.js';
@@ -48,7 +45,7 @@ export default function SyntheticMonitoringPage() {
 
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 10000); // 10s auto-refresh
+    const interval = setInterval(fetchDashboardData, 10000);
     return () => clearInterval(interval);
   }, [fetchDashboardData]);
 
@@ -107,32 +104,32 @@ export default function SyntheticMonitoringPage() {
     switch (status) {
       case 'PASS':
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-1 w-max">
+          <span className="synth-status-badge pass">
             <CheckCircle size={12} /> PASS
           </span>
         );
       case 'DEGRADED':
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center gap-1 w-max">
+          <span className="synth-status-badge degraded">
             <AlertTriangle size={12} /> DEGRADED
           </span>
         );
       case 'FAIL':
       case 'ERROR':
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center gap-1 w-max">
+          <span className="synth-status-badge fail">
             <XCircle size={12} /> {status}
           </span>
         );
       case 'TIMEOUT':
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-orange-500/10 border border-orange-500/30 text-orange-400 flex items-center gap-1 w-max">
+          <span className="synth-status-badge timeout">
             <Clock size={12} /> TIMEOUT
           </span>
         );
       default:
         return (
-          <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1 w-max">
+          <span className="synth-status-badge pending">
             <Activity size={12} /> PENDING
           </span>
         );
@@ -140,106 +137,97 @@ export default function SyntheticMonitoringPage() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 text-slate-100">
+    <div className="synth-page-root">
       {/* Top Banner Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-600/10 border border-indigo-500/20 rounded-xl text-indigo-400">
-              <Globe size={24} />
+      <div className="synth-header">
+        <div className="synth-header-title-block">
+          <div className="title-row">
+            <div className="icon-badge">
+              <Globe size={22} color="#6366f1" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Synthetic Monitoring</h1>
-              <p className="text-xs text-slate-400 mt-0.5">
-                In-house automated probe runner testing endpoints, SLAs, latency & response integrity
-              </p>
+              <h1>Synthetic Monitoring</h1>
+              <span className="badge-synth">AUTOMATED PROBES</span>
             </div>
           </div>
+          <p className="subtitle-txt">
+            In-house HTTP/API uptime, response integrity, SLA availability &amp; multi-stage network latency tracing
+          </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={fetchDashboardData}
-            className="p-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-lg transition-all"
-            title="Refresh Data"
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+        <div className="synth-header-actions">
+          <button onClick={fetchDashboardData} className="ctrl-btn" title="Refresh Data">
+            <RefreshCw size={14} className={loading ? 'spin' : ''} />
+            <span>Refresh</span>
           </button>
-          <button
-            onClick={handleCreate}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-2 transition-all shadow-lg shadow-indigo-600/20"
-          >
-            <Plus size={16} /> New Synthetic Probe
+          <button onClick={handleCreate} className="ctrl-btn primary-btn">
+            <Plus size={15} />
+            <span>New Synthetic Probe</span>
           </button>
         </div>
       </div>
 
       {/* Overview Metric Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <span className="text-[10px] font-semibold uppercase text-slate-400 tracking-wider">Total Probes</span>
-          <div className="text-2xl font-bold text-white mt-1 font-mono">{stats?.total_tests || 0}</div>
-          <span className="text-[10px] text-slate-500">Configured checks</span>
+      <div className="synth-kpi-row">
+        <div className="kpi-card">
+          <span className="kpi-lbl">TOTAL PROBES</span>
+          <div className="kpi-val font-mono">{stats?.total_tests || 0}</div>
+          <span className="kpi-sub">Configured checks</span>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <span className="text-[10px] font-semibold uppercase text-emerald-400 tracking-wider">Healthy</span>
-          <div className="text-2xl font-bold text-emerald-400 mt-1 font-mono">{stats?.healthy || 0}</div>
-          <span className="text-[10px] text-emerald-500/70">100% PASS</span>
+        <div className="kpi-card">
+          <span className="kpi-lbl green-txt">HEALTHY</span>
+          <div className="kpi-val green-txt font-mono">{stats?.healthy || 0}</div>
+          <span className="kpi-sub">100% PASS</span>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <span className="text-[10px] font-semibold uppercase text-amber-400 tracking-wider">Degraded</span>
-          <div className="text-2xl font-bold text-amber-400 mt-1 font-mono">{stats?.degraded || 0}</div>
-          <span className="text-[10px] text-amber-500/70">High latency</span>
+        <div className="kpi-card">
+          <span className="kpi-lbl amber-txt">DEGRADED</span>
+          <div className="kpi-val amber-txt font-mono">{stats?.degraded || 0}</div>
+          <span className="kpi-sub">High latency</span>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <span className="text-[10px] font-semibold uppercase text-rose-400 tracking-wider">Failing</span>
-          <div className="text-2xl font-bold text-rose-400 mt-1 font-mono">{stats?.failed || 0}</div>
-          <span className="text-[10px] text-rose-500/70">HTTP err / timeout</span>
+        <div className="kpi-card">
+          <span className="kpi-lbl red-txt">FAILING</span>
+          <div className="kpi-val red-txt font-mono">{stats?.failed || 0}</div>
+          <span className="kpi-sub">HTTP err / timeout</span>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <span className="text-[10px] font-semibold uppercase text-cyan-400 tracking-wider">Availability SLA</span>
-          <div className="text-2xl font-bold text-cyan-400 mt-1 font-mono">
+        <div className="kpi-card">
+          <span className="kpi-lbl cyan-txt">AVAILABILITY SLA</span>
+          <div className="kpi-val cyan-txt font-mono">
             {stats?.availability_pct !== undefined ? `${stats.availability_pct.toFixed(2)}%` : '100%'}
           </div>
-          <span className="text-[10px] text-cyan-500/70">Overall uptime</span>
+          <span className="kpi-sub">Overall uptime</span>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <span className="text-[10px] font-semibold uppercase text-indigo-400 tracking-wider">Avg Latency</span>
-          <div className="text-2xl font-bold text-indigo-300 mt-1 font-mono">
+        <div className="kpi-card">
+          <span className="kpi-lbl indigo-txt">AVG LATENCY</span>
+          <div className="kpi-val indigo-txt font-mono">
             {stats?.avg_response_ms ? `${stats.avg_response_ms.toFixed(0)} ms` : '--'}
           </div>
-          <span className="text-[10px] text-indigo-400/70">Response time</span>
+          <span className="kpi-sub">Response time</span>
         </div>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
-        <div className="relative w-full sm:w-80">
-          <Search size={15} className="absolute left-3 top-2.5 text-slate-500" />
+      <div className="synth-controls-bar">
+        <div className="search-input-box">
+          <Search size={14} className="search-icon" />
           <input
             type="text"
             placeholder="Search probes by name or target URL..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
           />
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
+        <div className="filter-pills-row">
           {['ALL', 'PASS', 'DEGRADED', 'FAIL', 'DISABLED'].map((f) => (
             <button
               key={f}
               onClick={() => setStatusFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                statusFilter === f
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-              }`}
+              className={`filter-pill ${statusFilter === f ? 'active' : ''}`}
             >
               {f}
             </button>
@@ -248,24 +236,24 @@ export default function SyntheticMonitoringPage() {
       </div>
 
       {/* Dense Enterprise Data Table */}
-      <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl overflow-hidden backdrop-blur-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
+      <div className="synth-table-card">
+        <div className="synth-table-wrap">
+          <table className="synth-data-table">
+            <thead>
               <tr>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Probe Name & Method</th>
-                <th className="px-4 py-3">Target Endpoint URL</th>
-                <th className="px-4 py-3">Interval</th>
-                <th className="px-4 py-3">Last Response Time</th>
-                <th className="px-4 py-3">Last Checked</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th>STATUS</th>
+                <th>PROBE NAME &amp; METHOD</th>
+                <th>TARGET ENDPOINT URL</th>
+                <th>INTERVAL</th>
+                <th>LAST RESPONSE TIME</th>
+                <th>LAST CHECKED</th>
+                <th style={{ textAlign: 'right' }}>ACTIONS</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/50">
+            <tbody>
               {filteredTests.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={7} className="synth-empty-td">
                     No synthetic probes found matching your filter criteria.
                   </td>
                 </tr>
@@ -274,64 +262,58 @@ export default function SyntheticMonitoringPage() {
                   <tr
                     key={test.id}
                     onClick={() => navigate(`/synthetic/${test.id}`)}
-                    className="hover:bg-slate-800/40 cursor-pointer transition-colors"
+                    className="clickable-tr"
                   >
-                    <td className="px-4 py-3">{statusBadge(test.last_status)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-white">{test.name}</span>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-indigo-300 border border-slate-700">
-                          {test.method}
-                        </span>
-                        {!test.enabled && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] bg-slate-800 text-slate-400">PAUSED</span>
-                        )}
+                    <td>{statusBadge(test.last_status)}</td>
+                    <td>
+                      <div className="name-cell">
+                        <span className="test-name">{test.name}</span>
+                        <span className="method-badge">{test.method}</span>
+                        {!test.enabled && <span className="paused-tag">PAUSED</span>}
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-slate-400 max-w-xs truncate">{test.url}</td>
-                    <td className="px-4 py-3 text-slate-400 font-mono">{test.interval_seconds}s</td>
-                    <td className="px-4 py-3">
-                      <div className="font-mono">
+                    <td className="mono-txt muted-txt max-url">{test.url}</td>
+                    <td className="mono-txt muted-txt">{test.interval_seconds}s</td>
+                    <td>
+                      <div className="mono-txt">
                         <span
-                          className={`font-bold ${
+                          className={
                             test.last_response_time_ms > test.response_time_threshold_ms
-                              ? 'text-amber-400'
-                              : 'text-cyan-400'
-                          }`}
+                              ? 'amber-txt fw-bold'
+                              : 'cyan-txt fw-bold'
+                          }
                         >
                           {test.last_response_time_ms ? `${test.last_response_time_ms.toFixed(0)} ms` : '--'}
                         </span>
-                        <span className="text-[10px] text-slate-500 ml-1">
-                          / {test.response_time_threshold_ms}ms
-                        </span>
+                        <span className="thresh-sub"> / {test.response_time_threshold_ms}ms</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
+                    <td className="mono-txt muted-txt time-cell">
                       {test.last_check_at ? new Date(test.last_check_at).toLocaleTimeString() : 'Never'}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
+                    <td style={{ textAlign: 'right' }}>
+                      <div className="actions-row">
                         <button
                           onClick={(e) => handleRunNow(e, test.id)}
                           disabled={runningMap[test.id]}
-                          className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded transition-colors"
+                          className="action-icon-btn run-btn"
                           title="Run Manual Probe"
                         >
-                          <Play size={14} className={runningMap[test.id] ? 'animate-spin' : ''} />
+                          <Play size={13} className={runningMap[test.id] ? 'spin' : ''} />
                         </button>
                         <button
                           onClick={(e) => handleEdit(e, test)}
-                          className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded transition-colors"
+                          className="action-icon-btn"
                           title="Edit Probe"
                         >
-                          <Edit size={14} />
+                          <Edit size={13} />
                         </button>
                         <button
                           onClick={(e) => handleDelete(e, test.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors"
+                          className="action-icon-btn del-btn"
                           title="Delete Probe"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </td>
@@ -350,6 +332,323 @@ export default function SyntheticMonitoringPage() {
         onSaved={fetchDashboardData}
         initialTest={editingTest}
       />
+
+      <style>{`
+        .synth-page-root {
+          padding: 28px 36px;
+          min-height: 100vh;
+          background-color: #0b0f19;
+          color: #f1f5f9;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        .synth-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          margin-bottom: 24px;
+        }
+        .synth-header-title-block {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .title-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .icon-badge {
+          background: rgba(99, 102, 241, 0.1);
+          border: 1px solid rgba(99, 102, 241, 0.2);
+          padding: 8px;
+          border-radius: 10px;
+        }
+        .title-row h1 {
+          font-size: 24px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0;
+          letter-spacing: -0.02em;
+        }
+        .badge-synth {
+          background-color: #1e293b;
+          color: #94a3b8;
+          font-size: 10px;
+          font-weight: 800;
+          padding: 3px 8px;
+          border-radius: 4px;
+          letter-spacing: 0.05em;
+          border: 1px solid #334155;
+        }
+        .subtitle-txt {
+          font-size: 13px;
+          color: #64748b;
+          margin: 0;
+        }
+
+        .synth-header-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .ctrl-btn {
+          background: #1e293b;
+          border: 1px solid #334155;
+          color: #f1f5f9;
+          border-radius: 8px;
+          padding: 8px 14px;
+          font-size: 12px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .ctrl-btn:hover:not(:disabled) {
+          background: #334155;
+          color: #ffffff;
+        }
+        .primary-btn {
+          background: #4f46e5 !important;
+          border-color: #4338ca !important;
+          color: #ffffff !important;
+        }
+        .primary-btn:hover {
+          background: #4338ca !important;
+        }
+
+        .synth-kpi-row {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 14px;
+          margin-bottom: 20px;
+        }
+        @media (min-width: 768px) {
+          .synth-kpi-row { grid-template-columns: repeat(6, 1fr); }
+        }
+        .kpi-card {
+          background: #111827;
+          border: 1px solid #1f293d;
+          border-radius: 12px;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          min-height: 84px;
+        }
+        .kpi-lbl {
+          font-size: 10px;
+          font-weight: 800;
+          color: #94a3b8;
+          letter-spacing: 0.04em;
+        }
+        .kpi-val {
+          font-size: 24px;
+          font-weight: 800;
+          color: #ffffff;
+          margin-top: 4px;
+        }
+        .kpi-sub {
+          font-size: 10px;
+          color: #64748b;
+          margin-top: 2px;
+        }
+
+        .green-txt { color: #22c55e; }
+        .amber-txt { color: #f59e0b; }
+        .red-txt { color: #ef4444; }
+        .cyan-txt { color: #38bdf8; }
+        .indigo-txt { color: #818cf8; }
+        .font-mono { font-family: monospace; }
+        .fw-bold { font-weight: 700; color: #ffffff; }
+
+        .synth-controls-bar {
+          background: #111827;
+          border: 1px solid #1f293d;
+          border-radius: 12px;
+          padding: 12px 16px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 20px;
+          gap: 16px;
+        }
+        .search-input-box {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #0b0f19;
+          border: 1px solid #1f293d;
+          border-radius: 8px;
+          padding: 8px 12px;
+          width: 320px;
+        }
+        .search-icon { color: #64748b; }
+        .search-input-box input {
+          background: transparent;
+          border: none;
+          outline: none;
+          color: #f1f5f9;
+          font-size: 12px;
+          width: 100%;
+        }
+        .filter-pills-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .filter-pill {
+          background: #0b0f19;
+          border: 1px solid #1f293d;
+          color: #94a3b8;
+          border-radius: 8px;
+          padding: 6px 12px;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .filter-pill.active {
+          background: #4f46e5;
+          border-color: #4f46e5;
+          color: #ffffff;
+        }
+
+        .synth-table-card {
+          background: #111827;
+          border: 1px solid #1f293d;
+          border-radius: 14px;
+          overflow: hidden;
+        }
+        .synth-table-wrap {
+          overflow-x: auto;
+        }
+        .synth-data-table {
+          width: 100%;
+          border-collapse: collapse;
+          text-align: left;
+          font-size: 12px;
+        }
+        .synth-data-table th {
+          background: #0b0f19;
+          color: #64748b;
+          padding: 12px 16px;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          border-bottom: 1px solid #1f293d;
+        }
+        .synth-data-table td {
+          padding: 14px 16px;
+          border-bottom: 1px solid #1a2333;
+          color: #cbd5e1;
+        }
+        .clickable-tr {
+          cursor: pointer;
+        }
+        .clickable-tr:hover td {
+          background: rgba(30, 41, 59, 0.4);
+        }
+        .synth-empty-td {
+          text-align: center;
+          padding: 36px !important;
+          color: #64748b;
+        }
+
+        .name-cell {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .test-name {
+          font-weight: 700;
+          color: #ffffff;
+        }
+        .method-badge {
+          background: #1e293b;
+          color: #a5b4fc;
+          border: 1px solid #334155;
+          font-size: 10px;
+          font-weight: 800;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-family: monospace;
+        }
+        .paused-tag {
+          background: #1e293b;
+          color: #64748b;
+          font-size: 9px;
+          padding: 2px 4px;
+          border-radius: 4px;
+        }
+
+        .mono-txt { font-family: monospace; }
+        .muted-txt { color: #94a3b8; }
+        .max-url { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .thresh-sub { font-size: 10px; color: #64748b; }
+        .time-cell { font-size: 11px; }
+
+        .synth-status-badge {
+          font-size: 10px;
+          font-weight: 800;
+          padding: 3px 8px;
+          border-radius: 6px;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .synth-status-badge.pass {
+          background: rgba(34, 197, 94, 0.15);
+          color: #22c55e;
+          border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .synth-status-badge.degraded {
+          background: rgba(245, 158, 11, 0.15);
+          color: #f59e0b;
+          border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+        .synth-status-badge.fail {
+          background: rgba(239, 68, 68, 0.15);
+          color: #ef4444;
+          border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .synth-status-badge.timeout {
+          background: rgba(249, 115, 22, 0.15);
+          color: #f97316;
+          border: 1px solid rgba(249, 115, 22, 0.3);
+        }
+        .synth-status-badge.pending {
+          background: #1e293b;
+          color: #94a3b8;
+          border: 1px solid #334155;
+        }
+
+        .actions-row {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 6px;
+        }
+        .action-icon-btn {
+          background: #1e293b;
+          border: 1px solid #334155;
+          color: #94a3b8;
+          border-radius: 6px;
+          padding: 5px 8px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .action-icon-btn:hover { background: #334155; color: #ffffff; }
+        .run-btn:hover { color: #22c55e; }
+        .del-btn:hover { color: #ef4444; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 0.8s linear infinite; }
+      `}</style>
     </div>
   );
 }

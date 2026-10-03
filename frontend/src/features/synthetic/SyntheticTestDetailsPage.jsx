@@ -9,11 +9,7 @@ import {
   AlertTriangle,
   XCircle,
   Activity,
-  ShieldAlert,
-  Radio,
-  Server,
   RefreshCw,
-  Sliders,
 } from 'lucide-react';
 import { getSyntheticTestByID, getSyntheticTestResults, runSyntheticTestNow } from '../../api/synthetic.js';
 
@@ -60,8 +56,8 @@ export default function SyntheticTestDetailsPage() {
 
   if (loading && !test) {
     return (
-      <div className="p-8 text-slate-400 flex items-center justify-center min-h-[400px]">
-        <RefreshCw size={24} className="animate-spin text-indigo-400 mr-3" />
+      <div className="synth-details-loading">
+        <RefreshCw size={24} className="spin cyan-txt mr-3" />
         <span>Loading synthetic probe investigation data...</span>
       </div>
     );
@@ -69,12 +65,9 @@ export default function SyntheticTestDetailsPage() {
 
   if (!test) {
     return (
-      <div className="p-8 text-center text-slate-400">
+      <div className="synth-details-notfound">
         <p>Synthetic probe not found.</p>
-        <button
-          onClick={() => navigate('/synthetic')}
-          className="mt-4 px-4 py-2 bg-slate-800 text-white rounded-lg text-sm"
-        >
+        <button onClick={() => navigate('/synthetic')} className="ctrl-btn">
           Back to Synthetic Monitoring
         </button>
       </div>
@@ -87,32 +80,57 @@ export default function SyntheticTestDetailsPage() {
   const availPct = totalProbes > 0 ? ((passProbes / totalProbes) * 100).toFixed(2) : '100.00';
 
   const latestResult = results[0] || {};
-  const statusColors = {
-    PASS: { bg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400', label: 'PASS ✓', icon: CheckCircle },
-    DEGRADED: { bg: 'bg-amber-500/10 border-amber-500/30 text-amber-400', label: 'DEGRADED ⚠', icon: AlertTriangle },
-    FAIL: { bg: 'bg-rose-500/10 border-rose-500/30 text-rose-400', label: 'FAIL ✕', icon: XCircle },
-    TIMEOUT: { bg: 'bg-orange-500/10 border-orange-500/30 text-orange-400', label: 'TIMEOUT ⌛', icon: Clock },
-    ERROR: { bg: 'bg-purple-500/10 border-purple-500/30 text-purple-400', label: 'ERROR !', icon: XCircle },
+
+  const statusBadge = (status) => {
+    switch (status) {
+      case 'PASS':
+        return (
+          <span className="synth-status-badge pass">
+            <CheckCircle size={12} /> PASS
+          </span>
+        );
+      case 'DEGRADED':
+        return (
+          <span className="synth-status-badge degraded">
+            <AlertTriangle size={12} /> DEGRADED
+          </span>
+        );
+      case 'FAIL':
+      case 'ERROR':
+        return (
+          <span className="synth-status-badge fail">
+            <XCircle size={12} /> {status}
+          </span>
+        );
+      case 'TIMEOUT':
+        return (
+          <span className="synth-status-badge timeout">
+            <Clock size={12} /> TIMEOUT
+          </span>
+        );
+      default:
+        return (
+          <span className="synth-status-badge pending">
+            <Activity size={12} /> PENDING
+          </span>
+        );
+    }
   };
 
-  const StatusIcon = statusColors[test.last_status]?.icon || Activity;
-
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 text-slate-100">
-      {/* Back Header */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => navigate('/synthetic')}
-          className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition-colors"
-        >
-          <ArrowLeft size={16} /> Back to Synthetic Probes
+    <div className="synth-details-root">
+      {/* Back Navigation Bar */}
+      <div className="details-nav-bar">
+        <button onClick={() => navigate('/synthetic')} className="back-btn">
+          <ArrowLeft size={15} />
+          <span>Back to Synthetic Probes</span>
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className="actions-right">
           <select
             value={timeRange}
             onChange={(e) => setTimeRange(e.target.value)}
-            className="px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none"
+            className="ctrl-select"
           >
             <option value="1h">Last 1 Hour</option>
             <option value="6h">Last 6 Hours</option>
@@ -120,202 +138,469 @@ export default function SyntheticTestDetailsPage() {
             <option value="7d">Last 7 Days</option>
           </select>
 
-          <button
-            onClick={handleRunNow}
-            disabled={running}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-2 transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-50"
-          >
-            <Play size={14} className={running ? 'animate-spin' : ''} />
-            {running ? 'Executing Probe...' : 'Run Probe Now'}
+          <button onClick={handleRunNow} disabled={running} className="ctrl-btn primary-btn">
+            <Play size={14} className={running ? 'spin' : ''} />
+            <span>{running ? 'Executing Probe...' : 'Run Probe Now'}</span>
           </button>
         </div>
       </div>
 
       {/* Main Title Banner */}
-      <div className="p-6 bg-slate-900/80 border border-slate-800/80 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md">
-        <div className="flex items-start gap-4">
-          <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400 mt-1">
-            <Globe size={28} />
+      <div className="details-banner">
+        <div className="banner-left">
+          <div className="icon-badge">
+            <Globe size={26} color="#6366f1" />
           </div>
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-xl font-bold text-white">{test.name}</h1>
-              <span className="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-indigo-300 border border-slate-700">
-                {test.method}
-              </span>
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1.5 ${
-                  statusColors[test.last_status]?.bg || 'bg-slate-800 text-slate-300'
-                }`}
-              >
-                <StatusIcon size={14} />
-                {test.last_status || 'PENDING'}
-              </span>
+            <div className="title-row">
+              <h2>{test.name}</h2>
+              <span className="method-badge">{test.method}</span>
+              {statusBadge(test.last_status)}
             </div>
-            <p className="text-xs text-slate-400 font-mono mt-1.5">{test.url}</p>
+            <p className="url-txt font-mono">{test.url}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-6 text-xs text-slate-400 border-t md:border-t-0 md:border-l border-slate-800 pt-3 md:pt-0 md:pl-6">
+        <div className="banner-meta">
           <div>
-            <span className="block text-[10px] uppercase text-slate-500 font-semibold">Check Interval</span>
-            <span className="font-semibold text-slate-200">{test.interval_seconds}s</span>
+            <span className="meta-lbl">CHECK INTERVAL</span>
+            <span className="meta-val font-mono">{test.interval_seconds}s</span>
           </div>
           <div>
-            <span className="block text-[10px] uppercase text-slate-500 font-semibold">Degraded Threshold</span>
-            <span className="font-semibold text-slate-200">{test.response_time_threshold_ms}ms</span>
+            <span className="meta-lbl">DEGRADED THRESHOLD</span>
+            <span className="meta-val font-mono">{test.response_time_threshold_ms}ms</span>
           </div>
           <div>
-            <span className="block text-[10px] uppercase text-slate-500 font-semibold">Expected Status</span>
-            <span className="font-semibold text-slate-200">{test.expected_status || 200}</span>
+            <span className="meta-lbl">EXPECTED STATUS</span>
+            <span className="meta-val font-mono">{test.expected_status || 200}</span>
           </div>
         </div>
       </div>
 
-      {/* Key Metric Tiles */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <div className="text-[11px] uppercase tracking-wider text-slate-400 font-medium mb-1">
-            Availability SLA ({timeRange})
-          </div>
-          <div className="text-2xl font-bold text-emerald-400 font-mono">{availPct}%</div>
-          <p className="text-[11px] text-slate-500 mt-1">{passProbes} / {totalProbes} successful probes</p>
+      {/* Metric Tiles Row */}
+      <div className="details-kpi-row">
+        <div className="kpi-card">
+          <span className="kpi-lbl">AVAILABILITY SLA ({timeRange})</span>
+          <div className="kpi-val green-txt font-mono">{availPct}%</div>
+          <span className="kpi-sub">{passProbes} / {totalProbes} successful probes</span>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <div className="text-[11px] uppercase tracking-wider text-slate-400 font-medium mb-1">
-            Last Response Time
-          </div>
-          <div className="text-2xl font-bold text-cyan-400 font-mono">
+        <div className="kpi-card">
+          <span className="kpi-lbl">LAST RESPONSE TIME</span>
+          <div className="kpi-val cyan-txt font-mono">
             {test.last_response_time_ms ? `${test.last_response_time_ms.toFixed(1)} ms` : '--'}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">Threshold: {test.response_time_threshold_ms} ms</p>
+          <span className="kpi-sub">Threshold: {test.response_time_threshold_ms} ms</span>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <div className="text-[11px] uppercase tracking-wider text-slate-400 font-medium mb-1">
-            Failure Breach Count
-          </div>
-          <div className={`text-2xl font-bold font-mono ${test.breach_counter > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+        <div className="kpi-card">
+          <span className="kpi-lbl">BREACH COUNTER</span>
+          <div className={`kpi-val font-mono ${test.breach_counter > 0 ? 'red-txt' : ''}`}>
             {test.breach_counter || 0}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">Concurring failing checks</p>
+          <span className="kpi-sub">Consecutive failing checks</span>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/80 rounded-xl">
-          <div className="text-[11px] uppercase tracking-wider text-slate-400 font-medium mb-1">
-            Last Checked At
-          </div>
-          <div className="text-sm font-semibold text-slate-200 mt-2 font-mono">
+        <div className="kpi-card">
+          <span className="kpi-lbl">LAST CHECKED AT</span>
+          <div className="kpi-val font-mono text-sm">
             {test.last_check_at ? new Date(test.last_check_at).toLocaleTimeString() : 'Never'}
           </div>
-          <p className="text-[11px] text-slate-500 mt-0.5">
+          <span className="kpi-sub">
             {test.last_check_at ? new Date(test.last_check_at).toLocaleDateString() : ''}
-          </p>
+          </span>
         </div>
       </div>
 
-      {/* Latency Breakdown Bar */}
-      {latestResult.total_response_time_ms > 0 && (
-        <div className="p-5 bg-slate-900/60 border border-slate-800/80 rounded-xl space-y-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-300">Latest Probe Network Latency Breakdown</span>
-            <span className="font-mono text-cyan-400 font-bold">
-              Total: {latestResult.total_response_time_ms.toFixed(2)} ms
-            </span>
+      {/* Latency Breakdown */}
+      {latestResult.response_time_ms > 0 && (
+        <div className="breakdown-card">
+          <div className="breakdown-header">
+            <span>Latest Probe Network Latency Breakdown</span>
+            <span className="total-lat font-mono">Total: {latestResult.response_time_ms.toFixed(2)} ms</span>
           </div>
 
-          <div className="grid grid-cols-4 gap-3 text-xs">
-            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold block">DNS Lookup</span>
-              <span className="text-sm font-mono font-bold text-amber-400">
-                {latestResult.dns_lookup_ms?.toFixed(2) || '0.00'} ms
-              </span>
+          <div className="breakdown-grid">
+            <div className="metric-box">
+              <span className="lbl">DNS Lookup</span>
+              <span className="val amber-txt font-mono">{latestResult.dns_time_ms?.toFixed(2) || '0.00'} ms</span>
             </div>
-            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold block">TLS Handshake</span>
-              <span className="text-sm font-mono font-bold text-indigo-400">
-                {latestResult.tls_handshake_ms?.toFixed(2) || '0.00'} ms
-              </span>
+            <div className="metric-box">
+              <span className="lbl">TLS Handshake</span>
+              <span className="val indigo-txt font-mono">{latestResult.tls_time_ms?.toFixed(2) || '0.00'} ms</span>
             </div>
-            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold block">Time To First Byte (TTFB)</span>
-              <span className="text-sm font-mono font-bold text-cyan-400">
-                {latestResult.ttfb_ms?.toFixed(2) || '0.00'} ms
-              </span>
+            <div className="metric-box">
+              <span className="lbl">Time To First Byte (TTFB)</span>
+              <span className="val cyan-txt font-mono">{latestResult.ttfb_ms?.toFixed(2) || '0.00'} ms</span>
             </div>
-            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold block">HTTP Status Code</span>
-              <span className="text-sm font-mono font-bold text-emerald-400">
-                {latestResult.status_code || test.expected_status}
-              </span>
+            <div className="metric-box">
+              <span className="lbl">HTTP Status Code</span>
+              <span className="val green-txt font-mono">{latestResult.http_status || test.expected_status}</span>
             </div>
           </div>
         </div>
       )}
 
       {/* Historical Execution Log Table */}
-      <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-white">Execution Logs & Probe History</h3>
-          <span className="text-xs text-slate-400">{results.length} recent executions</span>
+      <div className="details-table-card">
+        <div className="table-header">
+          <h3>Execution Logs &amp; Probe History</h3>
+          <span>{results.length} recent executions</span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
+        <div className="table-wrap">
+          <table className="synth-data-table">
+            <thead>
               <tr>
-                <th className="px-4 py-3">Timestamp</th>
-                <th className="px-4 py-3">Result Status</th>
-                <th className="px-4 py-3">HTTP Code</th>
-                <th className="px-4 py-3">Total Latency</th>
-                <th className="px-4 py-3">DNS</th>
-                <th className="px-4 py-3">TLS</th>
-                <th className="px-4 py-3">TTFB</th>
-                <th className="px-4 py-3">Details / Notes</th>
+                <th>TIMESTAMP</th>
+                <th>RESULT STATUS</th>
+                <th>HTTP CODE</th>
+                <th>TOTAL LATENCY</th>
+                <th>DNS</th>
+                <th>TLS</th>
+                <th>TTFB</th>
+                <th>DETAILS / NOTES</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/50">
+            <tbody>
               {results.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={8} className="synth-empty-td">
                     No probe history recorded yet. Click "Run Probe Now" to trigger an instant check.
                   </td>
                 </tr>
               ) : (
-                results.map((r) => {
-                  const SIcon = statusColors[r.status]?.icon || Activity;
-                  return (
-                    <tr key={r.id} className="hover:bg-slate-800/30 transition-colors font-mono">
-                      <td className="px-4 py-3 text-slate-400">
-                        {new Date(r.created_at).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold border flex items-center gap-1 w-max ${
-                            statusColors[r.status]?.bg || 'bg-slate-800 text-slate-400'
-                          }`}
-                        >
-                          <SIcon size={12} />
-                          {r.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 font-bold text-slate-200">{r.status_code || '--'}</td>
-                      <td className="px-4 py-3 text-cyan-400 font-bold">{r.total_response_time_ms.toFixed(1)} ms</td>
-                      <td className="px-4 py-3 text-slate-400">{r.dns_lookup_ms?.toFixed(1)} ms</td>
-                      <td className="px-4 py-3 text-slate-400">{r.tls_handshake_ms?.toFixed(1)} ms</td>
-                      <td className="px-4 py-3 text-slate-400">{r.ttfb_ms?.toFixed(1)} ms</td>
-                      <td className="px-4 py-3 text-slate-400 font-sans max-w-xs truncate" title={r.error_message}>
-                        {r.error_message || 'OK'}
-                      </td>
-                    </tr>
-                  );
-                })
+                results.map((r) => (
+                  <tr key={r.id} className="font-mono">
+                    <td className="muted-txt">{new Date(r.timestamp || r.created_at).toLocaleString()}</td>
+                    <td>{statusBadge(r.status)}</td>
+                    <td className="fw-bold">{r.http_status || '--'}</td>
+                    <td className="cyan-txt fw-bold">{r.response_time_ms.toFixed(1)} ms</td>
+                    <td className="muted-txt">{r.dns_time_ms?.toFixed(1)} ms</td>
+                    <td className="muted-txt">{r.tls_time_ms?.toFixed(1)} ms</td>
+                    <td className="muted-txt">{r.ttfb_ms?.toFixed(1)} ms</td>
+                    <td className="muted-txt max-err">{r.error_message || 'OK'}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      <style>{`
+        .synth-details-root {
+          padding: 28px 36px;
+          min-height: 100vh;
+          background-color: #0b0f19;
+          color: #f1f5f9;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+
+        .synth-details-loading, .synth-details-notfound {
+          padding: 48px;
+          text-align: center;
+          color: #94a3b8;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 400px;
+        }
+
+        .details-nav-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .back-btn {
+          background: transparent;
+          border: none;
+          color: #94a3b8;
+          font-size: 12px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+        }
+        .back-btn:hover { color: #ffffff; }
+
+        .actions-right {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .ctrl-select {
+          background: #111827;
+          border: 1px solid #1f293d;
+          color: #cbd5e1;
+          border-radius: 8px;
+          padding: 8px 12px;
+          font-size: 12px;
+          outline: none;
+        }
+
+        .ctrl-btn {
+          background: #1e293b;
+          border: 1px solid #334155;
+          color: #f1f5f9;
+          border-radius: 8px;
+          padding: 8px 14px;
+          font-size: 12px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+        }
+        .ctrl-btn:hover { background: #334155; }
+        .primary-btn {
+          background: #4f46e5 !important;
+          border-color: #4338ca !important;
+          color: #ffffff !important;
+        }
+
+        .details-banner {
+          background: #111827;
+          border: 1px solid #1f293d;
+          border-radius: 16px;
+          padding: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .banner-left {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+        .icon-badge {
+          background: rgba(99, 102, 241, 0.1);
+          border: 1px solid rgba(99, 102, 241, 0.2);
+          padding: 10px;
+          border-radius: 12px;
+        }
+        .title-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .title-row h2 {
+          font-size: 20px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0;
+        }
+        .method-badge {
+          background: #1e293b;
+          color: #a5b4fc;
+          border: 1px solid #334155;
+          font-size: 11px;
+          font-weight: 800;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-family: monospace;
+        }
+        .url-txt {
+          font-size: 12px;
+          color: #64748b;
+          margin: 4px 0 0 0;
+        }
+
+        .banner-meta {
+          display: flex;
+          align-items: center;
+          gap: 24px;
+          border-left: 1px solid #1f293d;
+          padding-left: 24px;
+        }
+        .meta-lbl {
+          display: block;
+          font-size: 10px;
+          font-weight: 800;
+          color: #64748b;
+        }
+        .meta-val {
+          font-size: 13px;
+          font-weight: 700;
+          color: #e2e8f0;
+        }
+
+        .details-kpi-row {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 14px;
+        }
+        .kpi-card {
+          background: #111827;
+          border: 1px solid #1f293d;
+          border-radius: 12px;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+        .kpi-lbl {
+          font-size: 10px;
+          font-weight: 800;
+          color: #94a3b8;
+          letter-spacing: 0.04em;
+        }
+        .kpi-val {
+          font-size: 22px;
+          font-weight: 800;
+          color: #ffffff;
+          margin-top: 4px;
+        }
+        .kpi-sub {
+          font-size: 10px;
+          color: #64748b;
+          margin-top: 2px;
+        }
+
+        .breakdown-card {
+          background: #111827;
+          border: 1px solid #1f293d;
+          border-radius: 14px;
+          padding: 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+        .breakdown-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          font-size: 13px;
+          font-weight: 700;
+          color: #e2e8f0;
+        }
+        .total-lat { color: #38bdf8; font-weight: 800; }
+
+        .breakdown-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 12px;
+        }
+        .metric-box {
+          background: #0b0f19;
+          border: 1px solid #1f293d;
+          border-radius: 8px;
+          padding: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .metric-box .lbl {
+          font-size: 10px;
+          color: #64748b;
+          font-weight: 700;
+          text-transform: uppercase;
+        }
+        .metric-box .val {
+          font-size: 15px;
+          font-weight: 800;
+        }
+
+        .details-table-card {
+          background: #111827;
+          border: 1px solid #1f293d;
+          border-radius: 14px;
+          overflow: hidden;
+        }
+        .table-header {
+          padding: 16px 20px;
+          background: #0b0f19;
+          border-bottom: 1px solid #1f293d;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .table-header h3 {
+          font-size: 14px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0;
+        }
+        .table-header span {
+          font-size: 12px;
+          color: #64748b;
+        }
+
+        .table-wrap { overflow-x: auto; }
+        .synth-data-table {
+          width: 100%;
+          border-collapse: collapse;
+          text-align: left;
+          font-size: 12px;
+        }
+        .synth-data-table th {
+          background: #0b0f19;
+          color: #64748b;
+          padding: 12px 16px;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          border-bottom: 1px solid #1f293d;
+        }
+        .synth-data-table td {
+          padding: 14px 16px;
+          border-bottom: 1px solid #1a2333;
+          color: #cbd5e1;
+        }
+
+        .synth-status-badge {
+          font-size: 10px;
+          font-weight: 800;
+          padding: 3px 8px;
+          border-radius: 6px;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .synth-status-badge.pass {
+          background: rgba(34, 197, 94, 0.15);
+          color: #22c55e;
+          border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .synth-status-badge.degraded {
+          background: rgba(245, 158, 11, 0.15);
+          color: #f59e0b;
+          border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+        .synth-status-badge.fail {
+          background: rgba(239, 68, 68, 0.15);
+          color: #ef4444;
+          border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .synth-status-badge.timeout {
+          background: rgba(249, 115, 22, 0.15);
+          color: #f97316;
+          border: 1px solid rgba(249, 115, 22, 0.3);
+        }
+        .synth-status-badge.pending {
+          background: #1e293b;
+          color: #94a3b8;
+          border: 1px solid #334155;
+        }
+
+        .green-txt { color: #22c55e; }
+        .amber-txt { color: #f59e0b; }
+        .red-txt { color: #ef4444; }
+        .cyan-txt { color: #38bdf8; }
+        .indigo-txt { color: #818cf8; }
+        .font-mono { font-family: monospace; }
+        .fw-bold { font-weight: 700; color: #ffffff; }
+        .muted-txt { color: #94a3b8; }
+        .max-err { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 0.8s linear infinite; }
+      `}</style>
     </div>
   );
 }

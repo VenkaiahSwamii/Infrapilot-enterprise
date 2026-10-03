@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, ShieldAlert, Zap, Globe, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, ShieldAlert, Globe, AlertCircle } from 'lucide-react';
 import { createSyntheticTest, updateSyntheticTest } from '../../api/synthetic.js';
 
 export default function SyntheticTestDrawer({ isOpen, onClose, onSaved, initialTest = null }) {
@@ -38,7 +38,7 @@ export default function SyntheticTestDrawer({ isOpen, onClose, onSaved, initialT
     } else {
       setFormData({
         name: '',
-        url: 'https://',
+        url: '',
         method: 'GET',
         headers: '',
         body: '',
@@ -93,53 +93,44 @@ export default function SyntheticTestDrawer({ isOpen, onClose, onSaved, initialT
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-sm flex justify-end animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl bg-slate-900 text-slate-100 border-l border-slate-800 shadow-2xl h-full flex flex-col">
+    <div className="synth-drawer-backdrop">
+      <div className="synth-drawer-container">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-indigo-400">
-              <Globe size={20} />
+        <div className="synth-drawer-header">
+          <div className="synth-drawer-title-wrap">
+            <div className="synth-drawer-icon">
+              <Globe size={20} color="#6366f1" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-white">
-                {initialTest ? 'Edit Synthetic Probe' : 'Create Synthetic Probe'}
-              </h2>
-              <p className="text-xs text-slate-400">
-                Automated HTTP endpoint uptime, latency, and assertions
-              </p>
+              <h3>{initialTest ? 'Edit Synthetic Probe' : 'Create Synthetic Probe'}</h3>
+              <p>Automated HTTP endpoint uptime, latency, and response assertions</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-          >
+          <button onClick={onClose} className="synth-drawer-close-btn">
             <X size={18} />
           </button>
         </div>
 
         {/* Security Alert Banner */}
-        <div className="mx-6 mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-2.5">
-          <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+        <div className="synth-alert-banner">
+          <ShieldAlert size={16} className="amber-icon" />
           <div>
-            <span className="font-semibold">SSRF Protection Active:</span> Probes to cloud metadata (169.254.169.254), private loopbacks, or local broadcast endpoints are blocked.
+            <strong>SSRF Protection Active:</strong> Probes to cloud metadata (169.254.169.254), private loopbacks, or local broadcast endpoints are blocked.
           </div>
         </div>
 
         {errorMessage && (
-          <div className="mx-6 mt-3 p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
-            <AlertCircle size={16} className="shrink-0" />
+          <div className="synth-error-banner">
+            <AlertCircle size={16} />
             <span>{errorMessage}</span>
           </div>
         )}
 
         {/* Form Body */}
-        <form id="synthetic-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
+        <form id="synthetic-form" onSubmit={handleSubmit} className="synth-drawer-form">
           {/* Test Name */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Probe Target Name *
-            </label>
+          <div className="form-group">
+            <label>Probe Target Name *</label>
             <input
               type="text"
               name="name"
@@ -147,20 +138,15 @@ export default function SyntheticTestDrawer({ isOpen, onClose, onSaved, initialT
               placeholder="e.g. Auth Gateway Healthcheck"
               value={formData.name}
               onChange={handleChange}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+              className="form-input"
             />
           </div>
 
           {/* URL & Method */}
-          <div className="grid grid-cols-4 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Method</label>
-              <select
-                name="method"
-                value={formData.method}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
-              >
+          <div className="form-row grid-4">
+            <div className="form-group col-1">
+              <label>Method</label>
+              <select name="method" value={formData.method} onChange={handleChange} className="form-select">
                 <option value="GET">GET</option>
                 <option value="POST">POST</option>
                 <option value="PUT">PUT</option>
@@ -168,8 +154,8 @@ export default function SyntheticTestDrawer({ isOpen, onClose, onSaved, initialT
                 <option value="HEAD">HEAD</option>
               </select>
             </div>
-            <div className="col-span-3">
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Target Endpoint URL *</label>
+            <div className="form-group col-3">
+              <label>Target Endpoint URL *</label>
               <input
                 type="url"
                 name="url"
@@ -177,141 +163,293 @@ export default function SyntheticTestDrawer({ isOpen, onClose, onSaved, initialT
                 placeholder="https://api.yourdomain.com/health"
                 value={formData.url}
                 onChange={handleChange}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+                className="form-input mono"
               />
             </div>
           </div>
 
           {/* Interval & Timeout & Expected Status */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Check Interval</label>
-              <select
-                name="interval_seconds"
-                value={formData.interval_seconds}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
-              >
+          <div className="form-row grid-3">
+            <div className="form-group">
+              <label>Check Interval</label>
+              <select name="interval_seconds" value={formData.interval_seconds} onChange={handleChange} className="form-select">
                 <option value={15}>Every 15s</option>
                 <option value={30}>Every 30s</option>
                 <option value={60}>Every 1 min</option>
                 <option value={300}>Every 5 min</option>
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Expected HTTP Status</label>
+            <div className="form-group">
+              <label>Expected HTTP Status</label>
               <input
                 type="number"
                 name="expected_status"
                 value={formData.expected_status}
                 onChange={handleChange}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
+                className="form-input mono"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Degraded Threshold (ms)</label>
+            <div className="form-group">
+              <label>Degraded Threshold (ms)</label>
               <input
                 type="number"
                 name="response_time_threshold_ms"
                 value={formData.response_time_threshold_ms}
                 onChange={handleChange}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
+                className="form-input mono"
               />
             </div>
           </div>
 
           {/* Timeout & Validation */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Timeout Limit (ms)</label>
+          <div className="form-row grid-2">
+            <div className="form-group">
+              <label>Timeout Limit (ms)</label>
               <input
                 type="number"
                 name="timeout_ms"
                 value={formData.timeout_ms}
                 onChange={handleChange}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
+                className="form-input mono"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Body Substring Match (Optional)</label>
+            <div className="form-group">
+              <label>Body Substring Match (Optional)</label>
               <input
                 type="text"
                 name="validation_contains"
                 placeholder='e.g. "status":"ok"'
                 value={formData.validation_contains}
                 onChange={handleChange}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
+                className="form-input mono"
               />
             </div>
           </div>
 
           {/* Request Headers JSON */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Custom HTTP Headers (JSON string)
-            </label>
+          <div className="form-group">
+            <label>Custom HTTP Headers (JSON string)</label>
             <textarea
               name="headers"
               rows={2}
               placeholder='{"Authorization": "Bearer token123", "X-Custom-Header": "value"}'
               value={formData.headers}
               onChange={handleChange}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
+              className="form-textarea mono"
             />
           </div>
 
           {/* Request Body (POST/PUT) */}
           {['POST', 'PUT', 'PATCH'].includes(formData.method) && (
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                HTTP Request Payload Body
-              </label>
+            <div className="form-group">
+              <label>HTTP Request Payload Body</label>
               <textarea
                 name="body"
                 rows={3}
                 placeholder='{"ping": true}'
                 value={formData.body}
                 onChange={handleChange}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
+                className="form-textarea mono"
               />
             </div>
           )}
 
           {/* Active Enabled Toggle */}
-          <div className="flex items-center gap-3 pt-2">
+          <div className="checkbox-row">
             <input
               type="checkbox"
               id="enabled"
               name="enabled"
               checked={formData.enabled}
               onChange={handleChange}
-              className="h-4 w-4 rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-indigo-500"
             />
-            <label htmlFor="enabled" className="text-xs text-slate-200 cursor-pointer">
-              Enable automated synthetic probe runner
-            </label>
+            <label htmlFor="enabled">Enable automated synthetic probe runner</label>
           </div>
         </form>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-800 bg-slate-950 flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-          >
+        <div className="synth-drawer-footer">
+          <button type="button" onClick={onClose} className="btn-secondary">
             Cancel
           </button>
-          <button
-            type="submit"
-            form="synthetic-form"
-            disabled={isSubmitting}
-            className="px-4 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-lg shadow-indigo-600/20 disabled:opacity-50 transition-all flex items-center gap-2"
-          >
+          <button type="submit" form="synthetic-form" disabled={isSubmitting} className="btn-primary">
             {isSubmitting ? 'Saving...' : initialTest ? 'Update Probe' : 'Save & Trigger Probe'}
           </button>
         </div>
       </div>
+
+      <style>{`
+        .synth-drawer-backdrop {
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(0, 0, 0, 0.7);
+          backdrop-filter: blur(4px);
+          z-index: 9999;
+          display: flex;
+          justify-content: flex-end;
+        }
+        .synth-drawer-container {
+          width: 100%;
+          max-width: 640px;
+          height: 100%;
+          background: #111827;
+          border-left: 1px solid #1f293d;
+          display: flex;
+          flex-direction: column;
+          color: #f1f5f9;
+        }
+        .synth-drawer-header {
+          padding: 18px 24px;
+          background: #0b0f19;
+          border-bottom: 1px solid #1f293d;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .synth-drawer-title-wrap {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .synth-drawer-icon {
+          background: rgba(99, 102, 241, 0.1);
+          border: 1px solid rgba(99, 102, 241, 0.2);
+          padding: 8px;
+          border-radius: 8px;
+        }
+        .synth-drawer-title-wrap h3 {
+          font-size: 16px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0;
+        }
+        .synth-drawer-title-wrap p {
+          font-size: 12px;
+          color: #64748b;
+          margin: 2px 0 0 0;
+        }
+        .synth-drawer-close-btn {
+          background: transparent;
+          border: none;
+          color: #64748b;
+          cursor: pointer;
+          padding: 6px;
+          border-radius: 6px;
+        }
+        .synth-drawer-close-btn:hover { background: #1e293b; color: #ffffff; }
+
+        .synth-alert-banner {
+          margin: 16px 24px 0 24px;
+          padding: 12px 14px;
+          background: rgba(245, 158, 11, 0.1);
+          border: 1px solid rgba(245, 158, 11, 0.2);
+          border-radius: 8px;
+          color: #fcd34d;
+          font-size: 12px;
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+        }
+        .amber-icon { color: #f59e0b; flex-shrink: 0; margin-top: 1px; }
+
+        .synth-error-banner {
+          margin: 12px 24px 0 24px;
+          padding: 10px 14px;
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.2);
+          border-radius: 8px;
+          color: #fca5a5;
+          font-size: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .synth-drawer-form {
+          flex: 1;
+          overflow-y: auto;
+          padding: 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 18px;
+        }
+
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .form-group label {
+          font-size: 11px;
+          font-weight: 700;
+          color: #94a3b8;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+        .form-input, .form-select, .form-textarea {
+          background: #0b0f19;
+          border: 1px solid #1f293d;
+          border-radius: 8px;
+          padding: 8px 12px;
+          color: #f1f5f9;
+          font-size: 13px;
+          outline: none;
+          transition: border-color 0.15s ease;
+        }
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+          border-color: #6366f1;
+        }
+        .mono { font-family: monospace; }
+
+        .form-row { display: grid; gap: 12px; }
+        .grid-2 { grid-template-columns: 1fr 1fr; }
+        .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+        .grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+        .col-1 { grid-column: span 1; }
+        .col-3 { grid-column: span 3; }
+
+        .checkbox-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: #cbd5e1;
+          margin-top: 4px;
+        }
+
+        .synth-drawer-footer {
+          padding: 16px 24px;
+          background: #0b0f19;
+          border-top: 1px solid #1f293d;
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 12px;
+        }
+        .btn-secondary {
+          background: #1e293b;
+          border: 1px solid #334155;
+          color: #cbd5e1;
+          padding: 8px 16px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .btn-secondary:hover { background: #334155; color: #ffffff; }
+        .btn-primary {
+          background: #4f46e5;
+          border: 1px solid #4338ca;
+          color: #ffffff;
+          padding: 8px 18px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .btn-primary:hover:not(:disabled) { background: #4338ca; }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+      `}</style>
     </div>
   );
 }
