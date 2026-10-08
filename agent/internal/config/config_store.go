@@ -33,22 +33,37 @@ func DefaultConfigPath() string {
 		}
 	}
 
-	// If running alongside executable in an installed directory or custom folder
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		if !strings.Contains(strings.ToLower(exeDir), "system32") {
-			return filepath.Join(exeDir, "config.json")
+	// Prioritize standard Linux config directories where the service user has write permission
+	if runtime.GOOS != "windows" {
+		for _, dir := range []string{"/etc/infrapilot", "/var/lib/infrapilot", "/opt/infrapilot"} {
+			if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
+				return filepath.Join(dir, "config.json")
+			}
 		}
 	}
 
+	// Windows standard Program Files installation directory
 	if runtime.GOOS == "windows" {
 		progFiles := os.Getenv("ProgramFiles")
 		if progFiles == "" {
 			progFiles = `C:\Program Files`
 		}
 		installDir := filepath.Join(progFiles, "InfraPilot")
-		if _, err := os.Stat(installDir); err == nil {
+		if stat, err := os.Stat(installDir); err == nil && stat.IsDir() {
 			return filepath.Join(installDir, "config.json")
+		}
+	}
+
+	// Running alongside executable in custom folder (ignore system binary directories like /usr/local/bin, /usr/bin, System32)
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		exeDirLower := strings.ToLower(exeDir)
+		if !strings.Contains(exeDirLower, "system32") &&
+			!strings.HasPrefix(exeDir, "/usr/bin") &&
+			!strings.HasPrefix(exeDir, "/usr/local/bin") &&
+			!strings.HasPrefix(exeDir, "/bin") &&
+			!strings.HasPrefix(exeDir, "/sbin") {
+			return filepath.Join(exeDir, "config.json")
 		}
 	}
 

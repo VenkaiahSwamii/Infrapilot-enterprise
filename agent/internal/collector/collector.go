@@ -342,24 +342,48 @@ func collectNetworkInterfaces() []metrics.NetworkInterfaceMetric {
 	return result
 }
 
+var (
+	serviceRestartCounts = make(map[string]int)
+	lastServiceStatuses  = make(map[string]string)
+)
+
 func collectServices() []metrics.ServiceMetric {
 	if runtime.GOOS == "linux" {
-		servicesToCheck := []string{"ssh", "cron", "systemd-journald", "docker", "nginx", "postgresql", "mysql", "redis"}
+		servicesToCheck := []string{"ssh", "cron", "systemd-journald", "nginx", "postgresql", "docker", "redis", "infrapilot-agent"}
 		result := make([]metrics.ServiceMetric, 0, len(servicesToCheck))
 		for _, name := range servicesToCheck {
 			cmd := exec.Command("systemctl", "is-active", name)
 			out, err := cmd.Output()
 			st := strings.TrimSpace(string(out))
-			status := "Stopped"
+
+			status := ""
 			if err == nil && (st == "active" || st == "activating" || st == "reloading") {
 				status = "Running"
 			} else if st == "failed" {
 				status = "Failed"
+			} else if st == "inactive" {
+				// Check if unit file is installed before declaring it Stopped
+				checkCmd := exec.Command("systemctl", "list-unit-files", name+"*")
+				checkOut, checkErr := checkCmd.Output()
+				if checkErr == nil && strings.Contains(string(checkOut), name) {
+					status = "Stopped"
+				} else {
+					continue // Uninstalled service, skip
+				}
+			} else {
+				continue // unknown or unit not found, skip
 			}
+
+			prevStatus := lastServiceStatuses[name]
+			if prevStatus != "" && (prevStatus == "Stopped" || prevStatus == "Failed") && status == "Running" {
+				serviceRestartCounts[name]++
+			}
+			lastServiceStatuses[name] = status
+
 			result = append(result, metrics.ServiceMetric{
 				Name:         name,
 				Status:       status,
-				RestartCount: 0,
+				RestartCount: serviceRestartCounts[name],
 			})
 		}
 		return result
@@ -396,16 +420,32 @@ func collectServices() []metrics.ServiceMetric {
 		}
 	}
 
+	targetWinServices := map[string]bool{
+		"spooler": true, "windefend": true, "eventlog": true, "wuauserv": true,
+		"w32time": true, "dhcp": true, "dnscache": true, "infrapilot-agent": true,
+	}
+
 	result := make([]metrics.ServiceMetric, 0, len(winServices))
 	for _, ws := range winServices {
+		nameLower := strings.ToLower(ws.Name)
+		if !targetWinServices[nameLower] {
+			continue
+		}
 		status := "Stopped"
 		if ws.Status == "Running" {
 			status = "Running"
 		}
+
+		prevStatus := lastServiceStatuses[ws.Name]
+		if prevStatus != "" && prevStatus == "Stopped" && status == "Running" {
+			serviceRestartCounts[ws.Name]++
+		}
+		lastServiceStatuses[ws.Name] = status
+
 		result = append(result, metrics.ServiceMetric{
 			Name:         ws.Name,
 			Status:       status,
-			RestartCount: 0,
+			RestartCount: serviceRestartCounts[ws.Name],
 		})
 	}
 	return result

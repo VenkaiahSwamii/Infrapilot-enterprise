@@ -63,6 +63,18 @@ func ExecuteTerminalCommand(c *gin.Context) {
 	}
 
 	machineID, _ := uuid.Parse(req.MachineID)
+	if machineID == uuid.Nil && strings.TrimSpace(req.MachineID) != "" && database.DB != nil {
+		var server models.Server
+		if err := database.DB.Where("LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR id::text LIKE ?", req.MachineID, req.MachineID, req.MachineID+"%").First(&server).Error; err == nil {
+			machineID = server.ID
+		}
+	}
+
+	if machineID == uuid.Nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "A valid target machine_id is required to execute commands"})
+		return
+	}
+
 	sessionID, _ := uuid.Parse(req.SessionID)
 
 	now := time.Now()

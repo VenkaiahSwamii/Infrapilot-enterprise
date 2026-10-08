@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -28,6 +29,8 @@ type agentK8sCluster struct {
 type agentK8sNode struct {
 	Name             string  `json:"name"`
 	Role             string  `json:"role"`
+	InternalIP       string  `json:"internal_ip"`
+	Version          string  `json:"version"`
 	CPU              float64 `json:"cpu"`
 	Memory           float64 `json:"memory"`
 	Disk             float64 `json:"disk"`
@@ -41,6 +44,7 @@ type agentK8sPod struct {
 	Name         string  `json:"name"`
 	Namespace    string  `json:"namespace"`
 	Node         string  `json:"node"`
+	IP           string  `json:"ip"`
 	Status       string  `json:"status"`
 	Phase        string  `json:"phase"`
 	Reason       string  `json:"reason"`
@@ -118,6 +122,65 @@ type agentK8sEvent struct {
 	InvolvedObject string    `json:"involved_object"`
 }
 
+func buildKubeConfig() (*rest.Config, error) {
+	// 1. Try InClusterConfig (if running inside k8s pod/daemonset)
+	if cfg, err := rest.InClusterConfig(); err == nil {
+		return cfg, nil
+	}
+
+	// 2. Candidate paths
+	var candidatePaths []string
+
+	// Check KUBECONFIG environment variable
+	if envPath := os.Getenv("KUBECONFIG"); envPath != "" {
+		for _, p := range filepath.SplitList(envPath) {
+			if strings.TrimSpace(p) != "" {
+				candidatePaths = append(candidatePaths, strings.TrimSpace(p))
+			}
+		}
+	}
+
+	// User home directory
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidatePaths = append(candidatePaths, filepath.Join(home, ".kube", "config"))
+	}
+
+	// System/Distribution specific locations
+	if runtime.GOOS == "windows" {
+		// If running as LocalSystem or service, check user directories
+		userProfiles, _ := filepath.Glob(`C:\Users\*\.kube\config`)
+		for _, up := range userProfiles {
+			low := strings.ToLower(up)
+			if !strings.Contains(low, "systemprofile") &&
+				!strings.Contains(low, "localservice") &&
+				!strings.Contains(low, "networkservice") {
+				candidatePaths = append(candidatePaths, up)
+			}
+		}
+		candidatePaths = append(candidatePaths, `C:\ProgramData\minikube\.kube\config`)
+	} else {
+		// Linux / Unix standard k8s paths
+		candidatePaths = append(candidatePaths,
+			"/etc/kubernetes/admin.conf",
+			"/etc/kubernetes/kubelet.conf",
+			"/etc/rancher/k3s/k3s.yaml",
+			"/etc/rancher/rke2/rke2.yaml",
+			"/var/snap/microk8s/current/credentials/client.config",
+			"/root/.kube/config",
+		)
+	}
+
+	for _, path := range candidatePaths {
+		if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+			if cfg, err := clientcmd.BuildConfigFromFlags("", path); err == nil {
+				return cfg, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no valid kubeconfig found")
+}
+
 func collectKubernetesData() (
 	k8sInstalled bool,
 	k8sClusterJSON string,
@@ -131,18 +194,7 @@ func collectKubernetesData() (
 	k8sStorageJSON string,
 	k8sEventsJSON string,
 ) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false, "", "[]", "[]", "[]", "[]", "[]", "[]", "[]", "[]", "[]"
-	}
-
-	kubeconfig := filepath.Join(home, ".kube", "config")
-	// Verify file exists
-	if _, err := os.Stat(kubeconfig); os.IsNotExist(err) {
-		return false, "", "[]", "[]", "[]", "[]", "[]", "[]", "[]", "[]", "[]"
-	}
-
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	config, err := buildKubeConfig()
 	if err != nil {
 		return false, "", "[]", "[]", "[]", "[]", "[]", "[]", "[]", "[]", "[]"
 	}
@@ -218,12 +270,39 @@ func collectKubernetesData() (
 				}
 			}
 
+			internalIP := ""
+			for _, addr := range n.Status.Addresses {
+				if addr.Type == "InternalIP" {
+					internalIP = addr.Address
+					break
+				}
+			}
+			if internalIP == "" && len(n.Status.Addresses) > 0 {
+				internalIP = n.Status.Addresses[0].Address
+			}
+
+			// Compute CPU and memory percentage based on Allocatable / Capacity if available
+			var cpuPct float64 = 0.0
+			var memPct float64 = 0.0
+			capCPU := n.Status.Capacity.Cpu().MilliValue()
+			allocCPU := n.Status.Allocatable.Cpu().MilliValue()
+			if capCPU > 0 && allocCPU > 0 {
+				cpuPct = float64(capCPU-allocCPU) / float64(capCPU) * 100.0
+			}
+			capMem := n.Status.Capacity.Memory().Value()
+			allocMem := n.Status.Allocatable.Memory().Value()
+			if capMem > 0 && allocMem > 0 {
+				memPct = float64(capMem-allocMem) / float64(capMem) * 100.0
+			}
+
 			nodes = append(nodes, agentK8sNode{
 				Name:             n.Name,
 				Role:             role,
-				CPU:              15.0 + rand.Float64()*25.0, // Fallback telemetry simulation
-				Memory:           20.0 + rand.Float64()*35.0,
-				Disk:             10.0 + rand.Float64()*15.0,
+				InternalIP:       internalIP,
+				Version:          n.Status.NodeInfo.KubeletVersion,
+				CPU:              cpuPct,
+				Memory:           memPct,
+				Disk:             0.0,
 				OS:               n.Status.NodeInfo.OSImage,
 				Kernel:           n.Status.NodeInfo.KernelVersion,
 				ContainerRuntime: n.Status.NodeInfo.ContainerRuntimeVersion,
@@ -255,15 +334,36 @@ func collectKubernetesData() (
 				age = time.Since(p.CreationTimestamp.Time).Round(time.Minute).String()
 			}
 
+			podIP := p.Status.PodIP
+			if podIP == "" && len(p.Status.PodIPs) > 0 {
+				podIP = p.Status.PodIPs[0].IP
+			}
+
+			var podCPU float64
+			var podMem float64
+			for _, c := range p.Spec.Containers {
+				if q := c.Resources.Requests.Cpu(); q != nil {
+					podCPU += float64(q.MilliValue()) / 10.0 // representation in percent of a core
+				} else if q := c.Resources.Limits.Cpu(); q != nil {
+					podCPU += float64(q.MilliValue()) / 10.0
+				}
+				if q := c.Resources.Requests.Memory(); q != nil {
+					podMem += float64(q.Value()) / (1024 * 1024) // MB
+				} else if q := c.Resources.Limits.Memory(); q != nil {
+					podMem += float64(q.Value()) / (1024 * 1024)
+				}
+			}
+
 			pods = append(pods, agentK8sPod{
 				Name:         p.Name,
 				Namespace:    p.Namespace,
 				Node:         p.Spec.NodeName,
+				IP:           podIP,
 				Status:       string(p.Status.Phase),
 				Phase:        string(p.Status.Phase),
 				Reason:       reason,
-				CPU:          0.1 + rand.Float64()*10.0,
-				Memory:       10.0 + rand.Float64()*120.0,
+				CPU:          podCPU,
+				Memory:       podMem,
 				RestartCount: restarts,
 				Age:          age,
 			})
@@ -374,11 +474,15 @@ func collectKubernetesData() (
 	nsList, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err == nil {
 		for _, n := range nsList.Items {
-			// Calculate pod count
+			// Calculate pod count and aggregate resource requests
 			podCount := 0
+			var nsCPU float64
+			var nsMem float64
 			for _, p := range pods {
 				if p.Namespace == n.Name {
 					podCount++
+					nsCPU += p.CPU
+					nsMem += p.Memory
 				}
 			}
 
@@ -386,8 +490,8 @@ func collectKubernetesData() (
 				Name:        n.Name,
 				Status:      string(n.Status.Phase),
 				PodCount:    podCount,
-				CPUUsage:    0.5 + rand.Float64()*10.0,
-				MemoryUsage: 50.0 + rand.Float64()*400.0,
+				CPUUsage:    nsCPU,
+				MemoryUsage: nsMem,
 			})
 		}
 	}

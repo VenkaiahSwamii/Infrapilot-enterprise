@@ -39,6 +39,9 @@ export default function LoginPage() {
       if (data.user) {
         localStorage.setItem('user', JSON.stringify({ username: data.user, email: data.email, id: data.user_id }));
       }
+      if (data.role) {
+        localStorage.setItem('user_role', data.role);
+      }
 
       navigate('/');
     } catch (err) {

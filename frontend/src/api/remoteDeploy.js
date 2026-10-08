@@ -30,3 +30,12 @@ export function getRemoteDeployHistory() {
 export function getRemoteDeployStatus(deployId) {
   return apiGet(`/agent/remote-deploy/${deployId}`);
 }
+
+/**
+ * Execute remote SSH agent uninstallation and decommissioning
+ * @param {string} serverId
+ * @param {Object} uninstallConfig - { host, port, username, auth_type, password, ssh_key, sudo_password, force_db_only }
+ */
+export function executeRemoteAgentUninstall(serverId, uninstallConfig) {
+  return apiPost(`/servers/${serverId}/remote-uninstall`, uninstallConfig);
+}

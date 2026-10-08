@@ -106,6 +106,21 @@ func PostTerminalCommandResult(c *gin.Context) {
 		"finished_at": now.Format(time.RFC3339),
 	})
 
+	if websocket.WS != nil {
+		websocket.WS.BroadcastJSON(map[string]interface{}{
+			"event":       "command_completed",
+			"type":        "command_completed",
+			"command_id":  cmd.ID.String(),
+			"machine_id":  cmd.MachineID.String(),
+			"command":     cmd.Command,
+			"status":      cmd.Status,
+			"stdout":      cmd.Stdout,
+			"stderr":      cmd.Stderr,
+			"exit_code":   cmd.ExitCode,
+			"finished_at": now.Format(time.RFC3339),
+		})
+	}
+
 	c.JSON(http.StatusOK, cmd)
 }
 

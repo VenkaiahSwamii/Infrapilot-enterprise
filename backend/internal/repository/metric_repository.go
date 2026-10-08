@@ -7,6 +7,7 @@ import (
 	"infrapilot/backend/internal/models"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -108,8 +109,12 @@ func (r *MetricRepository) CreateLinuxProcess(process models.LinuxProcess) error
 
 func (r *MetricRepository) UpsertLinuxService(service models.LinuxService) error {
 	return database.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "machine_id"}, {Name: "name"}},
-		DoUpdates: clause.AssignmentColumns([]string{"status", "restart_count", "last_seen_at"}),
+		Columns: []clause.Column{{Name: "machine_id"}, {Name: "name"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"status":        service.Status,
+			"restart_count": gorm.Expr("CASE WHEN linux_services.restart_count > ? THEN linux_services.restart_count ELSE ? END", service.RestartCount, service.RestartCount),
+			"last_seen_at":   service.LastSeenAt,
+		}),
 	}).Create(&service).Error
 }
 

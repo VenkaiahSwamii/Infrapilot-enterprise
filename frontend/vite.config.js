@@ -10,11 +10,11 @@ export default defineConfig({
     strictPort: false,
     proxy: {
       '/api': {
-        target: process.env.VITE_BACKEND_URL || 'http://localhost:8080',
+        target: process.env.VITE_BACKEND_URL || 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
       '/ws': {
-        target: process.env.VITE_WS_URL || 'ws://localhost:8080',
+        target: process.env.VITE_WS_URL || 'ws://127.0.0.1:8080',
         ws: true,
         changeOrigin: true,
       },

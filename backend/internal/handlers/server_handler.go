@@ -15,7 +15,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 
@@ -132,8 +131,13 @@ func (h *ServerHandler) RegisterServer(c *gin.Context) {
 		ip = req.IPAddress
 	}
 
-	// Active registration automatically clears prior decommission blocks
-	_ = utils.UndecommissionHost(database.DB, uuid.Nil, req.Hostname, ip)
+	var macID uuid.UUID
+	if req.MachineID != "" {
+		macID, _ = uuid.Parse(req.MachineID)
+	}
+
+	// When an agent explicitly registers (or re-registers), lift any prior decommission block
+	_ = utils.UndecommissionHost(database.DB, macID, req.Hostname, ip)
 
 	if req.MachineID != "" {
 		macID, err := uuid.Parse(req.MachineID)
@@ -358,65 +362,8 @@ func (h *ServerHandler) DeleteServer(c *gin.Context) {
 	}
 
 	if database.DB != nil {
-		txErr := database.DB.Transaction(func(tx *gorm.DB) error {
-			// 1. Record permanent decommission tombstone so agent cannot auto-resurrect or revert
-			if sUUID != uuid.Nil || hostname != "" || ipAddress != "" {
-				_ = utils.DecommissionHost(tx, sUUID, hostname, ipAddress, username, "Permanently deleted and decommissioned by administrator")
-			}
-
-			if sUUID != uuid.Nil {
-				strID := sUUID.String()
-				// Child tables referencing machine_id / server_id
-				tx.Exec("DELETE FROM linux_metrics WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_dockers WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_kubernetes WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_processes WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_services WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_logs WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_alerts WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_networks WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_storages WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM linux_servers WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM metrics WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM historical_metrics WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM audit_logs WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM user_host_permissions WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM terminal_commands WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM terminal_sessions WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM commands WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM file_operations WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM remediation_jobs WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM workflow_executions WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM incidents WHERE machine_id = ?", sUUID)
-				tx.Exec("DELETE FROM remote_deployment_records WHERE machine_id = ?", strID)
-				tx.Exec("DELETE FROM aiops_anomalies WHERE machine_id = ?", strID)
-				tx.Exec("DELETE FROM aiops_predictions WHERE machine_id = ?", strID)
-				tx.Exec("DELETE FROM aiops_recommendations WHERE machine_id = ?", strID)
-				tx.Exec("DELETE FROM docker_containers WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM docker_images WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM docker_volumes WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM docker_networks WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM docker_events WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM docker_hosts WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM kubernetes_clusters WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM ai_recommendations WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM ai_predictions WHERE server_id = ?", sUUID)
-				tx.Exec("DELETE FROM ai_health_scores WHERE server_id = ?", sUUID)
-				// Finally delete the server record itself
-				if err := tx.Exec("DELETE FROM servers WHERE id = ?", sUUID).Error; err != nil {
-					return err
-				}
-			}
-			if hostname != "" {
-				tx.Exec("DELETE FROM servers WHERE LOWER(hostname) = LOWER(?)", hostname)
-			}
-			if ipAddress != "" && ipAddress != "127.0.0.1" && ipAddress != "localhost" {
-				tx.Exec("DELETE FROM servers WHERE ip_address = ?", ipAddress)
-			}
-			return nil
-		})
-		if txErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+		if err := utils.PurgeServerCascade(database.DB, sUUID, hostname, ipAddress, username, "Permanently deleted and decommissioned by administrator"); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 	}
@@ -636,8 +583,9 @@ func (h *ServerHandler) UnblockServer(c *gin.Context) {
 	}
 
 	if database.DB != nil {
-		_ = database.DB.Exec("UPDATE servers SET status = 'ONLINE', is_blocked = false, online = true, last_seen = ? WHERE id::text = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?", now, sID, hostname, idStr)
-		_ = database.DB.Exec("UPDATE machines SET status = 'ONLINE', is_blocked = false, online = true, last_seen = ? WHERE id::text = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?", now, sID, hostname, idStr)
+		_ = utils.UndecommissionHost(database.DB, server.ID, hostname, idStr)
+		_ = database.DB.Exec("UPDATE servers SET status = 'ONLINE', is_blocked = false, online = true, last_seen = ? WHERE CAST(id AS TEXT) = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?", now, sID, hostname, idStr)
+		_ = database.DB.Exec("UPDATE machines SET status = 'ONLINE', is_blocked = false, online = true, last_seen = ? WHERE CAST(id AS TEXT) = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?", now, sID, hostname, idStr)
 	}
 
 	h.serverService.BroadcastStatusUpdate(server)

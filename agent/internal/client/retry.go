@@ -32,11 +32,15 @@ func PostWithRetry(url string, body []byte, contentType string) error {
 		}
 		req.Header.Set("Content-Type", contentType)
 
-		// Set API Key headers
+		// Set API Key and Machine identification headers
 		apiKey := config.Get().APIKey
 		if apiKey != "" {
 			req.Header.Set("X-API-Key", apiKey)
 			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+		machineID := config.Get().MachineID
+		if machineID != "" {
+			req.Header.Set("X-Machine-ID", machineID)
 		}
 
 		resp, err := HTTPClient.Do(req)

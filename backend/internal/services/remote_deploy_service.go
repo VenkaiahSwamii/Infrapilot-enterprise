@@ -23,6 +23,40 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// RemoteUninstallTarget represents target machine credentials and options for uninstallation
+type RemoteUninstallTarget struct {
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	Username     string `json:"username"`
+	AuthType     string `json:"auth_type"` // "password" or "key"
+	Password     string `json:"password"`
+	SSHKey       string `json:"ssh_key"`
+	SudoPassword string `json:"sudo_password"`
+	ForceDBOnly  bool   `json:"force_db_only"`
+}
+
+// RemoteUninstallStep represents one step in the uninstall workflow
+type RemoteUninstallStep struct {
+	StepID     int    `json:"step_id"`
+	Title      string `json:"title"`
+	Status     string `json:"status"` // "pending", "running", "success", "failed", "skipped"
+	Details    string `json:"details"`
+	Output     string `json:"output,omitempty"`
+	DurationMs int64  `json:"duration_ms"`
+}
+
+// RemoteUninstallResult represents the complete outcome of a remote uninstall execution
+type RemoteUninstallResult struct {
+	Success     bool                  `json:"success"`
+	Host        string                `json:"host"`
+	Hostname    string                `json:"hostname"`
+	Steps       []RemoteUninstallStep `json:"steps"`
+	Logs        []string              `json:"logs"`
+	TotalTimeMs int64                 `json:"total_time_ms"`
+	Error       string                `json:"error,omitempty"`
+	Message     string                `json:"message"`
+}
+
 // RemoteDeployTarget represents target machine credentials and options
 type RemoteDeployTarget struct {
 	Host         string `json:"host" binding:"required"`
@@ -435,12 +469,12 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	updateStep(2, "running", "Provisioning InfraPilot Enterprise Agent package...", "", 0)
 
 	serverURL := strings.TrimRight(target.ServerURL, "/")
-	if serverURL == "" || strings.Contains(serverURL, "localhost") || strings.Contains(serverURL, "127.0.0.1") {
+	if serverURL == "" {
 		cfg := config.Get()
-		if cfg.BackendURL != "" {
+		if cfg != nil && cfg.BackendURL != "" {
 			serverURL = strings.TrimRight(cfg.BackendURL, "/")
 		} else {
-			serverURL = "http://127.0.0.1:8080"
+			serverURL = "http://localhost:8080"
 		}
 	}
 
@@ -491,12 +525,22 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 			}
 		} else {
 			// Linux target non-root systemd installer execution
-			installScriptCmd := fmt.Sprintf(`curl -fsSL "%s/api/v1/agent/install.sh" | sudo SERVER_URL="%s" ENROLL_TOKEN="%s" bash`, serverURL, serverURL, enrollToken)
+			sudoPass := target.SudoPassword
+			if sudoPass == "" {
+				sudoPass = target.Password
+			}
+			safePass := strings.ReplaceAll(sudoPass, "'", "'\\''")
+			var installScriptCmd string
+			if target.Username == "root" || sudoPass == "" {
+				installScriptCmd = fmt.Sprintf(`mkdir -p /tmp/infrapilot && cd /tmp/infrapilot && curl -fsSL "%s/api/v1/agent/install.sh" -o install.sh && chmod +x install.sh && SERVER_URL="%s" ENROLL_TOKEN="%s" ./install.sh`, serverURL, serverURL, enrollToken)
+			} else {
+				installScriptCmd = fmt.Sprintf(`mkdir -p /tmp/infrapilot && cd /tmp/infrapilot && curl -fsSL "%s/api/v1/agent/install.sh" -o install.sh && chmod +x install.sh && echo '%s' | sudo -S SERVER_URL="%s" ENROLL_TOKEN="%s" ./install.sh`, serverURL, safePass, serverURL, enrollToken)
+			}
 			installOut, err = runSSHCommand(client, installScriptCmd)
-			if err != nil || strings.Contains(installOut, "Error") {
-				addLog("[INFO] Standard elevated script execution fallback initiated...")
-				fallbackCmd := fmt.Sprintf(`mkdir -p /tmp/infrapilot && cd /tmp/infrapilot && curl -fsSL "%s/api/v1/agent/install.sh" -o install.sh && chmod +x install.sh && sudo SERVER_URL="%s" ENROLL_TOKEN="%s" ./install.sh`, serverURL, serverURL, enrollToken)
-				installOut, _ = runSSHCommand(client, fallbackCmd)
+			if err != nil || strings.Contains(installOut, "Error") || strings.Contains(installOut, "❌") {
+				addLog("[WARN] Primary script execution warning: %s. Initiating direct root shell retry...", installOut)
+				retryCmd := fmt.Sprintf(`echo '%s' | sudo -S bash -c 'curl -fsSL "%s/api/v1/agent/install.sh" | SERVER_URL="%s" ENROLL_TOKEN="%s" bash'`, safePass, serverURL, serverURL, enrollToken)
+				installOut, _ = runSSHCommand(client, retryCmd)
 			}
 		}
 	} else {
@@ -522,7 +566,7 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	var psOut string
 	if client != nil {
 		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
-			checkCmd := `powershell -Command "Get-Service -Name 'InfraPilotAgent' -ErrorAction SilentlyContinue | Select-Object Status, Name"`
+			checkCmd := `powershell -Command "Get-Service -Name 'infrapilot-agent','InfraPilotAgent' -ErrorAction SilentlyContinue | Select-Object Status, Name"`
 			psOut, _ = runSSHCommand(client, checkCmd)
 		} else {
 			checkCmd := `systemctl is-active infrapilot-agent || pgrep -f "infrapilot" || echo "RUNNING"`
@@ -710,4 +754,237 @@ func extractKey(output, key, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+// RemoteUninstallAgent cleanly stops and removes the agent daemon from the target machine via SSH,
+// cascades the database record purge, and registers a decommission tombstone.
+func (s *RemoteDeployService) RemoteUninstallAgent(ctx context.Context, serverIdentifier string, target RemoteUninstallTarget, actor string) (*RemoteUninstallResult, error) {
+	totalStart := time.Now()
+	if actor == "" {
+		actor = "admin"
+	}
+
+	result := &RemoteUninstallResult{
+		Success: true,
+		Logs:    make([]string, 0),
+		Steps: []RemoteUninstallStep{
+			{StepID: 1, Title: "SSH Connection & Authentication", Status: "pending", Details: "Pending..."},
+			{StepID: 2, Title: "Stop & Terminate Agent Service", Status: "pending", Details: "Pending..."},
+			{StepID: 3, Title: "Purge Agent Binaries, Units & Configs", Status: "pending", Details: "Pending..."},
+			{StepID: 4, Title: "Clean Database Records & Register Decommission Tombstone", Status: "pending", Details: "Pending..."},
+		},
+	}
+
+	addLog := func(format string, args ...interface{}) {
+		msg := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+		result.Logs = append(result.Logs, msg)
+	}
+
+	updateStep := func(idx int, status, details, output string, dur time.Duration) {
+		if idx >= 0 && idx < len(result.Steps) {
+			result.Steps[idx].Status = status
+			result.Steps[idx].Details = details
+			if output != "" {
+				result.Steps[idx].Output = output
+			}
+			result.Steps[idx].DurationMs = dur.Milliseconds()
+		}
+	}
+
+	// 1. Resolve Server info
+	var sUUID uuid.UUID
+	var hostname string
+	var ipAddress string
+	cleanIdentifier := serverIdentifier
+	cleanIdentifier = strings.TrimSuffix(cleanIdentifier, "_linux")
+	cleanIdentifier = strings.TrimSuffix(cleanIdentifier, "_windows")
+
+	server, err := s.serverService.GetServerByIDOrHostname(serverIdentifier)
+	if err == nil && server != nil {
+		sUUID = server.ID
+		hostname = server.Hostname
+		ipAddress = server.IPAddress
+	} else if parsed, parseErr := uuid.Parse(cleanIdentifier); parseErr == nil {
+		sUUID = parsed
+		hostname = cleanIdentifier
+	} else {
+		hostname = serverIdentifier
+	}
+
+	result.Hostname = hostname
+
+	targetHost := strings.TrimSpace(target.Host)
+	if targetHost == "" {
+		targetHost = ipAddress
+	}
+	if targetHost == "" {
+		targetHost = hostname
+	}
+	result.Host = targetHost
+
+	port := target.Port
+	if port <= 0 {
+		port = 22
+	}
+
+	// If ForceDBOnly is requested, skip SSH and proceed directly to DB purge
+	if target.ForceDBOnly {
+		addLog("[INFO] Force DB-Only deletion requested. Skipping remote SSH execution.")
+		updateStep(0, "skipped", "Skipped (Force DB Only requested)", "", 0)
+		updateStep(1, "skipped", "Skipped (Force DB Only requested)", "", 0)
+		updateStep(2, "skipped", "Skipped (Force DB Only requested)", "", 0)
+	} else {
+		if targetHost == "" {
+			errStr := "target host IP address is required for remote SSH uninstall"
+			updateStep(0, "failed", errStr, "", 0)
+			result.Success = false
+			result.Error = errStr
+			result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+			return result, nil
+		}
+
+		if target.Username == "" {
+			errStr := "SSH username is required for remote uninstallation"
+			updateStep(0, "failed", errStr, "", 0)
+			result.Success = false
+			result.Error = errStr
+			result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+			return result, nil
+		}
+
+		// Step 1: Connect SSH
+		step1Start := time.Now()
+		updateStep(0, "running", fmt.Sprintf("Connecting to %s:%d via SSH...", targetHost, port), "", 0)
+		addLog("Establishing SSH transport connection to %s:%d (user: %s)...", targetHost, port, target.Username)
+
+		sshTarget := RemoteDeployTarget{
+			Host:         targetHost,
+			Port:         port,
+			Username:     target.Username,
+			AuthType:     target.AuthType,
+			Password:     target.Password,
+			SSHKey:       target.SSHKey,
+			SudoPassword: target.SudoPassword,
+		}
+
+		sshConfig, err := s.buildSSHConfig(sshTarget)
+		if err != nil {
+			updateStep(0, "failed", err.Error(), "", time.Since(step1Start))
+			addLog("[ERROR] Credential configuration error: %v", err)
+			result.Success = false
+			result.Error = err.Error()
+			result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+			return result, nil
+		}
+
+		addr := fmt.Sprintf("%s:%d", targetHost, port)
+		client, err := ssh.Dial("tcp", addr, sshConfig)
+		if err != nil {
+			errMsg := fmt.Sprintf("Failed to authenticate SSH with %s: %v", addr, err)
+			updateStep(0, "failed", errMsg, "", time.Since(step1Start))
+			addLog("[ERROR] %s", errMsg)
+			result.Success = false
+			result.Error = errMsg
+			result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+			return result, nil
+		}
+		defer client.Close()
+
+		updateStep(0, "success", fmt.Sprintf("SSH authenticated successfully on %s:%d", targetHost, port), "", time.Since(step1Start))
+		addLog("SSH connection established with remote host.")
+
+		// Step 2: Stop & Terminate Service
+		step2Start := time.Now()
+		updateStep(1, "running", "Stopping agent service and terminating process...", "", 0)
+		addLog("Stopping and disabling background service...")
+
+		// Detect OS
+		isWindows := false
+		probeOut, _ := runSSHCommand(client, `cmd.exe /c "echo OS=Windows"`)
+		if strings.Contains(probeOut, "OS=Windows") {
+			isWindows = true
+		}
+
+		sudoPass := target.SudoPassword
+		if sudoPass == "" {
+			sudoPass = target.Password
+		}
+		sudoCmd := ""
+		if target.Username != "root" {
+			if sudoPass != "" {
+				sudoCmd = fmt.Sprintf("echo '%s' | sudo -S", strings.ReplaceAll(sudoPass, "'", "'\\''"))
+			} else {
+				sudoCmd = "sudo"
+			}
+		}
+
+		execCmd := func(command string) string {
+			if sudoCmd != "" {
+				return sudoCmd + " " + command
+			}
+			return command
+		}
+
+		var stopOut string
+		if isWindows {
+			stopCmd := `powershell -ExecutionPolicy Bypass -Command "Stop-Service infrapilot-agent -Force -ErrorAction SilentlyContinue; Stop-Process -Name infrapilot-agent -Force -ErrorAction SilentlyContinue; sc.exe delete infrapilot-agent"`
+			stopOut, _ = runSSHCommand(client, stopCmd)
+		} else {
+			stopScript := fmt.Sprintf("%s; %s; %s",
+				execCmd("systemctl stop infrapilot-agent 2>/dev/null || true"),
+				execCmd("systemctl disable infrapilot-agent 2>/dev/null || true"),
+				execCmd("pkill -9 -f infrapilot-agent 2>/dev/null || true"))
+			stopOut, _ = runSSHCommand(client, stopScript)
+		}
+
+		updateStep(1, "success", "Agent daemon stopped and service unregistered.", stopOut, time.Since(step2Start))
+		addLog("Agent background process stopped.")
+
+		// Step 3: Remove Binaries & Files
+		step3Start := time.Now()
+		updateStep(2, "running", "Purging binaries, configuration, and telemetry data...", "", 0)
+		addLog("Removing installed agent files and configurations from host...")
+
+		var purgeOut string
+		if isWindows {
+			purgeCmd := `powershell -ExecutionPolicy Bypass -Command "Remove-Item 'C:\Program Files\InfraPilot' -Recurse -Force -ErrorAction SilentlyContinue"`
+			purgeOut, _ = runSSHCommand(client, purgeCmd)
+		} else {
+			purgeScript := fmt.Sprintf("%s; %s; %s; %s; %s",
+				execCmd("rm -f /etc/systemd/system/infrapilot-agent.service"),
+				execCmd("rm -f /usr/local/bin/infrapilot-agent* /usr/bin/infrapilot-agent*"),
+				execCmd("rm -rf /etc/infrapilot /var/log/infrapilot /var/lib/infrapilot /etc/sudoers.d/infrapilot"),
+				execCmd("systemctl daemon-reload 2>/dev/null || true"),
+				execCmd("systemctl reset-failed 2>/dev/null || true"))
+			purgeOut, _ = runSSHCommand(client, purgeScript)
+		}
+
+		updateStep(2, "success", "Agent files, tokens, and systemd units removed from host.", purgeOut, time.Since(step3Start))
+		addLog("Agent binaries and config purged from host.")
+	}
+
+	// Step 4: Database Purge & Tombstone
+	step4Start := time.Now()
+	updateStep(3, "running", "Purging machine records and registering decommission tombstone...", "", 0)
+	addLog("Executing central database cascading delete for machine...")
+
+	if database.DB != nil {
+		if err := utils.PurgeServerCascade(database.DB, sUUID, hostname, ipAddress, actor, "Remotely uninstalled and decommissioned via SSH by administrator"); err != nil {
+			updateStep(3, "failed", "Database error: "+err.Error(), "", time.Since(step4Start))
+			addLog("[ERROR] Failed to purge database records: %v", err)
+			result.Success = false
+			result.Error = err.Error()
+			result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+			return result, err
+		}
+	}
+
+	updateStep(3, "success", "Server records purged from central database and decommission tombstone registered.", "", time.Since(step4Start))
+	addLog("Machine record %s completely wiped from database. Host decommissioned.", serverIdentifier)
+	utils.LogAudit(actor, sUUID, fmt.Sprintf("Permanently uninstalled and decommissioned agent %s (%s)", hostname, serverIdentifier), "Success")
+
+	result.Success = true
+	result.Message = fmt.Sprintf("Agent on host '%s' was successfully uninstalled and decommissioned.", targetHost)
+	result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+	return result, nil
 }

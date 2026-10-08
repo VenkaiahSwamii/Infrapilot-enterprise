@@ -386,6 +386,14 @@ func ResolveAlert(c *gin.Context) {
 		return
 	}
 
+	// Dispatch single resolution notification to complete email incident lifecycle
+	go func(a models.LinuxAlert) {
+		if !strings.HasPrefix(a.Title, "[RESOLVED] ") {
+			a.Title = fmt.Sprintf("[RESOLVED] %s", a.Title)
+		}
+		services.SendAlert(a)
+	}(alert)
+
 	if websocket.WS != nil {
 		websocket.WS.Broadcast(map[string]interface{}{
 			"type":            "alert.resolved",
@@ -530,6 +538,9 @@ func BulkResolveAlerts(c *gin.Context) {
 		return
 	}
 
+	var alertsToResolve []models.LinuxAlert
+	_ = query.Find(&alertsToResolve).Error
+
 	if err := query.Updates(map[string]interface{}{
 		"status":          "RESOLVED",
 		"resolved_by":     userName,
@@ -539,6 +550,20 @@ func BulkResolveAlerts(c *gin.Context) {
 	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk resolve"})
 		return
+	}
+
+	// Dispatch resolution notifications for all bulk-resolved alerts
+	for _, a := range alertsToResolve {
+		go func(alt models.LinuxAlert) {
+			if !strings.HasPrefix(alt.Title, "[RESOLVED] ") {
+				alt.Title = fmt.Sprintf("[RESOLVED] %s", alt.Title)
+			}
+			alt.Status = "RESOLVED"
+			alt.ResolvedAt = &now
+			alt.ResolvedBy = userName
+			alt.ResolutionNote = note
+			services.SendAlert(alt)
+		}(a)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "alerts resolved successfully"})

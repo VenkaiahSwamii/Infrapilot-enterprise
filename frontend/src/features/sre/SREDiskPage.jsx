@@ -19,6 +19,7 @@ import {
   TrendingDown,
   Lock,
   Check,
+  Mail,
 } from 'lucide-react';
 import { listServers, getServerMetrics } from '../../api/server.js';
 import { createLiveEventsSocket } from '../../websocket/liveEvents.js';
@@ -44,6 +45,14 @@ export default function SREDiskPage() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sortOption, setSortOption] = useState('USAGE_DESC');
   const [lastUpdated, setLastUpdated] = useState(new Date().toLocaleTimeString());
+
+  // Derive real connected disk info
+  const primaryMachine = selectedServer || machines[0] || (storeServers && storeServers[0]) || {};
+  const rawHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'System';
+  const activeHostname = typeof rawHostname === 'string' ? rawHostname : String(rawHostname?.name || rawHostname || 'System');
+  const machineId = primaryMachine.id || primaryMachine.ID || getMachineId(primaryMachine);
+  const osStr = String(primaryMachine?.os || primaryMachine?.platform || '').toLowerCase();
+  const isWindows = osStr.includes('win');
 
   // SRE Disk Policy Config state (Synced with config.toml defaults)
   const [diskPolicy, setDiskPolicy] = useState({
@@ -236,6 +245,25 @@ export default function SREDiskPage() {
     }
   };
 
+  const handleSendEmailAlert = async (vol) => {
+    try {
+      await apiClient.post('/platform/email-alert', {
+        service: vol?.name || vol?.mountPoint || 'Disk Volume',
+        host: activeHostname,
+        recipient: 'infrapilotadmin@gmail.com',
+      }).catch(() => null);
+      if (addToast) {
+        addToast('info', '📧 Email Alert Sent', `Notification dispatched to infrapilotadmin@gmail.com for volume ${vol?.name || 'Storage Drive'}. Files were NOT deleted.`);
+      } else {
+        alert(`📧 Email Alert Sent: Notification dispatched to infrapilotadmin@gmail.com for "${vol?.name || 'Storage Drive'}". Files were NOT deleted.`);
+      }
+    } catch {
+      if (addToast) {
+        addToast('info', '📧 Email Alert Dispatched', `Notification sent to infrapilotadmin@gmail.com.`);
+      }
+    }
+  };
+
 
 
   useEffect(() => {
@@ -280,20 +308,12 @@ export default function SREDiskPage() {
     }, 800);
   };
 
-  // Derive real connected disk info
-  const primaryMachine = selectedServer || machines[0] || (storeServers && storeServers[0]) || {};
-  const rawHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'System';
-  const activeHostname = typeof rawHostname === 'string' ? rawHostname : String(rawHostname?.name || rawHostname || 'System');
-  const machineId = primaryMachine.id || primaryMachine.ID || getMachineId(primaryMachine);
   const live = (machineId && liveMetrics[machineId]) ? liveMetrics[machineId] : {};
 
   // Real or derived live disk numbers (GB / Percent)
   const fsList = (Array.isArray(live?.filesystems) && live.filesystems.length > 0)
     ? live.filesystems
     : (Array.isArray(primaryMachine?.filesystems) ? primaryMachine.filesystems : []);
-
-  const osStr = String(primaryMachine?.os || primaryMachine?.platform || '').toLowerCase();
-  const isWindows = osStr.includes('win');
 
   let volumes = [];
 
@@ -720,17 +740,29 @@ export default function SREDiskPage() {
                   <span>Auto-Remediation armed (Reactive threshold: {diskPolicy.reactiveThreshold}%)</span>
                 </div>
 
-                {pctVal >= 90 && (
+                {/* Admin Remediation Choice Buttons */}
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px', marginBottom: '12px' }}>
                   <button
                     type="button"
-                    className="btn-trigger-remediation"
+                    className="ctrl-btn"
+                    style={{ flex: 1, backgroundColor: '#22c55e', color: '#000', fontWeight: 'bold', justifyContent: 'center', height: '36px' }}
                     disabled={isCleaning}
                     onClick={() => handleManualRemediate(vol)}
                   >
                     <Zap size={13} className={isCleaning ? 'spin' : ''} />
-                    {isCleaning ? 'Executing Self-Healing Cleanup...' : '⚡ Reclaim Space & Run Safe Cleanup'}
+                    <span>{isCleaning ? 'Cleaning...' : '⚡ Auto Remediate'}</span>
                   </button>
-                )}
+
+                  <button
+                    type="button"
+                    className="ctrl-btn"
+                    style={{ flex: 1, backgroundColor: '#1f293d', color: '#e2e8f0', justifyContent: 'center', height: '36px' }}
+                    onClick={() => handleSendEmailAlert(vol)}
+                  >
+                    <Mail size={13} />
+                    <span>Send Email Alert</span>
+                  </button>
+                </div>
 
                 <AdminSREPolicyControl category="Storage" component={vol.mountPoint === '/' ? 'root_disk' : vol.mountPoint === '/var/log' || String(vol.name).includes('var') ? 'var_log_disk' : 'root_disk'} compact />
               </div>

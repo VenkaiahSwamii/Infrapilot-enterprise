@@ -6,11 +6,11 @@
 [server]
 http_port = 8080
 grpc_port = 50051
-backend_url = "http://localhost:8080"
+backend_url = "http://192.168.1.86:8080"
 connection_timeout = 10
 retry_attempts = 3
 retry_delay = 5
-allowed_origins = ["http://192.168.1.2:5173", "http://192.168.1.2:3000", "http://192.168.1.2:8080", "http://192.168.1.2:5173", "http://192.168.1.2:3000", "http://192.168.1.2:8080", "http://localhost:5173", "http://localhost:3000"]
+allowed_origins = ["http://192.168.1.86:5173", "http://192.168.1.86:3000", "http://192.168.1.86:8080", "http://localhost:5173", "http://localhost:3000"]
 
 [server.tls]
 enabled = true
@@ -20,9 +20,10 @@ server_key = "certs/server.key"
 
 [server.database]
 driver = "postgres"
-host = "localhost"
+host = "192.168.1.136"
 port = 5432
 user = "postgres"
+password = "postgres"
 dbname = "infrapilot"
 sslmode = "disable"
 
@@ -51,8 +52,8 @@ export_aggregated_metrics = true
 
 # 2. Edge Agent (infrapilot-agent) Configuration
 [agent]
-server_address = "192.168.1.2:50051"
-backend_url = "http://localhost:8080"
+server_address = "192.168.1.86:50051"
+backend_url = "http://192.168.1.86:8080"
 machine_id = ""
 api_key = ""
 enrollment_token = ""
@@ -80,10 +81,31 @@ deny_list = [
 ]
 
 [agent.services]
+linux = [
+    "ssh.service",
+    "cron.service",
+    "systemd-journald.service",
+    "nginx.service",
+    "postgresql.service"
+]
+windows = [
+    "Spooler",
+    "WinDefend",
+    "EventLog",
+    "wuauserv",
+    "W32Time"
+]
 accept_list = [
     "ssh.service",
     "cron.service",
-    "systemd-journald.service"
+    "systemd-journald.service",
+    "nginx.service",
+    "postgresql.service",
+    "Spooler",
+    "WinDefend",
+    "EventLog",
+    "wuauserv",
+    "W32Time"
 ]
 
 [agent.latency]
@@ -113,16 +135,6 @@ kubernetes = true
 logs = true
 security = true
 
-# 3. Splunk Integration & HTTP Event Collector (HEC)
-[splunk]
-enabled = false
-hec_url = "https://splunk.yourdomain.com:8088/services/collector/event"
-token = "c203f6be-443d-4984-8758-eb29bef"
-index = "infrapilot_enterprise"
-sourcetype = "infrapilot:json"
-ssl_verify = true
-batch_size = 100
-flush_interval_seconds = 5
 
 # 4. Enterprise Alerting & Notification Policies
 [alerts]

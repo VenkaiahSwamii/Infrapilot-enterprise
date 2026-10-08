@@ -19,6 +19,7 @@ import {
   Terminal,
   Network,
   Globe,
+  Users,
 } from 'lucide-react';
 
 import { useAlertStore } from '../../store/alertStore.jsx';
@@ -50,10 +51,11 @@ export default function Sidebar({ collapsed, userProfile }) {
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, path: '/analytics' },
     { id: 'reports', label: 'Reports', icon: FileText, path: '/reports' },
     { id: 'agents', label: 'Agents', icon: Bot, path: '/agents' },
+    { id: 'users', label: 'User Management', icon: Users, path: '/admin/users', badge: 'RBAC', badgeColor: '#38bdf8' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/admin/settings' },
   ], [activeCount]);
 
-  const userRole = String(userProfile?.role || 'Admin').toLowerCase();
+  const userRole = String(userProfile?.role || localStorage.getItem('user_role') || 'Viewer').toLowerCase();
   const isAdmin = userRole.includes('admin') || userRole.includes('superadmin');
 
   const allowedModules = useMemo(() => {
@@ -70,9 +72,14 @@ export default function Sidebar({ collapsed, userProfile }) {
   }, [userProfile, isAdmin]);
 
   const visibleNavItems = useMemo(() => {
-    if (allowedModules === 'all') return navItems;
-    return navItems.filter(item => !item.id || allowedModules.has(item.id) || item.id === 'overview');
-  }, [navItems, allowedModules]);
+    let items = navItems;
+    if (!isAdmin) {
+      // Fleet Terminal, Admin Settings, and User Management are strictly Admin/SuperAdmin only
+      items = items.filter(item => item.id !== 'terminal' && item.id !== 'settings' && item.id !== 'users');
+    }
+    if (allowedModules === 'all') return items;
+    return items.filter(item => !item.id || allowedModules.has(item.id) || item.id === 'overview');
+  }, [navItems, allowedModules, isAdmin]);
 
   return (
     <aside className={`sidebar-container ${collapsed ? 'collapsed' : ''}`}>

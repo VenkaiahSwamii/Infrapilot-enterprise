@@ -15,7 +15,6 @@ import (
 	"infrapilot/backend/internal/services"
 	"infrapilot/backend/internal/utils"
 	"infrapilot/backend/internal/websocket"
-	splunkServices "infrapilot/backend/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -277,24 +276,6 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		diskPct = req.DiskUsage
 	}
 
-	// Async non-blocking dispatch to Splunk HEC
-	go func(r MetricsRequest, mem float64, disk float64) {
-		splunkData := map[string]interface{}{
-			"hostname":       r.Hostname,
-			"ip_address":     r.IPAddress,
-			"os":             r.OS,
-			"cpu":            r.CPUUsage,
-			"memory":         mem,
-			"disk":           disk,
-			"uptime":         r.Uptime,
-			"load_1":         r.Load1,
-			"load_5":         r.Load5,
-			"load_15":        r.Load15,
-		}
-		if err := splunkServices.SendToSplunk(splunkData); err != nil {
-			log.Printf("[Splunk] Error forwarding metrics for %s: %v", r.Hostname, err)
-		}
-	}(req, memPct, diskPct)
 
 	input := services.SaveMetricInput{
 		MachineID:           machine.ID,

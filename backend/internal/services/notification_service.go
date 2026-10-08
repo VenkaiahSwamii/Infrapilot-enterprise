@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 
@@ -45,11 +44,8 @@ func (n *NotificationService) Send(alert models.LinuxAlert) error {
 }
 
 func (n *NotificationService) SendEmail(alert models.LinuxAlert) {
-	recipient := DefaultAdminEmail
-	cfg := config.Get()
-	if cfg.Alerts.AdminEmail != "" {
-		recipient = cfg.Alerts.AdminEmail
-	}
+	smtpCfg := GetResolvedSMTPConfig()
+	recipient := smtpCfg.DefaultRecipient
 	if envRec := strings.TrimSpace(os.Getenv("ADMIN_EMAIL")); envRec != "" {
 		recipient = envRec
 	}
@@ -57,6 +53,12 @@ func (n *NotificationService) SendEmail(alert models.LinuxAlert) {
 	hostname := "Host Node"
 	if alert.MachineID != uuid.Nil {
 		hostname = alert.MachineID.String()
+		if database.DB != nil {
+			var srv models.Server
+			if err := database.DB.Select("hostname").Where("id = ?", alert.MachineID).First(&srv).Error; err == nil && srv.Hostname != "" {
+				hostname = srv.Hostname
+			}
+		}
 	}
 
 	// Dispatch real email via SMTP
@@ -93,10 +95,12 @@ func (n *NotificationService) SendWebhook(alert models.LinuxAlert) {
 }
 
 func (n *NotificationService) SendEmailMsg(subject, body string) {
+	smtpCfg := GetResolvedSMTPConfig()
+	recipient := smtpCfg.DefaultRecipient
 	if n.emailSvc != nil {
-		_ = n.emailSvc.SendRawEmail(DefaultAdminEmail, subject, body)
+		_ = n.emailSvc.SendRawEmail(recipient, subject, body)
 	}
-	n.recordNotification(uuid.Nil, "Email", DefaultAdminEmail, "SENT", "")
+	n.recordNotification(uuid.Nil, "Email", recipient, "SENT", "")
 }
 
 func (n *NotificationService) SendSlackMsg(message string) {

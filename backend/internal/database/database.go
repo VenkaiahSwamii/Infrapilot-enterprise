@@ -42,7 +42,7 @@ func Connect() {
 		logger.Warn("PostgreSQL unavailable on port 5432, falling back to local SQLite database (infrapilot.db)...",
 			"error", err,
 		)
-		db, err = gorm.Open(sqlite.Open("infrapilot.db"), &gorm.Config{
+		db, err = gorm.Open(sqlite.Open("infrapilot.db?_journal_mode=WAL&_busy_timeout=10000"), &gorm.Config{
 			Logger: gormLogger.Default.LogMode(gormLogger.Warn),
 		})
 		if err != nil {
@@ -241,6 +241,7 @@ func Connect() {
 		&models.LinuxNetwork{},
 		&models.LinuxStorage{},
 		&models.LinuxAlert{},
+		&models.NotificationSettings{},
 		&models.HistoricalMetric{},
 		&models.QueuedMetric{},
 		&models.Organization{},
@@ -264,6 +265,7 @@ func Connect() {
 		&models.KubernetesStorage{},
 		&models.KubernetesEvent{},
 		&models.LinuxLog{},
+		&models.LogEntry{},
 		&models.AuditLog{},
 		&models.Report{},
 		&models.DockerHost{},

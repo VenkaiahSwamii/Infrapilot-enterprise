@@ -20,7 +20,7 @@ func NewAlertRuleHandler() *AlertRuleHandler {
 	}
 }
 
-// ListRules handles GET /organizations/:orgId/alert-rules
+// ListRules handles GET /alert-rules or GET /organizations/:orgId/alert-rules
 func (h *AlertRuleHandler) ListRules(c *gin.Context) {
 	orgID := c.Param("orgId")
 	rules, err := h.service.ListRules(orgID)
@@ -28,12 +28,23 @@ func (h *AlertRuleHandler) ListRules(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load alert rules"})
 		return
 	}
+	// If no rules found for specific org param, fallback to all rules
+	if len(rules) == 0 && orgID != "" && orgID != "all" {
+		fallback, fallbackErr := h.service.ListRules("")
+		if fallbackErr == nil && len(fallback) > 0 {
+			c.JSON(http.StatusOK, fallback)
+			return
+		}
+	}
 	c.JSON(http.StatusOK, rules)
 }
 
-// GetRule handles GET /organizations/:orgId/alert-rules/:id
+// GetRule handles GET /alert-rules/:id or GET /organizations/:orgId/alert-rules/:id
 func (h *AlertRuleHandler) GetRule(c *gin.Context) {
 	id := c.Param("id")
+	if id == "" {
+		id = c.Param("ruleId")
+	}
 
 	ruleID, err := uuid.Parse(id)
 	if err != nil {
@@ -41,23 +52,16 @@ func (h *AlertRuleHandler) GetRule(c *gin.Context) {
 		return
 	}
 
-	rule, err := h.service.ListRules(c.Param("orgId"))
+	rule, err := h.service.GetRule(ruleID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load alert rules"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "alert rule not found"})
 		return
 	}
 
-	for _, r := range rule {
-		if r.ID == ruleID {
-			c.JSON(http.StatusOK, r)
-			return
-		}
-	}
-
-	c.JSON(http.StatusNotFound, gin.H{"error": "alert rule not found"})
+	c.JSON(http.StatusOK, rule)
 }
 
-// CreateRule handles POST /organizations/:orgId/alert-rules
+// CreateRule handles POST /alert-rules or POST /organizations/:orgId/alert-rules
 func (h *AlertRuleHandler) CreateRule(c *gin.Context) {
 	orgID := c.Param("orgId")
 
@@ -67,7 +71,18 @@ func (h *AlertRuleHandler) CreateRule(c *gin.Context) {
 		return
 	}
 
-	req.OrganizationID = orgID
+	if req.OrganizationID == "" {
+		if orgID != "" {
+			req.OrganizationID = orgID
+		} else {
+			req.OrganizationID = "default"
+		}
+	}
+
+	if req.Threshold == 0 && req.Value != 0 {
+		req.Threshold = req.Value
+	}
+
 	rule, err := h.service.CreateRule(req)
 	if err != nil {
 		switch err {
@@ -84,10 +99,12 @@ func (h *AlertRuleHandler) CreateRule(c *gin.Context) {
 	c.JSON(http.StatusCreated, rule)
 }
 
-// UpdateRule handles PATCH /organizations/:orgId/alert-rules/:id
+// UpdateRule handles PATCH /alert-rules/:id or PATCH /organizations/:orgId/alert-rules/:id
 func (h *AlertRuleHandler) UpdateRule(c *gin.Context) {
-	_ = c.Param("orgId")
 	id := c.Param("id")
+	if id == "" {
+		id = c.Param("ruleId")
+	}
 
 	ruleID, err := uuid.Parse(id)
 	if err != nil {
@@ -99,6 +116,10 @@ func (h *AlertRuleHandler) UpdateRule(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	if req.Threshold == 0 && req.Value != 0 {
+		req.Threshold = req.Value
 	}
 
 	rule, err := h.service.UpdateRule(ruleID, req)
@@ -119,9 +140,12 @@ func (h *AlertRuleHandler) UpdateRule(c *gin.Context) {
 	c.JSON(http.StatusOK, rule)
 }
 
-// DeleteRule handles DELETE /organizations/:orgId/alert-rules/:id
+// DeleteRule handles DELETE /alert-rules/:id or DELETE /organizations/:orgId/alert-rules/:id
 func (h *AlertRuleHandler) DeleteRule(c *gin.Context) {
 	id := c.Param("id")
+	if id == "" {
+		id = c.Param("ruleId")
+	}
 
 	ruleID, err := uuid.Parse(id)
 	if err != nil {
@@ -138,13 +162,15 @@ func (h *AlertRuleHandler) DeleteRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusNoContent, nil)
+	c.JSON(http.StatusOK, gin.H{"message": "alert rule deleted successfully"})
 }
 
-// ToggleRule handles PATCH /organizations/:orgId/alert-rules/:id/toggle
+// ToggleRule handles PATCH /alert-rules/:id/toggle or PATCH /organizations/:orgId/alert-rules/:id/toggle
 func (h *AlertRuleHandler) ToggleRule(c *gin.Context) {
-	_ = c.Param("orgId")
 	id := c.Param("id")
+	if id == "" {
+		id = c.Param("ruleId")
+	}
 
 	ruleID, err := uuid.Parse(id)
 	if err != nil {
@@ -153,15 +179,20 @@ func (h *AlertRuleHandler) ToggleRule(c *gin.Context) {
 	}
 
 	var req struct {
-		Enabled bool `json:"enabled"`
+		Enabled *bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	targetEnabled := true
+	if req.Enabled != nil {
+		targetEnabled = *req.Enabled
+	}
+
 	var rule *models.AlertRule
-	if req.Enabled {
+	if targetEnabled {
 		rule, err = h.service.EnableRule(ruleID)
 	} else {
 		rule, err = h.service.DisableRule(ruleID)
@@ -177,4 +208,23 @@ func (h *AlertRuleHandler) ToggleRule(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, rule)
+}
+
+// SeedPresets handles POST /alert-rules/presets or POST /organizations/:orgId/alert-rules/presets
+func (h *AlertRuleHandler) SeedPresets(c *gin.Context) {
+	orgID := c.Param("orgId")
+	if orgID == "" {
+		orgID = "default"
+	}
+
+	created, err := h.service.SeedPresets(orgID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to seed alert rule presets"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Alert rule presets loaded successfully",
+		"created": created,
+	})
 }

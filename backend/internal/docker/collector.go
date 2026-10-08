@@ -161,7 +161,7 @@ func SaveDockerMetrics(
 		}
 
 		db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "id"}},
+			Columns: []clause.Column{{Name: "server_id"}, {Name: "id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"status", "state", "cpu_percent", "memory_used", "memory_limit", "memory_pct",
 				"network_in", "network_out", "disk_read", "disk_write", "p_ids", "restart_count",
@@ -205,7 +205,7 @@ func SaveDockerMetrics(
 		}
 
 		db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "id"}},
+			Columns: []clause.Column{{Name: "server_id"}, {Name: "id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"name", "tag", "size", "is_unused", "updated_at",
 			}),
@@ -233,7 +233,7 @@ func SaveDockerMetrics(
 		}
 
 		db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "name"}},
+			Columns: []clause.Column{{Name: "server_id"}, {Name: "name"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"driver", "mount_point", "usage_bytes", "updated_at",
 			}),
@@ -264,7 +264,7 @@ func SaveDockerMetrics(
 		}
 
 		db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "id"}},
+			Columns: []clause.Column{{Name: "server_id"}, {Name: "id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"name", "driver", "scope", "connected_containers", "updated_at",
 			}),

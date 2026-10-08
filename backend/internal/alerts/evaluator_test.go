@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"infrapilot/backend/internal/models"
+	"infrapilot/backend/internal/services"
 
 	"github.com/google/uuid"
 )
@@ -49,6 +50,32 @@ func TestSelectMetricValue(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("ExtendedMetricsWithInput", func(t *testing.T) {
+		input := services.SaveMetricInput{
+			PacketLoss:   12.5,
+			UploadMbps:   150.0,
+			DownloadMbps: 300.0,
+			DiskReadBps:  5000000,
+			DiskWriteBps: 2000000,
+		}
+
+		if val, ok := SelectMetricValue(sample, "packet_loss", input); !ok || val != 12.5 {
+			t.Errorf("SelectMetricValue(packet_loss) = %.1f, ok = %v; want 12.5, true", val, ok)
+		}
+		if val, ok := SelectMetricValue(sample, "upload_mbps", input); !ok || val != 150.0 {
+			t.Errorf("SelectMetricValue(upload_mbps) = %.1f, ok = %v; want 150.0, true", val, ok)
+		}
+		if val, ok := SelectMetricValue(sample, "download_mbps", input); !ok || val != 300.0 {
+			t.Errorf("SelectMetricValue(download_mbps) = %.1f, ok = %v; want 300.0, true", val, ok)
+		}
+		if val, ok := SelectMetricValue(sample, "disk_read_bps", input); !ok || val != 5000000 {
+			t.Errorf("SelectMetricValue(disk_read_bps) = %.1f, ok = %v; want 5000000, true", val, ok)
+		}
+		if val, ok := SelectMetricValue(sample, "disk_write_bps", input); !ok || val != 2000000 {
+			t.Errorf("SelectMetricValue(disk_write_bps) = %.1f, ok = %v; want 2000000, true", val, ok)
+		}
+	})
 }
 
 func TestRuleCache(t *testing.T) {
@@ -63,6 +90,7 @@ func TestRuleCache(t *testing.T) {
 
 	// Invalidate cache
 	cache.InvalidateCache()
+	InvalidateRuleCache()
 
 	rules2 := cache.GetEnabledRules()
 	if len(rules2) != len(rules) {

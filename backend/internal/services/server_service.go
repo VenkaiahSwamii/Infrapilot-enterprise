@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/events"
 	"infrapilot/backend/internal/models"
@@ -616,7 +617,12 @@ type ReSyncFleetResult struct {
 
 func (s *ServerService) ReSyncFleet(targetURL string) (*ReSyncFleetResult, error) {
 	if targetURL == "" {
-		targetURL = "http://192.168.1.86:8080"
+		cfg := config.Get()
+		if cfg != nil && cfg.BackendURL != "" {
+			targetURL = cfg.BackendURL
+		} else {
+			targetURL = "http://localhost:8080"
+		}
 	}
 	servers, err := s.serverRepo.ListServers()
 	if err != nil {

@@ -37,9 +37,11 @@ import { createLiveEventsSocket } from '../../websocket/liveEvents.js';
 import { getMachineId } from '../../utils/machineId.js';
 import { useAlertStore } from '../../store/alertStore.jsx';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
+import { useServerStore } from '../../store/serverStore.jsx';
 import QuickHostDrawer from '../../components/dashboard/QuickHostDrawer.jsx';
 import HostAccessModal from '../../components/dashboard/HostAccessModal.jsx';
 import HostSecurityModal from '../../components/dashboard/HostSecurityModal.jsx';
+import UninstallAgentModal from '../../components/dashboard/UninstallAgentModal.jsx';
 
 // SVG OS Icons
 function LinuxIcon() {
@@ -125,10 +127,11 @@ export default function EnterpriseDashboard() {
   const navigate = useNavigate();
   const { activeCount } = useAlertStore();
   const { addToast } = useDashboardStore();
+  const { servers: globalServers, liveMetricsMap: globalLiveMetrics } = useServerStore();
 
-  // State
-  const [machines, setMachines] = useState([]);
-  const [liveMetrics, setLiveMetrics] = useState({});
+  // State pre-populated instantly from global store to avoid 1-second blank flash on mount
+  const [machines, setMachines] = useState(() => (Array.isArray(globalServers) && globalServers.length > 0 ? globalServers : []));
+  const [liveMetrics, setLiveMetrics] = useState(() => (globalLiveMetrics || {}));
   const [alerts, setAlerts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -139,6 +142,7 @@ export default function EnterpriseDashboard() {
   const [selectedMachineForDrawer, setSelectedMachineForDrawer] = useState(null);
   const [selectedMachineForAccess, setSelectedMachineForAccess] = useState(null);
   const [selectedMachineForSecurity, setSelectedMachineForSecurity] = useState(null);
+  const [selectedMachineForUninstall, setSelectedMachineForUninstall] = useState(null);
   const [selectedMachineForMenu, setSelectedMachineForMenu] = useState(null);
   const [activeMenuId, setActiveMenuId] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
@@ -146,6 +150,13 @@ export default function EnterpriseDashboard() {
   const [removedMachineIds, setRemovedMachineIds] = useState(new Set());
   const [hasBackendFetched, setHasBackendFetched] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+
+  // Sync state instantly from global store when navigating between views
+  useEffect(() => {
+    if (Array.isArray(globalServers) && globalServers.length > 0 && machines.length === 0) {
+      setMachines(globalServers);
+    }
+  }, [globalServers, machines.length]);
 
   const handleResetFlapStatus = async () => {
     setIsResetting(true);
@@ -285,7 +296,20 @@ export default function EnterpriseDashboard() {
             }
           });
           const metricPairs = await Promise.all(metricPromises);
-          setLiveMetrics((prev) => ({ ...prev, ...Object.fromEntries(metricPairs.filter(Boolean)) }));
+          setLiveMetrics((prev) => {
+            const next = { ...prev };
+            for (const pair of metricPairs) {
+              if (!pair) continue;
+              const [mId, freshMetrics] = pair;
+              const existing = prev[mId];
+              const existingTs = existing ? new Date(existing.created_at || existing.last_seen || 0).getTime() : 0;
+              const freshTs = freshMetrics ? new Date(freshMetrics.created_at || freshMetrics.last_seen || 0).getTime() : 0;
+              if (freshTs >= existingTs || !existing) {
+                next[mId] = { ...(existing || {}), ...freshMetrics };
+              }
+            }
+            return next;
+          });
         }
       }
 
@@ -324,14 +348,15 @@ export default function EnterpriseDashboard() {
 
           setLiveMetrics((prev) => {
             const next = { ...prev };
-            if (ip) next[ip] = payload;
+            const mIdKey = getMachineId(payload) || rawId;
+            if (mIdKey) next[mIdKey] = { ...(next[mIdKey] || {}), ...payload };
+            if (ip) next[ip] = { ...(next[ip] || {}), ...payload };
             if (os) {
-              next[`${rawId}_${os}`] = payload;
-              if (host) next[`${host}-${os}`] = payload;
+              next[`${rawId}_${os}`] = { ...(next[`${rawId}_${os}`] || {}), ...payload };
+              if (host) next[`${host}-${os}`] = { ...(next[`${host}-${os}`] || {}), ...payload };
             }
-            if (ip && os) next[`${ip}_${os}`] = payload;
-            if (rawId && os) next[`${rawId}_${os}`] = payload;
-            if (rawId) next[rawId] = payload;
+            if (ip && os) next[`${ip}_${os}`] = { ...(next[`${ip}_${os}`] || {}), ...payload };
+            if (rawId) next[rawId] = { ...(next[rawId] || {}), ...payload };
             return next;
           });
         }
@@ -469,7 +494,7 @@ export default function EnterpriseDashboard() {
 
   // Merge backend machines with formatted values and smart deduplication
   const tableData = useMemo(() => {
-    const rawList = machines;
+    const rawList = (machines && machines.length > 0) ? machines : (Array.isArray(globalServers) ? globalServers : []);
 
     const formattedList = rawList.map((m, idx) => {
       const rawId = m.id || m.ID || m.machine_id || '';
@@ -482,7 +507,9 @@ export default function EnterpriseDashboard() {
       const rawIp = String(m.ip_address || m.IPAddress || '').trim();
       const live =
         (mId && liveMetrics[mId]) ||
+        (mId && globalLiveMetrics && globalLiveMetrics[mId]) ||
         (rawIp && liveMetrics[rawIp]) ||
+        (rawIp && globalLiveMetrics && globalLiveMetrics[rawIp]) ||
         (rawIp && liveMetrics[`${rawIp}_${osKey}`]) ||
         (rawId && liveMetrics[`${rawId}_${osKey}`]) ||
         (hostName && liveMetrics[`${hostName.toLowerCase()}-${osKey}`]) ||
@@ -499,16 +526,13 @@ export default function EnterpriseDashboard() {
       if (lastSeenStr) {
         const t = new Date(lastSeenStr).getTime();
         if (!isNaN(t)) {
-          lastSeenDiff = Math.abs(Date.now() - t);
-        } else if (statusUpper === 'ONLINE' || statusUpper === 'CONNECTED' || m.online === true) {
-          lastSeenDiff = 0;
+          lastSeenDiff = Math.max(0, Date.now() - t);
         }
-      } else if (statusUpper === 'ONLINE' || statusUpper === 'CONNECTED' || m.online === true) {
-        lastSeenDiff = 0;
       }
 
-      // Truly ONLINE only if NOT blocked, status is ONLINE, and heartbeat seen within 90 seconds
-      const isOnline = !isBlocked && (statusUpper === 'ONLINE' || statusUpper === 'CONNECTED' || m.online === true) && lastSeenDiff < 90000;
+      // Truly ONLINE only if NOT blocked, backend status is not OFFLINE, and telemetry received within 30 seconds
+      const hasFreshTelemetry = lastSeenDiff < 30000;
+      const isOnline = !isBlocked && statusUpper !== 'OFFLINE' && m.online !== false && hasFreshTelemetry;
       const normalizedStatus = isBlocked ? 'blocked' : (isOnline ? 'online' : 'offline');
 
       const rawCpu = isOnline ? (live.cpu_usage !== undefined ? live.cpu_usage : (live.cpu !== undefined ? live.cpu : (live.cpu_percent ?? (m.cpu_usage ?? m.cpu)))) : 0;
@@ -1284,6 +1308,16 @@ export default function EnterpriseDashboard() {
         machine={selectedMachineForSecurity}
       />
 
+      {/* ── Remote Uninstall & Host Decommission Modal ── */}
+      <UninstallAgentModal
+        isOpen={Boolean(selectedMachineForUninstall)}
+        onClose={() => setSelectedMachineForUninstall(null)}
+        agent={selectedMachineForUninstall}
+        onUninstalled={() => {
+          fetchData();
+        }}
+      />
+
       {/* ── Fixed Portal Context Menu Popover ── */}
       {activeMenuId && selectedMachineForMenu && createPortal(
         <div
@@ -1408,7 +1442,7 @@ export default function EnterpriseDashboard() {
               const target = selectedMachineForMenu;
               setActiveMenuId(null);
               setSelectedMachineForMenu(null);
-              handleDeleteMachine(target.id, target.hostname);
+              setSelectedMachineForUninstall(target?.rawMachine || target);
             }}
             type="button"
             style={{ color: '#ef4444' }}

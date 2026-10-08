@@ -101,6 +101,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		"user":          user.Username,
 		"user_id":       user.ID.String(),
 		"email":         user.Email,
+		"role":          user.Role,
 	})
 }
 

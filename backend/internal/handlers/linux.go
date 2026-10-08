@@ -11,6 +11,7 @@ import (
 
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
+	"infrapilot/backend/internal/websocket"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -174,9 +175,15 @@ func ReceiveAgentLogs(c *gin.Context) {
 	}
 
 	if machineUUID == uuid.Nil {
-		machineIDStr := c.GetString("machineId")
+		machineIDStr := c.GetHeader("X-Machine-ID")
+		if machineIDStr == "" {
+			machineIDStr = c.GetString("machineId")
+		}
 		if machineIDStr == "" {
 			machineIDStr = c.Query("machine_id")
+		}
+		if machineIDStr == "" {
+			machineIDStr = c.Param("id")
 		}
 		if machineIDStr != "" {
 			if id, err := uuid.Parse(machineIDStr); err == nil {
@@ -197,11 +204,15 @@ func ReceiveAgentLogs(c *gin.Context) {
 	}
 
 	type LogItem struct {
-		Timestamp string    `json:"timestamp"`
-		Source    string    `json:"source"`
-		Level     string    `json:"level"`
-		Message   string    `json:"message"`
+		ID        uuid.UUID `json:"id"`
 		MachineID uuid.UUID `json:"machine_id"`
+		Hostname  string    `json:"hostname"`
+		Platform  string    `json:"platform"`
+		Level     string    `json:"level"`
+		Source    string    `json:"source"`
+		Service   string    `json:"service"`
+		Message   string    `json:"message"`
+		Timestamp string    `json:"timestamp"`
 	}
 
 	var logsList []LogItem
@@ -230,12 +241,19 @@ func ReceiveAgentLogs(c *gin.Context) {
 		}
 	}
 
-	// Fallback to extract machine UUID from log items if still not resolved
+	// Fallback to extract machine UUID or match server by hostname
 	if machineUUID == uuid.Nil {
 		for _, l := range logsList {
 			if l.MachineID != uuid.Nil {
 				machineUUID = l.MachineID
 				break
+			}
+			if l.Hostname != "" && database.DB != nil {
+				var s models.Server
+				if err := database.DB.Where("LOWER(hostname) = LOWER(?)", l.Hostname).First(&s).Error; err == nil {
+					machineUUID = s.ID
+					break
+				}
 			}
 		}
 	}
@@ -244,19 +262,64 @@ func ReceiveAgentLogs(c *gin.Context) {
 		machineUUID = uuid.New()
 	}
 
+	var defaultHostname string = "node"
+	var defaultPlatform string = "linux"
+	if database.DB != nil {
+		var server models.Server
+		if err := database.DB.Select("hostname, os, platform").First(&server, "id = ?", machineUUID).Error; err == nil {
+			if server.Hostname != "" {
+				defaultHostname = server.Hostname
+			}
+			if server.Platform != "" {
+				defaultPlatform = server.Platform
+			} else if server.OS != "" {
+				defaultPlatform = server.OS
+			}
+		}
+	}
+
+	var createdLogEntries []models.LogEntry
 	tx := database.DB.Begin()
 	for _, l := range logsList {
-		parsedTime, parseErr := time.Parse(time.RFC3339, l.Timestamp)
+		parsedTime, parseErr := time.Parse(time.RFC3339Nano, l.Timestamp)
 		if parseErr != nil {
-			parsedTime = time.Now()
+			parsedTime, parseErr = time.Parse(time.RFC3339, l.Timestamp)
+			if parseErr != nil {
+				parsedTime = time.Now()
+			}
+		}
+
+		itemHostname := l.Hostname
+		if itemHostname == "" {
+			itemHostname = defaultHostname
+		}
+
+		itemPlatform := l.Platform
+		if itemPlatform == "" {
+			itemPlatform = defaultPlatform
+		}
+
+		itemLevel := strings.ToUpper(strings.TrimSpace(l.Level))
+		if itemLevel == "" {
+			itemLevel = "INFO"
+		}
+
+		itemSource := strings.TrimSpace(l.Source)
+		if itemSource == "" {
+			itemSource = "system"
+		}
+
+		itemService := strings.TrimSpace(l.Service)
+		if itemService == "" {
+			itemService = itemSource
 		}
 
 		dbLog := models.LinuxLog{
 			ID:        uuid.New(),
 			MachineID: machineUUID,
 			Timestamp: parsedTime,
-			Source:    l.Source,
-			Level:     l.Level,
+			Source:    itemSource,
+			Level:     itemLevel,
 			Message:   l.Message,
 		}
 
@@ -265,10 +328,52 @@ func ReceiveAgentLogs(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist log batch"})
 			return
 		}
+
+		entryID := l.ID
+		if entryID == uuid.Nil {
+			entryID = uuid.New()
+		}
+
+		logEntry := models.LogEntry{
+			ID:        entryID,
+			MachineID: machineUUID,
+			Hostname:  itemHostname,
+			Platform:  itemPlatform,
+			OS:        itemPlatform,
+			Level:     itemLevel,
+			Source:    itemSource,
+			Service:   itemService,
+			Message:   l.Message,
+			Timestamp: parsedTime,
+			CreatedAt: time.Now(),
+		}
+
+		if err := tx.Create(&logEntry).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist unified log entry"})
+			return
+		}
+
+		createdLogEntries = append(createdLogEntries, logEntry)
 	}
 	tx.Commit()
 
-	c.JSON(http.StatusOK, gin.H{"message": "Logs successfully delivered"})
+	// Broadcast live log events to WebSocket hub for instant Fleet Terminal streaming
+	if websocket.WS != nil {
+		for _, entry := range createdLogEntries {
+			websocket.WS.BroadcastJSON(map[string]interface{}{
+				"event": "log_entry",
+				"log":   entry,
+				"data":  entry,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Logs successfully delivered and broadcasted",
+		"count":     len(createdLogEntries),
+		"machine_id": machineUUID.String(),
+	})
 }
 
 func GetLinuxDocker(c *gin.Context) {

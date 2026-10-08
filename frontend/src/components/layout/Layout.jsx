@@ -36,13 +36,23 @@ export default function Layout() {
 
     let active = true;
 
-    // Safety timeout: Never keep the UI stuck on loading profile screen longer than 1.5s
+    // Safety timeout: Never keep the UI stuck on loading profile screen longer than 1.2s
     const timeoutId = setTimeout(() => {
       if (active) {
+        const storedUser = localStorage.getItem('user');
+        let parsedUsername = 'User';
+        let parsedEmail = '';
+        if (storedUser) {
+          try {
+            const u = JSON.parse(storedUser);
+            parsedUsername = u.username || 'User';
+            parsedEmail = u.email || '';
+          } catch {}
+        }
         setUserProfile({
-          username: 'Admin',
-          email: 'admin@infrapilot.io',
-          role: localStorage.getItem('user_role') || 'Admin',
+          username: parsedUsername,
+          email: parsedEmail,
+          role: localStorage.getItem('user_role') || 'Viewer',
         });
         setProfileLoading(false);
       }
@@ -52,7 +62,7 @@ export default function Layout() {
       .then((data) => {
         if (active) {
           clearTimeout(timeoutId);
-          setUserProfile(data || { username: 'Admin', email: 'admin@infrapilot.io', role: 'Admin' });
+          setUserProfile(data || { username: 'User', email: '', role: localStorage.getItem('user_role') || 'Viewer' });
           if (data?.role) localStorage.setItem('user_role', data.role);
           setProfileLoading(false);
         }
@@ -66,15 +76,15 @@ export default function Layout() {
             try {
               const parsed = JSON.parse(storedUser);
               setUserProfile({
-                username: parsed.username || 'Admin',
+                username: parsed.username || 'User',
                 email: parsed.email || '',
-                role: localStorage.getItem('user_role') || 'Admin',
+                role: localStorage.getItem('user_role') || 'Viewer',
               });
             } catch {
-              setUserProfile({ username: 'Admin', email: 'admin@infrapilot.io', role: 'Admin' });
+              setUserProfile({ username: 'User', email: '', role: localStorage.getItem('user_role') || 'Viewer' });
             }
           } else {
-            setUserProfile({ username: 'Admin', email: 'admin@infrapilot.io', role: 'Admin' });
+            setUserProfile({ username: 'User', email: '', role: localStorage.getItem('user_role') || 'Viewer' });
           }
           setProfileLoading(false);
         }

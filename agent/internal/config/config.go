@@ -191,15 +191,6 @@ func FindConfigFile(filename string) string {
 		return filename
 	}
 
-	// Check alongside running executable
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		candidate := filepath.Join(exeDir, filename)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-
 	// Check OS-specific standard directories
 	if runtime.GOOS == "windows" {
 		progFiles := os.Getenv("ProgramFiles")
@@ -211,8 +202,19 @@ func FindConfigFile(filename string) string {
 			return candidate
 		}
 	} else {
-		for _, dir := range []string{"/etc/infrapilot", "/opt/infrapilot"} {
+		for _, dir := range []string{"/etc/infrapilot", "/var/lib/infrapilot", "/opt/infrapilot"} {
 			candidate := filepath.Join(dir, filename)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+
+	// Check alongside running executable (for non-system dirs)
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		if !strings.HasPrefix(exeDir, "/usr/bin") && !strings.HasPrefix(exeDir, "/usr/local/bin") && !strings.HasPrefix(exeDir, "/bin") {
+			candidate := filepath.Join(exeDir, filename)
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate
 			}

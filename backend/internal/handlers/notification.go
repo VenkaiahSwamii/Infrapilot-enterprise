@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/services"
@@ -58,6 +59,26 @@ func SendTestNotification(c *gin.Context) {
 		return
 	}
 
+	if req.Channel == "Email" {
+		emailSvc := services.NewEmailService()
+		diagResult, err := emailSvc.SendDiagnosticTestEmail(req.Recipient, "", 0, "", "", "")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   fmt.Sprintf("Failed to send test email: %v", err),
+				"status":  "FAILED",
+				"details": diagResult,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   fmt.Sprintf("Test email delivered successfully to %s", req.Recipient),
+			"status":    "SENT",
+			"timestamp": time.Now().Format(time.RFC3339),
+			"details":   diagResult,
+		})
+		return
+	}
+
 	testAlert := models.LinuxAlert{
 		ID:        uuid.New(),
 		Title:     fmt.Sprintf("[TEST] %s Test Notification", req.Channel),
@@ -69,8 +90,6 @@ func SendTestNotification(c *gin.Context) {
 
 	notifSvc := services.NewNotificationService()
 	switch req.Channel {
-	case "Email":
-		notifSvc.SendEmail(testAlert)
 	case "Slack":
 		notifSvc.SendSlack(testAlert)
 	case "Telegram":
@@ -90,6 +109,146 @@ func SendTestNotification(c *gin.Context) {
 		"status":    "SENT",
 		"timestamp": time.Now().Format(time.RFC3339),
 	})
+}
+
+type TestEmailDiagnosticRequest struct {
+	Recipient    string `json:"recipient" binding:"required"`
+	SMTPHost     string `json:"smtp_host"`
+	SMTPPort     int    `json:"smtp_port"`
+	SMTPUser     string `json:"smtp_user"`
+	SMTPPassword string `json:"smtp_password"`
+	FromAddress  string `json:"from_address"`
+}
+
+// SendDiagnosticTestEmail executes an end-to-end diagnostic test and delivers a verification card
+func SendDiagnosticTestEmail(c *gin.Context) {
+	var req TestEmailDiagnosticRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	emailSvc := services.NewEmailService()
+	diagResult, err := emailSvc.SendDiagnosticTestEmail(
+		req.Recipient,
+		req.SMTPHost,
+		req.SMTPPort,
+		req.SMTPUser,
+		req.SMTPPassword,
+		req.FromAddress,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   err.Error(),
+			"details": diagResult,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Diagnostic test email delivered successfully to %s", req.Recipient),
+		"details": diagResult,
+	})
+}
+
+// GetNotificationSettings returns the active SMTP and notification configuration
+func GetNotificationSettings(c *gin.Context) {
+	smtpCfg := services.GetResolvedSMTPConfig()
+	cfg := config.Get()
+
+	maskedPass := ""
+	if smtpCfg.Password != "" {
+		maskedPass = "••••••••"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"enabled":                       smtpCfg.Enabled,
+		"smtp_host":                     smtpCfg.Host,
+		"smtp_port":                     smtpCfg.Port,
+		"smtp_user":                     smtpCfg.User,
+		"smtp_password":                 maskedPass,
+		"has_password":                  smtpCfg.Password != "",
+		"from_address":                  smtpCfg.From,
+		"default_recipient":             smtpCfg.DefaultRecipient,
+		"send_resolved_emails":          cfg.Alerts.SendResolvedEmails,
+		"consecutive_breaches_required": cfg.Alerts.ConsecutiveBreachesRequired,
+		"consecutive_normal_required":   cfg.Alerts.ConsecutiveNormalRequired,
+	})
+}
+
+type UpdateNotificationSettingsRequest struct {
+	Enabled                     *bool   `json:"enabled"`
+	SMTPHost                    *string `json:"smtp_host"`
+	SMTPPort                    *int    `json:"smtp_port"`
+	SMTPUser                    *string `json:"smtp_user"`
+	SMTPPassword                *string `json:"smtp_password"`
+	FromAddress                 *string `json:"from_address"`
+	DefaultRecipient            *string `json:"default_recipient"`
+	SendResolvedEmails          *bool   `json:"send_resolved_emails"`
+	ConsecutiveBreachesRequired *int    `json:"consecutive_breaches_required"`
+	ConsecutiveNormalRequired   *int    `json:"consecutive_normal_required"`
+}
+
+// UpdateNotificationSettings updates notification configuration in DB
+func UpdateNotificationSettings(c *gin.Context) {
+	var req UpdateNotificationSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if database.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database unavailable"})
+		return
+	}
+
+	var settings models.NotificationSettings
+	res := database.DB.First(&settings, 1)
+	if res.Error != nil {
+		settings = models.NotificationSettings{ID: 1, Enabled: true, SMTPPort: 587}
+	}
+
+	if req.Enabled != nil {
+		settings.Enabled = *req.Enabled
+	}
+	if req.SMTPHost != nil {
+		settings.SMTPHost = *req.SMTPHost
+	}
+	if req.SMTPPort != nil && *req.SMTPPort > 0 {
+		settings.SMTPPort = *req.SMTPPort
+	}
+	if req.SMTPUser != nil {
+		settings.SMTPUser = *req.SMTPUser
+	}
+	if req.SMTPPassword != nil && *req.SMTPPassword != "" && *req.SMTPPassword != "••••••••" {
+		settings.SMTPPassword = *req.SMTPPassword
+	}
+	if req.FromAddress != nil {
+		settings.FromAddress = *req.FromAddress
+	}
+	if req.DefaultRecipient != nil {
+		settings.DefaultRecipient = *req.DefaultRecipient
+	}
+	if req.SendResolvedEmails != nil {
+		settings.SendResolvedEmails = *req.SendResolvedEmails
+	}
+	if req.ConsecutiveBreachesRequired != nil && *req.ConsecutiveBreachesRequired > 0 {
+		settings.ConsecutiveBreachesRequired = *req.ConsecutiveBreachesRequired
+	}
+	if req.ConsecutiveNormalRequired != nil && *req.ConsecutiveNormalRequired > 0 {
+		settings.ConsecutiveNormalRequired = *req.ConsecutiveNormalRequired
+	}
+	settings.UpdatedAt = time.Now()
+
+	if err := database.DB.Save(&settings).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save settings: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Notification settings updated successfully", "success": true})
 }
 
 // GetNotificationPolicies lists notification policies

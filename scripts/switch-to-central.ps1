@@ -1,3 +1,7 @@
+param(
+    [string]$ServerURL = "http://192.168.1.86:8080"
+)
+
 # Requires administrator privileges to update C:\Program Files\InfraPilot
 Write-Host "Stopping InfraPilot Agent..." -ForegroundColor Cyan
 Stop-Service InfraPilotAgent -Force -ErrorAction SilentlyContinue
@@ -7,9 +11,9 @@ if (-not (Test-Path $dir)) {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
 }
 
-$jsonContent = @'
+$jsonContent = @"
 {
-  "backend_url": "http://192.168.1.2:8080",
+  "backend_url": "$ServerURL",
   "machine_id": "8296e585-82b2-4f83-bf73-ca965accb7b6",
   "api_key": "ip_live_21cecaf15ba9e649ad84fd306ab26602",
   "key_version": 1,
@@ -18,11 +22,11 @@ $jsonContent = @'
   "heartbeat_interval": 15,
   "os": "windows"
 }
-'@
+"@
 Set-Content -Path "$dir\config.json" -Value $jsonContent -Force
 
-$tomlContent = @'
-backend_url = "http://192.168.1.2:8080"
+$tomlContent = @"
+backend_url = "$ServerURL"
 registered_hostname = "SSA"
 interval = 5
 
@@ -37,10 +41,10 @@ docker = true
 kubernetes = true
 logs = true
 security = true
-'@
+"@
 Set-Content -Path "$dir\config.toml" -Value $tomlContent -Force
 Remove-Item -Path "$dir\offline_queue.json" -Force -ErrorAction SilentlyContinue
 
 Write-Host "Starting InfraPilot Agent..." -ForegroundColor Cyan
 Start-Service InfraPilotAgent
-Write-Host "SUCCESS: Connected this machine (SSA) to central dashboard at http://192.168.1.2:8080!" -ForegroundColor Green
+Write-Host "SUCCESS: Connected this machine (SSA) to central dashboard at $ServerURL!" -ForegroundColor Green

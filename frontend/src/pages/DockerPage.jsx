@@ -27,7 +27,11 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   Sliders,
-  Filter
+  Filter,
+  Play,
+  Square,
+  RotateCw,
+  Trash2
 } from 'lucide-react';
 import { listServers } from '../api/server.js';
 import { 
@@ -36,12 +40,19 @@ import {
   getDockerNetworks, 
   getDockerVolumes, 
   getDockerEvents, 
-  getContainerLogs
+  getContainerLogs,
+  startContainer,
+  stopContainer,
+  restartContainer,
+  removeContainer
 } from '../api/docker.js';
+import { wsClientInstance } from '../websocket/client.js';
 import { useDashboardStore } from '../store/dashboardStore.jsx';
 import ServerSelectDropdown from '../components/common/ServerSelectDropdown.jsx';
+import { useRBAC } from '../hooks/useRBAC.js';
 
 export default function DockerPage() {
+  const { isOperator } = useRBAC();
   const [servers, setServers] = useState([]);
   const [containers, setContainers] = useState([]);
   const [images, setImages] = useState([]);
@@ -72,8 +83,9 @@ export default function DockerPage() {
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
 
   const { addToast } = useDashboardStore();
+  const [actionLoading, setActionLoading] = useState(null);
 
-  const backendHost = typeof window !== 'undefined' ? (window.location.hostname || '192.168.1.2') : '192.168.1.2';
+  const backendHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost';
   const dockerCmd = `docker run -d --name infrapilot-agent --restart always --net=host -v /var/run/docker.sock:/var/run/docker.sock:ro -e BACKEND_URL=http://${backendHost}:8080 infrapilot/agent:latest`;
 
   const handleCopyCmd = () => {
@@ -82,6 +94,42 @@ export default function DockerPage() {
       setCopiedCmd(true);
       setTimeout(() => setCopiedCmd(false), 2500);
       addToast('success', 'Command Copied', 'Docker agent run command copied to clipboard.');
+    }
+  };
+
+  const handleContainerAction = async (action, container) => {
+    const cId = container.id || container.ID;
+    const sId = container.server_id || container.hostServerId;
+    if (!cId || !sId) {
+      addToast('error', 'Action Failed', 'Missing container or host ID.');
+      return;
+    }
+
+    const key = `${cId}_${action}`;
+    setActionLoading(key);
+    try {
+      if (action === 'start') {
+        await startContainer(sId, cId);
+        addToast('success', 'Container Started', `Container ${container.name || cId} started successfully.`);
+      } else if (action === 'stop') {
+        await stopContainer(sId, cId);
+        addToast('success', 'Container Stopped', `Container ${container.name || cId} stopped.`);
+      } else if (action === 'restart') {
+        await restartContainer(sId, cId);
+        addToast('success', 'Container Restarted', `Container ${container.name || cId} restarted.`);
+      } else if (action === 'remove') {
+        if (!window.confirm(`Are you sure you want to permanently remove container ${container.name || cId}?`)) {
+          setActionLoading(null);
+          return;
+        }
+        await removeContainer(sId, cId);
+        addToast('success', 'Container Removed', `Container ${container.name || cId} removed.`);
+      }
+      setTimeout(() => fetchDockerData(true), 1200);
+    } catch (err) {
+      addToast('error', 'Operation Failed', err.response?.data?.error || err.message || 'Container action failed.');
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -191,7 +239,18 @@ export default function DockerPage() {
     const interval = setInterval(() => {
       fetchDockerData(false);
     }, 15000);
-    return () => clearInterval(interval);
+
+    const handleDockerUpdate = () => {
+      fetchDockerData(false);
+    };
+    wsClientInstance.addEventListener('docker.updated', handleDockerUpdate);
+    wsClientInstance.addEventListener('docker.event', handleDockerUpdate);
+
+    return () => {
+      clearInterval(interval);
+      wsClientInstance.removeEventListener('docker.updated', handleDockerUpdate);
+      wsClientInstance.removeEventListener('docker.event', handleDockerUpdate);
+    };
   }, []);
 
   // Open Log Viewer
@@ -1010,6 +1069,103 @@ export default function DockerPage() {
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
                           
+                          {/* Lifecycle Controls */}
+                          {isOperator && (
+                            <>
+                              {isUp ? (
+                                <>
+                                  <button
+                                    onClick={() => handleContainerAction('restart', container)}
+                                    disabled={actionLoading === `${rawId}_restart`}
+                                    type="button"
+                                    style={{
+                                      padding: '5px 8px',
+                                      backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                                      border: '1px solid rgba(234, 179, 8, 0.3)',
+                                      borderRadius: '6px',
+                                      color: '#eab308',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      fontSize: '11px',
+                                      fontWeight: 600
+                                    }}
+                                    title="Restart Container"
+                                  >
+                                    <RotateCw size={12} className={actionLoading === `${rawId}_restart` ? 'spin' : ''} />
+                                    Restart
+                                  </button>
+                                  <button
+                                    onClick={() => handleContainerAction('stop', container)}
+                                    disabled={actionLoading === `${rawId}_stop`}
+                                    type="button"
+                                    style={{
+                                      padding: '5px 8px',
+                                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                                      borderRadius: '6px',
+                                      color: '#ef4444',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      fontSize: '11px',
+                                      fontWeight: 600
+                                    }}
+                                    title="Stop Container"
+                                  >
+                                    <Square size={12} />
+                                    Stop
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => handleContainerAction('start', container)}
+                                  disabled={actionLoading === `${rawId}_start`}
+                                  type="button"
+                                  style={{
+                                    padding: '5px 8px',
+                                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                    border: '1px solid rgba(34, 197, 94, 0.3)',
+                                    borderRadius: '6px',
+                                    color: '#22c55e',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 600
+                                  }}
+                                  title="Start Container"
+                                >
+                                  <Play size={12} />
+                                  Start
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => handleContainerAction('remove', container)}
+                                disabled={actionLoading === `${rawId}_remove`}
+                                type="button"
+                                style={{
+                                  padding: '5px 7px',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                                  border: '1px solid #1f2e44',
+                                  borderRadius: '6px',
+                                  color: '#94a3b8',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  fontSize: '11px'
+                                }}
+                                title="Remove Container"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </>
+                          )}
+
                           {/* Deep Dive Inspect & Monitor */}
                           <button
                             onClick={() => {
@@ -1018,7 +1174,7 @@ export default function DockerPage() {
                             }}
                             type="button"
                             style={{
-                              padding: '6px 11px',
+                              padding: '5px 9px',
                               backgroundColor: 'rgba(6, 182, 212, 0.12)',
                               border: '1px solid rgba(6, 182, 212, 0.35)',
                               borderRadius: '6px',
@@ -1026,14 +1182,14 @@ export default function DockerPage() {
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '5px',
-                              fontSize: '12px',
+                              gap: '4px',
+                              fontSize: '11px',
                               fontWeight: 700,
                               transition: 'all 0.15s'
                             }}
                             title="Open Deep-Dive Container Telemetry & Diagnostic Inspector"
                           >
-                            <Eye size={13} />
+                            <Eye size={12} />
                             Inspect
                           </button>
 
@@ -1042,7 +1198,7 @@ export default function DockerPage() {
                             onClick={() => handleOpenLogs(container)}
                             type="button"
                             style={{
-                              padding: '6px 11px',
+                              padding: '5px 9px',
                               backgroundColor: 'rgba(255, 255, 255, 0.05)',
                               border: '1px solid #1f2e44',
                               borderRadius: '6px',
@@ -1050,14 +1206,14 @@ export default function DockerPage() {
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '5px',
-                              fontSize: '12px',
+                              gap: '4px',
+                              fontSize: '11px',
                               fontWeight: 600,
                               transition: 'all 0.15s'
                             }}
                             title="View Streaming Logs with Syntax Highlighting"
                           >
-                            <FileText size={13} color="#38bdf8" />
+                            <FileText size={12} color="#38bdf8" />
                             Logs
                           </button>
                         </div>
@@ -1130,11 +1286,11 @@ export default function DockerPage() {
                       </td>
 
                       <td style={{ padding: '12px 16px', color: '#38bdf8', fontFamily: 'monospace', fontWeight: 600 }}>
-                        {img.size || (img.size_bytes ? formatBytes(img.size_bytes) : '-')}
+                        {typeof img.size === 'number' ? formatBytes(img.size) : (img.size || (img.size_bytes ? formatBytes(img.size_bytes) : '-'))}
                       </td>
 
                       <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '11px' }}>
-                        {img.created || img.created_at || 'Cached'}
+                        {img.created || img.created_at || (img.created_time ? new Date(img.created_time).toLocaleDateString() : 'Cached')}
                       </td>
 
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
@@ -1253,7 +1409,7 @@ export default function DockerPage() {
                     <td style={{ padding: '12px 16px', color: '#38bdf8' }}>{vol.hostServerName}</td>
                     <td style={{ padding: '12px 16px', color: '#94a3b8' }}>{vol.driver || 'local'}</td>
                     <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#94a3b8', fontSize: '11px' }}>
-                      {vol.mountpoint || vol.Mountpoint || '-'}
+                      {vol.mount_point || vol.mountpoint || vol.Mountpoint || '-'}
                     </td>
                   </tr>
                 ))}
@@ -1446,7 +1602,7 @@ export default function DockerPage() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
                     <button
                       onClick={() => handleOpenLogs(inspectContainer)}
                       style={{
@@ -1464,6 +1620,98 @@ export default function DockerPage() {
                       }}
                     >
                       <FileText size={14} /> Open Live Streaming Logs
+                    </button>
+
+                    {isOperator && (
+                      String(inspectContainer.state || inspectContainer.status || '').toLowerCase() === 'running' ? (
+                        <>
+                          <button
+                            onClick={() => handleContainerAction('restart', inspectContainer)}
+                            disabled={actionLoading?.startsWith(inspectContainer.id)}
+                            type="button"
+                            style={{
+                              padding: '8px 14px',
+                              backgroundColor: 'rgba(234, 179, 8, 0.15)',
+                              border: '1px solid rgba(234, 179, 8, 0.4)',
+                              borderRadius: '6px',
+                              color: '#eab308',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <RotateCw size={14} /> Restart
+                          </button>
+                          <button
+                            onClick={() => handleContainerAction('stop', inspectContainer)}
+                            disabled={actionLoading?.startsWith(inspectContainer.id)}
+                            type="button"
+                            style={{
+                              padding: '8px 14px',
+                              backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                              border: '1px solid rgba(239, 68, 68, 0.4)',
+                              borderRadius: '6px',
+                              color: '#ef4444',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <Square size={14} /> Stop
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => handleContainerAction('start', inspectContainer)}
+                          disabled={actionLoading?.startsWith(inspectContainer.id)}
+                          type="button"
+                          style={{
+                            padding: '8px 14px',
+                            backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                            border: '1px solid rgba(34, 197, 94, 0.4)',
+                            borderRadius: '6px',
+                            color: '#22c55e',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <Play size={14} /> Start
+                        </button>
+                      )
+                    )}
+
+                    <button
+                      onClick={() => {
+                        handleContainerAction('remove', inspectContainer);
+                        setInspectContainer(null);
+                      }}
+                      disabled={actionLoading?.startsWith(inspectContainer.id)}
+                      type="button"
+                      style={{
+                        padding: '8px 14px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid #1f2e44',
+                        borderRadius: '6px',
+                        color: '#94a3b8',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Trash2 size={14} /> Remove
                     </button>
                   </div>
                 </>

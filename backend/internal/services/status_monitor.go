@@ -11,7 +11,7 @@ import (
 )
 
 func StartStatusMonitorWithHub(hub *websocket.Hub) {
-	ticker := time.NewTicker(10 * time.Second) // Poll more frequently for faster detection
+	ticker := time.NewTicker(5 * time.Second) // Fast 5-second polling loop for instant offline detection
 
 	go func() {
 		for range ticker.C {
@@ -25,22 +25,20 @@ func StartStatusMonitorWithHub(hub *websocket.Hub) {
 			}
 
 			cfg := config.Get()
-			offlineThreshold := configuredOfflineThreshold(cfg)
+			offlineThreshold := 30 * time.Second
+			if cfg != nil && cfg.OfflineThresholdSec > 0 {
+				offlineThreshold = time.Duration(cfg.OfflineThresholdSec) * time.Second
+			}
 
 			for _, machine := range machines {
-				if machine.Status == "OFFLINE" {
+				if machine.Status == "OFFLINE" && !machine.Online {
 					continue
 				}
 
 				if EvaluateMachineStatusWithThreshold(machine.LastSeen, time.Now().UTC(), offlineThreshold) == "OFFLINE" {
-					if machine.RetryCount < cfg.HeartbeatRetryCount {
-						machine.RetryCount++
-						_ = database.DB.Save(&machine)
-						continue
-					}
-
-					log.Printf("[StatusMonitor] Machine %s has timed out. Marking OFFLINE.", machine.Hostname)
+					log.Printf("[StatusMonitor] Machine %s (%s) heartbeat timed out (>%v). Marking OFFLINE.", machine.Hostname, machine.ID, offlineThreshold)
 					machine.Status = "OFFLINE"
+					machine.Online = false
 					machine.RetryCount = 0
 					if err := database.DB.Save(&machine).Error; err != nil {
 						log.Printf("[StatusMonitor] Failed to save status: %v", err)
@@ -58,24 +56,18 @@ func StartStatusMonitorWithHub(hub *websocket.Hub) {
 					// Publish structured event
 					websocket.PublishServerOffline(machine.ID.String(), payload)
 
-					// Legacy broadcasts for compatibility
+					// Broadcast instant status change over WebSocket
 					legacyPayload := map[string]interface{}{
 						"type":       "machine_status_changed",
 						"machine_id": machine.ID.String(),
 						"hostname":   machine.Hostname,
 						"status":     "OFFLINE",
+						"online":     false,
 						"last_seen":  machine.LastSeen,
 					}
-					websocket.WS.Broadcast(legacyPayload)
-
-					legacyPayload2 := map[string]interface{}{
-						"type":       "machine_status",
-						"machine_id": machine.ID,
-						"hostname":   machine.Hostname,
-						"status":     "OFFLINE",
-						"last_seen":  machine.LastSeen,
+					if websocket.WS != nil {
+						websocket.WS.Broadcast(legacyPayload)
 					}
-					websocket.WS.Broadcast(legacyPayload2)
 				}
 			}
 		}

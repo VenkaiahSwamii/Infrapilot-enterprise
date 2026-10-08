@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Palette,
   Save,
@@ -24,15 +25,40 @@ import {
   Server,
   Download,
   AlertTriangle,
-  FileText
+  FileText,
+  Eye,
+  EyeOff,
+  Send,
+  CheckCircle,
+  Users,
+  ArrowRight
 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
 
 export default function Settings({ settings, onSave }) {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('branding');
   const [copiedToken, setCopiedToken] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Enterprise SMTP & Notification Settings State
+  const [smtpForm, setSmtpForm] = useState({
+    enabled: true,
+    smtp_host: 'smtp.gmail.com',
+    smtp_port: 587,
+    smtp_user: '',
+    smtp_password: '',
+    from_address: '',
+    default_recipient: '',
+    send_resolved_emails: true,
+    consecutive_breaches_required: 2,
+    consecutive_normal_required: 2,
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [testRecipient, setTestRecipient] = useState('');
+  const [testLoading, setTestLoading] = useState(false);
+  const [testResult, setTestResult] = useState(null);
 
   const [form, setForm] = useState({
     // 1. Branding & Organization
@@ -86,6 +112,72 @@ export default function Settings({ settings, onSave }) {
     }
   }, [settings]);
 
+  useEffect(() => {
+    async function loadSmtpSettings() {
+      try {
+        const res = await apiClient.get('/notifications/settings');
+        if (res && res.data) {
+          setSmtpForm((prev) => ({
+            ...prev,
+            enabled: res.data.enabled ?? prev.enabled,
+            smtp_host: res.data.smtp_host || prev.smtp_host,
+            smtp_port: res.data.smtp_port || prev.smtp_port,
+            smtp_user: res.data.smtp_user || prev.smtp_user,
+            smtp_password: res.data.smtp_password || '',
+            from_address: res.data.from_address || prev.from_address,
+            default_recipient: res.data.default_recipient || prev.default_recipient,
+            send_resolved_emails: res.data.send_resolved_emails ?? prev.send_resolved_emails,
+            consecutive_breaches_required: res.data.consecutive_breaches_required || prev.consecutive_breaches_required,
+            consecutive_normal_required: res.data.consecutive_normal_required || prev.consecutive_normal_required,
+          }));
+          if (res.data.default_recipient) {
+            setTestRecipient(res.data.default_recipient);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load notification settings', err);
+      }
+    }
+    loadSmtpSettings();
+  }, []);
+
+  const handleSendTestEmail = async () => {
+    const target = testRecipient || smtpForm.default_recipient || smtpForm.smtp_user;
+    if (!target) {
+      setTestResult({
+        success: false,
+        message: 'Please provide a valid recipient email address to receive the verification email.',
+      });
+      return;
+    }
+    setTestLoading(true);
+    setTestResult(null);
+    try {
+      const res = await apiClient.post('/notifications/test-email', {
+        recipient: target,
+        smtp_host: smtpForm.smtp_host,
+        smtp_port: Number(smtpForm.smtp_port),
+        smtp_user: smtpForm.smtp_user,
+        smtp_password: smtpForm.smtp_password,
+        from_address: smtpForm.from_address,
+      });
+      setTestResult({
+        success: true,
+        message: res.data?.message || 'SMTP handshake verified! Test email successfully delivered.',
+        details: res.data?.details,
+      });
+    } catch (err) {
+      const errMsg = err.response?.data?.error || err.message || 'SMTP diagnostic verification failed.';
+      setTestResult({
+        success: false,
+        message: errMsg,
+        details: err.response?.data?.details,
+      });
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
   const colorPresets = [
     { name: 'Cyber Cyan', primary: '#06b6d4', sidebar: '#08131e' },
     { name: 'Emerald Pro', primary: '#10b981', sidebar: '#081c15' },
@@ -112,7 +204,10 @@ export default function Settings({ settings, onSave }) {
     e.preventDefault();
     setIsSaving(true);
     try {
-      await apiClient.patch('/orgs/default/settings', form).catch(() => null);
+      await Promise.all([
+        apiClient.patch('/orgs/default/settings', form).catch(() => null),
+        apiClient.put('/notifications/settings', smtpForm).catch(() => null),
+      ]);
       if (onSave) onSave(form);
       setSavedMsg(true);
       setTimeout(() => setSavedMsg(false), 3000);
@@ -442,63 +537,346 @@ export default function Settings({ settings, onSave }) {
 
           {/* TAB 3: Notifications & Webhooks */}
           {activeTab === 'notifications' && (
-            <div className="settings-tab-content">
+            <div className="settings-tab-content grid-2col">
+              {/* CARD 1: Enterprise SMTP & Alert Engine */}
               <div className="settings-card">
-                <div className="card-section-header">
-                  <Bell size={16} color="#38bdf8" />
-                  <span>ALERT NOTIFICATION CHANNELS &amp; WEBHOOK INTEGRATIONS</span>
+                <div className="card-section-header" style={{ justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Mail size={16} color="#38bdf8" />
+                    <span>ENTERPRISE SMTP &amp; ALERT EMAIL ENGINE</span>
+                  </div>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                    backgroundColor: smtpForm.enabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    color: smtpForm.enabled ? '#10b981' : '#ef4444',
+                    border: `1px solid ${smtpForm.enabled ? '#10b981' : '#ef4444'}`,
+                  }}>
+                    {smtpForm.enabled ? 'SYSTEM ACTIVE' : 'DISABLED'}
+                  </span>
                 </div>
 
-                <div className="form-group">
-                  <label>SLACK INCOMING WEBHOOK URL</label>
-                  <div className="input-with-icon">
-                    <MessageSquare size={15} color="#38bdf8" />
-                    <input
-                      type="url"
-                      value={form.slack_webhook_url}
-                      onChange={(e) => setForm({ ...form, slack_webhook_url: e.target.value })}
-                      placeholder="https://hooks.slack.com/services/T00/B00/XXXX"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label>PAGERDUTY INTEGRATION ROUTING KEY</label>
-                  <div className="input-with-icon">
-                    <Zap size={15} color="#a855f7" />
-                    <input
-                      type="text"
-                      value={form.pagerduty_key}
-                      onChange={(e) => setForm({ ...form, pagerduty_key: e.target.value })}
-                      placeholder="e.g. pd_integration_key_prod_8819"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label>EMAIL ALERT RECIPIENTS (COMMA SEPARATED)</label>
-                  <div className="input-with-icon">
-                    <Mail size={15} color="#f59e0b" />
-                    <input
-                      type="text"
-                      value={form.email_recipients}
-                      onChange={(e) => setForm({ ...form, email_recipients: e.target.value })}
-                      placeholder="sre-team@company.com, ops@company.com"
-                    />
-                  </div>
+                <div style={{
+                  backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                  border: '1px solid rgba(56, 189, 248, 0.2)',
+                  borderRadius: '8px',
+                  padding: '12px 14px',
+                  fontSize: '12px',
+                  color: '#94a3b8',
+                  lineHeight: '1.5'
+                }}>
+                  <strong style={{ color: '#38bdf8' }}>Incident Lifecycle Policy:</strong> Dispatches <strong style={{ color: '#ffffff' }}>exactly 1 trigger email</strong> on breach, maintains <strong style={{ color: '#ffffff' }}>total silence</strong> while active, and sends <strong style={{ color: '#ffffff' }}>1 threaded resolution email</strong> with calculated outage downtime upon recovery.
                 </div>
 
                 <div className="toggle-setting-row">
                   <div>
-                    <strong>HIGH-SEVERITY CRITICAL PAGER TRIGGER</strong>
-                    <p>Trigger immediate PagerDuty phone/SMS alerts for P1 Critical incidents.</p>
+                    <strong>ENABLE EMAIL ALERT NOTIFICATIONS</strong>
+                    <p>Master toggle for all automated trigger and recovery emails.</p>
                   </div>
                   <input
                     type="checkbox"
-                    checked={form.enable_critical_pager}
-                    onChange={(e) => setForm({ ...form, enable_critical_pager: e.target.checked })}
+                    checked={smtpForm.enabled}
+                    onChange={(e) => setSmtpForm({ ...smtpForm, enabled: e.target.checked })}
                     className="toggle-switch"
                   />
+                </div>
+
+                <div className="toggle-setting-row">
+                  <div>
+                    <strong>AUTO-RESOLUTION RECOVERY EMAILS</strong>
+                    <p>Send a threaded resolution notification when metrics return to normal.</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={smtpForm.send_resolved_emails}
+                    onChange={(e) => setSmtpForm({ ...smtpForm, send_resolved_emails: e.target.checked })}
+                    className="toggle-switch"
+                  />
+                </div>
+
+                <div className="form-row-2">
+                  <div className="form-group">
+                    <label>CONSECUTIVE BREACHES (BEFORE TRIGGER)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={smtpForm.consecutive_breaches_required}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, consecutive_breaches_required: parseInt(e.target.value) || 2 })}
+                    />
+                    <span className="field-hint">Filters transient blips before email dispatch.</span>
+                  </div>
+
+                  <div className="form-group">
+                    <label>CONSECUTIVE NORMAL (BEFORE RESOLVE)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={smtpForm.consecutive_normal_required}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, consecutive_normal_required: parseInt(e.target.value) || 2 })}
+                    />
+                    <span className="field-hint">Requires sustained stability to avoid flapping.</span>
+                  </div>
+                </div>
+
+                <div className="card-section-header" style={{ marginTop: '8px' }}>
+                  <Server size={14} color="#a855f7" />
+                  <span>SMTP RELAY &amp; CREDENTIAL CONFIGURATION</span>
+                </div>
+
+                <div className="form-row-2">
+                  <div className="form-group">
+                    <label>SMTP HOST / SERVER</label>
+                    <input
+                      type="text"
+                      value={smtpForm.smtp_host}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtp_host: e.target.value })}
+                      placeholder="smtp.gmail.com"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>SMTP PORT</label>
+                    <input
+                      type="number"
+                      value={smtpForm.smtp_port}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtp_port: parseInt(e.target.value) || 587 })}
+                      placeholder="587"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>SMTP USERNAME / ACCOUNT EMAIL</label>
+                  <input
+                    type="text"
+                    value={smtpForm.smtp_user}
+                    onChange={(e) => setSmtpForm({ ...smtpForm, smtp_user: e.target.value })}
+                    placeholder="e.g. infrapilotadmin@gmail.com"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>SMTP PASSWORD / APP PASSWORD</label>
+                  <div className="input-with-icon" style={{ position: 'relative' }}>
+                    <Lock size={15} color="#94a3b8" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={smtpForm.smtp_password}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtp_password: e.target.value })}
+                      placeholder="Google App Password (16 characters)"
+                      style={{ paddingRight: '40px' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      style={{
+                        position: 'absolute',
+                        right: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: '#94a3b8',
+                        cursor: 'pointer',
+                        padding: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                      title={showPassword ? 'Hide Password' : 'Show Password'}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  <span className="field-hint">For Gmail, use a 16-character App Password without spaces.</span>
+                </div>
+
+                <div className="form-group">
+                  <label>FROM HEADER &amp; DISPLAY NAME</label>
+                  <input
+                    type="text"
+                    value={smtpForm.from_address}
+                    onChange={(e) => setSmtpForm({ ...smtpForm, from_address: e.target.value })}
+                    placeholder="InfraPilot Enterprise <infrapilotadmin@gmail.com>"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>DEFAULT ALERT RECIPIENT EMAIL</label>
+                  <input
+                    type="email"
+                    value={smtpForm.default_recipient}
+                    onChange={(e) => setSmtpForm({ ...smtpForm, default_recipient: e.target.value })}
+                    placeholder="devops@company.com"
+                  />
+                  <span className="field-hint">Primary recipient for all infrastructure alerts unless overridden by a rule.</span>
+                </div>
+              </div>
+
+              {/* CARD 2: Live Diagnostic Test Email & Webhooks */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div className="settings-card" style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}>
+                  <div className="card-section-header">
+                    <Send size={16} color="#38bdf8" />
+                    <span>DIAGNOSTIC VERIFICATION &amp; SEND TEST EMAIL</span>
+                  </div>
+
+                  <p style={{ fontSize: '12.5px', color: '#94a3b8', margin: 0, lineHeight: '1.5' }}>
+                    Validate your SMTP credentials end-to-end. This test executes DNS lookup, TCP connect, STARTTLS negotiation, authentication, and delivers a verification card to the specified inbox.
+                  </p>
+
+                  <div className="form-group">
+                    <label>TEST RECIPIENT EMAIL</label>
+                    <div className="input-with-icon">
+                      <Mail size={15} color="#38bdf8" />
+                      <input
+                        type="email"
+                        value={testRecipient !== '' ? testRecipient : (smtpForm.default_recipient || smtpForm.smtp_user || '')}
+                        onChange={(e) => setTestRecipient(e.target.value)}
+                        placeholder="your-email@company.com"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSendTestEmail}
+                    disabled={testLoading}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      backgroundColor: testLoading ? '#1e293b' : '#0284c7',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '12px 18px',
+                      fontSize: '13.5px',
+                      fontWeight: 600,
+                      cursor: testLoading ? 'not-allowed' : 'pointer',
+                      transition: 'background-color 0.2s',
+                    }}
+                  >
+                    {testLoading ? (
+                      <>
+                        <RefreshCw size={16} className="spin-animation" />
+                        <span>Verifying SMTP Connection...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={16} />
+                        <span>Send Test Verification Email</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Diagnostic Result Banner */}
+                  {testResult && (
+                    <div style={{
+                      backgroundColor: testResult.success ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                      border: `1px solid ${testResult.success ? '#10b981' : '#ef4444'}`,
+                      borderRadius: '8px',
+                      padding: '14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {testResult.success ? (
+                          <CheckCircle size={18} color="#10b981" />
+                        ) : (
+                          <AlertTriangle size={18} color="#ef4444" />
+                        )}
+                        <strong style={{ color: testResult.success ? '#10b981' : '#ef4444', fontSize: '13.5px' }}>
+                          {testResult.success ? 'SMTP Verification Succeeded' : 'SMTP Verification Failed'}
+                        </strong>
+                      </div>
+
+                      <div style={{ fontSize: '12.5px', color: '#cbd5e1', lineHeight: '1.4' }}>
+                        {testResult.message}
+                      </div>
+
+                      {testResult.details && (
+                        <div style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '6px',
+                          marginTop: '6px',
+                          fontSize: '11px',
+                          fontFamily: 'monospace',
+                        }}>
+                          <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: testResult.details.dns_ok ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: testResult.details.dns_ok ? '#34d399' : '#f87171' }}>
+                            DNS: {testResult.details.dns_ok ? 'OK' : 'FAIL'} {testResult.details.resolved_ip ? `(${testResult.details.resolved_ip})` : ''}
+                          </span>
+                          <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: testResult.details.tcp_ok ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: testResult.details.tcp_ok ? '#34d399' : '#f87171' }}>
+                            TCP: {testResult.details.tcp_ok ? 'OK' : 'FAIL'}
+                          </span>
+                          <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: testResult.details.tls_ok ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: testResult.details.tls_ok ? '#34d399' : '#f87171' }}>
+                            TLS: {testResult.details.tls_ok ? 'OK' : 'FAIL'}
+                          </span>
+                          <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: testResult.details.auth_ok ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: testResult.details.auth_ok ? '#34d399' : '#f87171' }}>
+                            AUTH: {testResult.details.auth_ok ? 'OK' : 'FAIL'}
+                          </span>
+                          <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: testResult.details.sent_ok ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: testResult.details.sent_ok ? '#34d399' : '#f87171' }}>
+                            DELIVERY: {testResult.details.sent_ok ? 'OK' : 'FAIL'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Additional Webhook Routing */}
+                <div className="settings-card">
+                  <div className="card-section-header">
+                    <Zap size={16} color="#a855f7" />
+                    <span>ON-CALL PAGING &amp; WEBHOOK INTEGRATIONS</span>
+                  </div>
+
+                  <div className="form-group">
+                    <label>SLACK INCOMING WEBHOOK URL</label>
+                    <div className="input-with-icon">
+                      <MessageSquare size={15} color="#38bdf8" />
+                      <input
+                        type="url"
+                        value={form.slack_webhook_url}
+                        onChange={(e) => setForm({ ...form, slack_webhook_url: e.target.value })}
+                        placeholder="https://hooks.slack.com/services/T00/B00/XXXX"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>PAGERDUTY INTEGRATION ROUTING KEY</label>
+                    <div className="input-with-icon">
+                      <Zap size={15} color="#a855f7" />
+                      <input
+                        type="text"
+                        value={form.pagerduty_key}
+                        onChange={(e) => setForm({ ...form, pagerduty_key: e.target.value })}
+                        placeholder="e.g. pd_integration_key_prod_8819"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="toggle-setting-row">
+                    <div>
+                      <strong>HIGH-SEVERITY CRITICAL PAGER TRIGGER</strong>
+                      <p>Trigger immediate PagerDuty phone/SMS alerts for P1 Critical incidents.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={form.enable_critical_pager}
+                      onChange={(e) => setForm({ ...form, enable_critical_pager: e.target.checked })}
+                      className="toggle-switch"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -629,6 +1007,42 @@ export default function Settings({ settings, onSave }) {
                     className="toggle-switch"
                   />
                 </div>
+              </div>
+
+              {/* IAM & RBAC Navigation Box */}
+              <div className="settings-card" style={{ marginTop: '16px', background: 'linear-gradient(145deg, #0f172a 0%, #1e293b 100%)', border: '1px solid #38bdf844' }}>
+                <div className="card-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Users size={18} color="#38bdf8" />
+                    <span style={{ color: '#f8fafc', fontWeight: 600 }}>USER MANAGEMENT &amp; ROLE-BASED ACCESS CONTROL (RBAC)</span>
+                  </div>
+                  <span style={{ fontSize: '11px', background: '#38bdf822', color: '#38bdf8', padding: '2px 8px', borderRadius: '4px', border: '1px solid #38bdf844' }}>ENTERPRISE IAM</span>
+                </div>
+                <p style={{ color: '#94a3b8', fontSize: '13px', margin: '12px 0 16px 0', lineHeight: 1.5 }}>
+                  Manage team accounts, assign enterprise roles (SuperAdmin, Admin, Operator, Viewer), enforce granular machine-level node scoping, and restrict platform module permissions.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/admin/users')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 16px',
+                    backgroundColor: '#0284c7',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <Users size={14} />
+                  <span>Open User Management Console</span>
+                  <ArrowRight size={14} />
+                </button>
               </div>
             </div>
           )}

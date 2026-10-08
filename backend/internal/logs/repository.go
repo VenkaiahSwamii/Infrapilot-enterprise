@@ -123,21 +123,22 @@ func (r *postgresRepository) CreateBatch(logs []models.Log) error {
 
 func parseTimeRange(tr string) (time.Time, time.Time) {
 	now := time.Now()
+	end := now.Add(10 * time.Minute) // 10 min buffer for client-agent clock differences
 	switch strings.ToLower(tr) {
 	case "5m":
-		return now.Add(-5 * time.Minute), now
+		return now.Add(-5 * time.Minute), end
 	case "15m":
-		return now.Add(-15 * time.Minute), now
+		return now.Add(-15 * time.Minute), end
 	case "30m":
-		return now.Add(-30 * time.Minute), now
+		return now.Add(-30 * time.Minute), end
 	case "1h":
-		return now.Add(-1 * time.Hour), now
+		return now.Add(-1 * time.Hour), end
 	case "6h":
-		return now.Add(-6 * time.Hour), now
+		return now.Add(-6 * time.Hour), end
 	case "24h":
-		return now.Add(-24 * time.Hour), now
+		return now.Add(-24 * time.Hour), end
 	case "7d":
-		return now.Add(-7 * 24 * time.Hour), now
+		return now.Add(-7 * 24 * time.Hour), end
 	default:
 		return time.Time{}, time.Time{}
 	}
@@ -157,7 +158,9 @@ func (r *postgresRepository) GetLogs(filter LogFilter) ([]models.Log, int64, err
 
 	if filter.MachineID != "" && filter.MachineID != "ALL" {
 		if mUUID, err := uuid.Parse(filter.MachineID); err == nil {
-			db = db.Where("machine_id = ?", mUUID)
+			db = db.Where("machine_id = ? OR LOWER(hostname) = LOWER(?)", mUUID, filter.MachineID)
+		} else {
+			db = db.Where("LOWER(hostname) = LOWER(?) OR machine_id::text LIKE ?", strings.ToLower(filter.MachineID), filter.MachineID+"%")
 		}
 	}
 	if filter.Hostname != "" && filter.Hostname != "ALL" {

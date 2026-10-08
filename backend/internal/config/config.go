@@ -92,6 +92,20 @@ type Config struct {
 
 	// Alerts & Notifications Policy
 	Alerts AlertsConfig `yaml:"alerts" toml:"alerts"`
+
+	// SMTP Configuration
+	SMTP SMTPConfig `yaml:"smtp" toml:"smtp"`
+}
+
+// SMTPConfig controls dynamic email and SMTP delivery parameters
+type SMTPConfig struct {
+	Enabled          bool   `yaml:"enabled" toml:"enabled" env:"SMTP_ENABLED"`
+	Host             string `yaml:"host" toml:"host" env:"SMTP_HOST"`
+	Port             int    `yaml:"port" toml:"port" env:"SMTP_PORT"`
+	User             string `yaml:"user" toml:"user" env:"SMTP_USER"`
+	Password         string `yaml:"password" toml:"password" env:"SMTP_PASSWORD"`
+	From             string `yaml:"from" toml:"from" env:"SMTP_FROM"`
+	DefaultRecipient string `yaml:"default_recipient" toml:"default_recipient" env:"SMTP_DEFAULT_RECIPIENT"`
 }
 
 // AlertsConfig controls email and notification rate-limiting and auto-resolution behavior
@@ -132,8 +146,8 @@ func Load() {
 		// Database defaults
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "infrapilot"),
-		DBPassword: getEnv("DB_PASSWORD", "infrapilot"),
+		DBUser:     getEnv("DB_USER", "postgres"),
+		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "infrapilot"),
 		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
 
@@ -201,12 +215,23 @@ func Load() {
 
 		// Alerts defaults
 		Alerts: AlertsConfig{
-			EmailEnabled:                getBool("ALERTS_EMAIL_ENABLED", false),
+			EmailEnabled:                getBool("ALERTS_EMAIL_ENABLED", true),
 			AdminEmail:                  getEnv("ADMIN_EMAIL", "infrapilotadmin@gmail.com"),
 			CooldownMinutes:             getInt("ALERTS_COOLDOWN_MINUTES", 15),
-			SendResolvedEmails:          getBool("ALERTS_SEND_RESOLVED_EMAILS", false),
+			SendResolvedEmails:          getBool("ALERTS_SEND_RESOLVED_EMAILS", true),
 			ConsecutiveBreachesRequired: getInt("ALERTS_BREACHES_REQUIRED", 2),
 			ConsecutiveNormalRequired:   getInt("ALERTS_NORMAL_REQUIRED", 2),
+		},
+
+		// SMTP defaults
+		SMTP: SMTPConfig{
+			Enabled:          getBool("SMTP_ENABLED", true),
+			Host:             getEnv("SMTP_HOST", "smtp.gmail.com"),
+			Port:             getInt("SMTP_PORT", 587),
+			User:             getEnv("SMTP_USER", ""),
+			Password:         getEnv("SMTP_PASSWORD", ""),
+			From:             getEnv("SMTP_FROM", "InfraPilot Enterprise <notifications@infrapilot.enterprise>"),
+			DefaultRecipient: getEnv("SMTP_DEFAULT_RECIPIENT", getEnv("ADMIN_EMAIL", "")),
 		},
 	}
 
@@ -226,12 +251,22 @@ func Load() {
 						ServerKey  string `toml:"server_key"`
 					} `toml:"tls"`
 					Database struct {
-						Host    string `toml:"host"`
-						Port    int    `toml:"port"`
-						User    string `toml:"user"`
-						DBName  string `toml:"dbname"`
-						SSLMode string `toml:"sslmode"`
+						Host     string `toml:"host"`
+						Port     int    `toml:"port"`
+						User     string `toml:"user"`
+						Password string `toml:"password"`
+						DBName   string `toml:"dbname"`
+						SSLMode  string `toml:"sslmode"`
 					} `toml:"database"`
+					SMTP struct {
+						Enabled          *bool  `toml:"enabled"`
+						Host             string `toml:"host"`
+						Port             int    `toml:"port"`
+						User             string `toml:"user"`
+						Password         string `toml:"password"`
+						From             string `toml:"from"`
+						DefaultRecipient string `toml:"default_recipient"`
+					} `toml:"smtp"`
 				} `toml:"server"`
 				Alerts struct {
 					EmailEnabled                *bool  `toml:"email_enabled"`
@@ -258,11 +293,38 @@ func Load() {
 				if tomlCfg.Server.Database.User != "" {
 					globalConfig.DBUser = tomlCfg.Server.Database.User
 				}
+				if tomlCfg.Server.Database.Password != "" {
+					globalConfig.DBPassword = tomlCfg.Server.Database.Password
+				}
 				if tomlCfg.Server.Database.DBName != "" {
 					globalConfig.DBName = tomlCfg.Server.Database.DBName
 				}
+				if tomlCfg.Server.Database.SSLMode != "" {
+					globalConfig.DBSSLMode = tomlCfg.Server.Database.SSLMode
+				}
 				if len(tomlCfg.Server.AllowedOrigins) > 0 {
 					globalConfig.CORSOrigins = tomlCfg.Server.AllowedOrigins
+				}
+				if tomlCfg.Server.SMTP.Enabled != nil {
+					globalConfig.SMTP.Enabled = *tomlCfg.Server.SMTP.Enabled
+				}
+				if tomlCfg.Server.SMTP.Host != "" {
+					globalConfig.SMTP.Host = tomlCfg.Server.SMTP.Host
+				}
+				if tomlCfg.Server.SMTP.Port != 0 {
+					globalConfig.SMTP.Port = tomlCfg.Server.SMTP.Port
+				}
+				if tomlCfg.Server.SMTP.User != "" {
+					globalConfig.SMTP.User = tomlCfg.Server.SMTP.User
+				}
+				if tomlCfg.Server.SMTP.Password != "" {
+					globalConfig.SMTP.Password = tomlCfg.Server.SMTP.Password
+				}
+				if tomlCfg.Server.SMTP.From != "" {
+					globalConfig.SMTP.From = tomlCfg.Server.SMTP.From
+				}
+				if tomlCfg.Server.SMTP.DefaultRecipient != "" {
+					globalConfig.SMTP.DefaultRecipient = tomlCfg.Server.SMTP.DefaultRecipient
 				}
 				if tomlCfg.Alerts.EmailEnabled != nil {
 					globalConfig.Alerts.EmailEnabled = *tomlCfg.Alerts.EmailEnabled
@@ -288,7 +350,7 @@ func Load() {
 	}
 
 	if globalConfig.BackendURL == "" {
-		globalConfig.BackendURL = getEnv("BACKEND_URL", "http://192.168.1.2:"+globalConfig.ServerPort)
+		globalConfig.BackendURL = getEnv("BACKEND_URL", "http://localhost:"+globalConfig.ServerPort)
 	}
 }
 

@@ -15,7 +15,7 @@ Write-Host "========================================================" -Foregroun
 
 $InstallDir = "$env:ProgramFiles\InfraPilot"
 $CertsDir = "$InstallDir\certs"
-$ServiceName = "InfraPilotAgent"
+$ServiceName = "infrapilot-agent"
 $BinaryPath = "$InstallDir\infrapilot-agent.exe"
 $ConfigPath = "$InstallDir\config.toml"
 $CertPath = "$CertsDir\ca.crt"
@@ -26,9 +26,11 @@ if (-not (Test-Path $InstallDir)) {
 }
 if (-not (Test-Path $CertsDir)) {
     New-Item -ItemType Directory -Force -Path $CertsDir | Out-Null
+    
 }
 
 # 2. Stop existing service and processes to prevent file-locking during binary update
+Stop-Service -Name "InfraPilotAgent" -Force -ErrorAction SilentlyContinue
 $ExistingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($ExistingService) {
     Write-Host "[+] Stopping existing $ServiceName service..." -ForegroundColor Yellow
@@ -48,7 +50,7 @@ try {
     try {
         Invoke-WebRequest -Uri $FallbackURL -OutFile $BinaryPath -UseBasicParsing
     } catch {
-        $LocalCandidates = @("C:\Users\abhis\Infrapilot-enterprise\infrapilot-agent.exe", "C:\Users\abhis\Infrapilot-enterprise\agent\agent.exe", ".\infrapilot-agent.exe")
+        $LocalCandidates = @(".\infrapilot-agent-windows-amd64.exe", ".\infrapilot-agent.exe", "..\infrapilot-agent.exe", ".\agent\agent.exe", ".\dist\infrapilot-agent-windows-amd64.exe")
         foreach ($cand in $LocalCandidates) {
             if (Test-Path $cand) {
                 Copy-Item -Path $cand -Destination $BinaryPath -Force

@@ -2,10 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Zap, Mail, Check, Shield, Save, Loader2, CheckCircle2 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
+import { useRBAC } from '../../hooks/useRBAC.js';
 
 const STORAGE_KEY_PREFIX = 'infrapilot_sre_policy_';
 
-export default function AdminSREPolicyControl({ category = 'Storage', component = 'root_disk', title, compact = false }) {
+export default function AdminSREPolicyControl({
+  category = 'Storage',
+  component = 'root_disk',
+  title,
+  compact = false,
+  onAutoRemediate,
+  onEmailAlert,
+}) {
+  const { isOperator } = useRBAC();
   let addToast = null;
   try {
     const store = useDashboardStore();
@@ -55,10 +64,13 @@ export default function AdminSREPolicyControl({ category = 'Storage', component 
       try {
         const res = await apiClient.get('/sre/policies');
         if (res?.data && Array.isArray(res.data)) {
+          const cleanTargetComp = (component || '').toLowerCase().replace(/\.service$/, '');
           const match = res.data.find(
-            (p) =>
-              p.category?.toLowerCase() === category?.toLowerCase() &&
-              p.component?.toLowerCase() === component?.toLowerCase()
+            (p) => {
+              if (p.category?.toLowerCase() !== category?.toLowerCase()) return false;
+              const pComp = (p.component || '').toLowerCase().replace(/\.service$/, '');
+              return pComp === cleanTargetComp;
+            }
           );
           if (match && isMounted) {
             const loadedMode = match.mode || 'AUTO_REMEDIATE';
@@ -89,7 +101,7 @@ export default function AdminSREPolicyControl({ category = 'Storage', component 
     };
   }, [category, component, cacheKey]);
 
-  const handleSave = async (updatedMode, updatedEmail, showNotification = true) => {
+  const handleSave = async (updatedMode, updatedEmail, showNotification = true, triggerAction = true) => {
     const modeToSave = updatedMode || policy.mode;
     const rawEmail = updatedEmail !== undefined ? updatedEmail : emailInput;
     const emailToSave = (rawEmail || '').trim() || 'infrapilotadmin@gmail.com';
@@ -146,6 +158,15 @@ export default function AdminSREPolicyControl({ category = 'Storage', component 
           addToast('info', 'Email Alert Configured', `Notifications for ${component} will be dispatched to ${emailToSave}.`);
         }
       }
+
+      // 3. Trigger action callback if provided
+      if (triggerAction) {
+        if (modeToSave === 'AUTO_REMEDIATE' && typeof onAutoRemediate === 'function') {
+          onAutoRemediate();
+        } else if (modeToSave === 'NOTIFY_EMAIL' && typeof onEmailAlert === 'function') {
+          onEmailAlert();
+        }
+      }
     }
   };
 
@@ -178,6 +199,9 @@ export default function AdminSREPolicyControl({ category = 'Storage', component 
           <button
             type="button"
             className={`enterprise-toggle-btn auto-btn ${isAuto ? 'active' : ''}`}
+            disabled={!isOperator || saving}
+            title={!isOperator ? 'Operator or Admin role required' : 'Set to Auto-Remediate'}
+            style={!isOperator ? { opacity: 0.55, cursor: 'not-allowed' } : {}}
             onClick={() => handleSave('AUTO_REMEDIATE')}
           >
             <div className="btn-icon-box">
@@ -191,6 +215,9 @@ export default function AdminSREPolicyControl({ category = 'Storage', component 
           <button
             type="button"
             className={`enterprise-toggle-btn email-btn ${isEmail ? 'active' : ''}`}
+            disabled={!isOperator || saving}
+            title={!isOperator ? 'Operator or Admin role required' : 'Set to Email Notification'}
+            style={!isOperator ? { opacity: 0.55, cursor: 'not-allowed' } : {}}
             onClick={() => {
               handleSave('NOTIFY_EMAIL');
               setTimeout(() => {

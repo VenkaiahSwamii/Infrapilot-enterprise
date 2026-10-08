@@ -57,9 +57,13 @@ export default function FleetTerminal({ machine, machineName }) {
   const { selectedServer, liveMetricsMap, servers } = useServerStore();
 
   const activeMachine = machine || selectedServer;
-  const machineId = activeMachine ? getMachineId(activeMachine) : '';
-  const hostLabel = machineName || activeMachine?.hostname || activeMachine?.name || 'ALL NODES';
-  const rawHost = activeMachine?.hostname || activeMachine?.name || 'node';
+  const initialMachineId = activeMachine ? getMachineId(activeMachine) : '';
+  const [selectedNodeId, setSelectedNodeId] = useState(initialMachineId || 'ALL');
+
+  const effectiveMachineId = selectedNodeId && selectedNodeId !== 'ALL' ? selectedNodeId : '';
+  const activeServerObj = servers?.find((s) => String(s.id).toLowerCase() === String(effectiveMachineId).toLowerCase()) || activeMachine;
+  const hostLabel = machineName || activeServerObj?.hostname || activeServerObj?.name || (effectiveMachineId ? 'Selected Node' : 'ALL NODES');
+  const rawHost = activeServerObj?.hostname || activeServerObj?.name || 'node';
 
   const [activeTab, setActiveTab] = useState('live'); // 'live' | 'patterns'
   const [logs, setLogs] = useState([]);
@@ -89,7 +93,7 @@ export default function FleetTerminal({ machine, machineName }) {
     try {
       const res = await apiClient.get('/logs', {
         params: {
-          machine_id: machineId || '',
+          machine_id: effectiveMachineId || '',
           level: filterLevel !== 'ALL' ? filterLevel : '',
           source: filterSource !== 'ALL' ? filterSource : '',
           service: filterService || '',
@@ -101,15 +105,16 @@ export default function FleetTerminal({ machine, machineName }) {
       if (res.data?.logs && Array.isArray(res.data.logs)) {
         const mapped = res.data.logs.map((l) => ({
           id: l.id || `log-${Math.random()}`,
+          machine_id: l.machine_id,
           ingestTs: formatIngestTs(new Date(l.timestamp || l.created_at || Date.now())),
           hostname: l.hostname || rawHost,
           level: (l.level || parseLogLevel(l.message)).toUpperCase(),
           source: l.source || 'system',
-          service: l.service || 'systemd',
+          service: l.service || 'agent',
           message: l.message || '',
           text: `[${(l.level || 'INFO').toUpperCase()}] ${l.message}`,
           fullLine: `[${formatIngestTs(new Date(l.timestamp || Date.now()))}] ${l.hostname || rawHost} [${l.service || 'sys'}] [${(l.level || 'INFO').toUpperCase()}] ${l.message}`,
-          os: l.os || l.platform || activeMachine?.os || 'linux',
+          os: l.os || l.platform || activeServerObj?.os || 'linux',
           container_name: l.container_name,
           pod_name: l.pod_name,
           namespace: l.namespace,
@@ -130,7 +135,7 @@ export default function FleetTerminal({ machine, machineName }) {
 
   useEffect(() => {
     fetchLogsHistory();
-  }, [machineId, filterLevel, filterSource, filterTimeRange, filterService]);
+  }, [effectiveMachineId, filterLevel, filterSource, filterTimeRange, filterService]);
 
   // 2. Real-time WebSocket Live Stream Listener
   useEffect(() => {
@@ -141,31 +146,71 @@ export default function FleetTerminal({ machine, machineName }) {
         try {
           const payload = JSON.parse(event.data);
 
-          if (payload.event === 'log_entry' || payload.log || payload.cpu_usage !== undefined || payload.message) {
-            const l = payload.log || payload;
+          // 2.1 Live Log Entry broadcast
+          if (payload.event === 'log_entry' || payload.log || payload.data) {
+            const l = payload.log || payload.data || payload;
             const eventHost = l.hostname || payload.hostname || rawHost;
 
-            const matches = !machineId || String(l.machine_id || payload.machine_id).toLowerCase() === String(machineId).toLowerCase();
+            const targetMid = String(effectiveMachineId || '').toLowerCase();
+            const logMid = String(l.machine_id || payload.machine_id || '').toLowerCase();
+            const logHost = String(l.hostname || payload.hostname || '').toLowerCase();
+
+            const matches = !effectiveMachineId || effectiveMachineId === 'ALL' || logMid === targetMid || (logHost && logHost === targetMid);
 
             if (matches) {
               const now = new Date(l.timestamp || l.created_at || Date.now());
-              const msgText = l.message || (payload.cpu_usage !== undefined ? `Telemetry: CPU=${payload.cpu_usage}%, RAM=${payload.memory_percent || 0}%` : 'Log stream event');
+              const msgText = l.message || '';
+              const lvl = (l.level || parseLogLevel(msgText)).toUpperCase();
               const newEntry = {
                 id: l.id || `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                machine_id: l.machine_id,
                 ingestTs: formatIngestTs(now),
                 hostname: eventHost,
-                level: (l.level || parseLogLevel(msgText)).toUpperCase(),
+                level: lvl,
                 source: l.source || 'system',
                 service: l.service || 'agent',
                 message: msgText,
-                text: `[${(l.level || parseLogLevel(msgText)).toUpperCase()}] ${msgText}`,
+                text: `[${lvl}] ${msgText}`,
                 fullLine: `[${formatIngestTs(now)}] ${eventHost} [${l.service || 'agent'}] ${msgText}`,
+                os: l.os || l.platform || 'linux',
+                container_name: l.container_name,
+                raw_log: l.raw_log,
               };
 
               if (streaming) {
                 setLogs((prev) => [...prev.slice(-400), newEntry]);
               } else {
                 setPausedQueue((prev) => [...prev, newEntry]);
+              }
+            }
+          }
+
+          // 2.2 Interactive Terminal Command Result broadcast
+          if (payload.event === 'command_completed' || payload.type === 'command_completed') {
+            const matches = !effectiveMachineId || String(payload.machine_id).toLowerCase() === String(effectiveMachineId).toLowerCase();
+
+            if (matches) {
+              const outText = payload.stdout || payload.stderr || `Command completed (Exit code: ${payload.exit_code ?? 0})`;
+              const isErr = (payload.exit_code !== 0 && payload.exit_code !== undefined) || (payload.stderr && !payload.stdout);
+              const now = new Date(payload.finished_at || Date.now());
+              const resEntry = {
+                id: `cmd-res-${payload.command_id || Date.now()}`,
+                machine_id: payload.machine_id,
+                ingestTs: formatIngestTs(now),
+                hostname: rawHost,
+                level: isErr ? 'ERROR' : 'INFO',
+                source: 'terminal',
+                service: 'output',
+                message: outText,
+                text: outText,
+                fullLine: `[${formatIngestTs(now)}] [${isErr ? 'ERR' : 'OK'}] ${outText}`,
+                exit_code: payload.exit_code,
+              };
+
+              if (streaming) {
+                setLogs((prev) => [...prev.slice(-400), resEntry]);
+              } else {
+                setPausedQueue((prev) => [...prev, resEntry]);
               }
             }
           }
@@ -180,7 +225,7 @@ export default function FleetTerminal({ machine, machineName }) {
     return () => {
       if (socket) socket.close();
     };
-  }, [streaming, machineId, rawHost]);
+  }, [streaming, effectiveMachineId, rawHost]);
 
   // Resume streaming
   const handleResumeLive = () => {
@@ -203,13 +248,39 @@ export default function FleetTerminal({ machine, machineName }) {
     e.preventDefault();
     if (!command.trim() || executing) return;
 
-    const cmdStr = command.trim();
+    let cmdStr = command.trim();
+    if (cmdStr.startsWith('$')) {
+      cmdStr = cmdStr.replace(/^\$\s*/, '').trim();
+    }
+    if (!cmdStr) return;
+
     setCommand('');
+
+    const targetNodeId = effectiveMachineId || initialMachineId || (servers?.length === 1 ? servers[0].id : '');
+    const now = new Date();
+
+    if (!targetNodeId) {
+      const noticeLog = {
+        id: `notice-${now.getTime()}`,
+        machine_id: '',
+        ingestTs: formatIngestTs(now),
+        hostname: rawHost,
+        level: 'WARN',
+        source: 'terminal',
+        service: 'cli',
+        message: '[Notice] Please select a specific server from the NODE dropdown above to execute terminal commands.',
+        text: '[Notice] Please select a specific server from the NODE dropdown.',
+        fullLine: `[${formatIngestTs(now)}] [Notice] Please select a specific server from the NODE dropdown above to execute terminal commands.`,
+      };
+      setLogs((prev) => [...prev, noticeLog]);
+      return;
+    }
+
     setExecuting(true);
 
-    const now = new Date();
     const userLog = {
       id: `cmd-${now.getTime()}`,
+      machine_id: targetNodeId,
       ingestTs: formatIngestTs(now),
       hostname: rawHost,
       level: 'INFO',
@@ -224,27 +295,45 @@ export default function FleetTerminal({ machine, machineName }) {
 
     try {
       const res = await apiClient.post('/terminal/execute', {
-        machine_id: machineId,
+        machine_id: targetNodeId,
         command: cmdStr,
       });
 
-      const outText = res.data?.output || res.data?.message || 'Command executed successfully.';
-      const resLog = {
-        id: `res-${now.getTime()}`,
-        ingestTs: formatIngestTs(new Date()),
-        hostname: rawHost,
-        level: 'INFO',
-        source: 'terminal',
-        service: 'cli',
-        message: outText,
-        text: outText,
-        fullLine: `[${formatIngestTs(new Date())}] ${outText}`,
-      };
-      setLogs((prev) => [...prev, resLog]);
+      if (res.data?.output) {
+        const outText = res.data.output;
+        const resLog = {
+          id: `res-${now.getTime()}`,
+          machine_id: effectiveMachineId,
+          ingestTs: formatIngestTs(new Date()),
+          hostname: rawHost,
+          level: 'INFO',
+          source: 'terminal',
+          service: 'output',
+          message: outText,
+          text: outText,
+          fullLine: `[${formatIngestTs(new Date())}] ${outText}`,
+        };
+        setLogs((prev) => [...prev, resLog]);
+      } else {
+        const queuedLog = {
+          id: `queue-${now.getTime()}`,
+          machine_id: effectiveMachineId,
+          ingestTs: formatIngestTs(new Date()),
+          hostname: rawHost,
+          level: 'INFO',
+          source: 'terminal',
+          service: 'cli',
+          message: `[Dispatch] Command queued for agent execution (ID: ${res.data?.id || 'pending'}). Awaiting response...`,
+          text: `[Dispatch] Command queued for agent execution...`,
+          fullLine: `[${formatIngestTs(new Date())}] [Dispatch] Command queued for agent execution...`,
+        };
+        setLogs((prev) => [...prev, queuedLog]);
+      }
     } catch (err) {
       const errText = err.response?.data?.error || err.message || 'Execution failed.';
       const errLog = {
         id: `err-${now.getTime()}`,
+        machine_id: effectiveMachineId,
         ingestTs: formatIngestTs(new Date()),
         hostname: rawHost,
         level: 'ERROR',
@@ -263,7 +352,25 @@ export default function FleetTerminal({ machine, machineName }) {
   // Filtered Logs Calculation
   const filteredLogs = useMemo(() => {
     return logs.filter((l) => {
-      if (filterLevel !== 'ALL' && !stringsEqual(l.level, filterLevel)) return false;
+      if (effectiveMachineId && effectiveMachineId !== 'ALL') {
+        const target = String(effectiveMachineId).toLowerCase();
+        const rowMid = String(l.machine_id || '').toLowerCase();
+        const rowHost = String(l.hostname || '').toLowerCase();
+        const activeMid = String(activeServerObj?.id || '').toLowerCase();
+        const activeHost = String(activeServerObj?.hostname || activeServerObj?.name || '').toLowerCase();
+
+        const matches = rowMid === target || rowHost === target || (activeMid && rowMid === activeMid) || (activeHost && rowHost === activeHost);
+        if (!matches) return false;
+      }
+      if (filterLevel !== 'ALL') {
+        const targetLvl = filterLevel.toUpperCase();
+        const rowLvl = String(l.level || '').toUpperCase();
+        if (targetLvl === 'WARN' || targetLvl === 'WARNING') {
+          if (rowLvl !== 'WARN' && rowLvl !== 'WARNING') return false;
+        } else if (!stringsEqual(rowLvl, targetLvl)) {
+          return false;
+        }
+      }
       if (filterSource !== 'ALL' && !stringsEqual(l.source, filterSource)) return false;
       if (filterService && !l.service?.toLowerCase().includes(filterService.toLowerCase())) return false;
       if (searchQuery) {
@@ -271,11 +378,12 @@ export default function FleetTerminal({ machine, machineName }) {
         const matchesMsg = l.message?.toLowerCase().includes(q);
         const matchesHost = l.hostname?.toLowerCase().includes(q);
         const matchesSvc = l.service?.toLowerCase().includes(q);
-        if (!matchesMsg && !matchesHost && !matchesSvc) return false;
+        const matchesSrc = l.source?.toLowerCase().includes(q);
+        if (!matchesMsg && !matchesHost && !matchesSvc && !matchesSrc) return false;
       }
       return true;
     });
-  }, [logs, filterLevel, filterSource, filterService, searchQuery]);
+  }, [logs, effectiveMachineId, filterLevel, filterSource, filterService, searchQuery]);
 
   // Statistics Calculation
   const logStats = useMemo(() => {
@@ -435,6 +543,33 @@ export default function FleetTerminal({ machine, machineName }) {
 
       {/* Structured Filter Bar */}
       <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '10px', padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+        {/* Node Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '10px', fontWeight: 700, color: '#64748b' }}>NODE:</span>
+          <select
+            value={selectedNodeId}
+            onChange={(e) => setSelectedNodeId(e.target.value)}
+            style={{
+              backgroundColor: '#020617',
+              border: '1px solid #1e293b',
+              borderRadius: '6px',
+              padding: '6px 8px',
+              color: '#f1f5f9',
+              fontSize: '12px',
+              outline: 'none',
+              cursor: 'pointer',
+              maxWidth: '180px',
+            }}
+          >
+            <option value="ALL">ALL NODES</option>
+            {servers?.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.hostname || s.name || s.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Search Field */}
         <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
           <Search size={14} color="#64748b" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
@@ -457,10 +592,10 @@ export default function FleetTerminal({ machine, machineName }) {
         </div>
 
         {/* Level Dropdown */}
-        <SelectFilter label="LEVEL" value={filterLevel} onChange={setFilterLevel} options={['ALL', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'FATAL', 'DEBUG']} />
+        <SelectFilter label="LEVEL" value={filterLevel} onChange={setFilterLevel} options={['ALL', 'INFO', 'WARN', 'ERROR', 'CRITICAL', 'FATAL', 'DEBUG']} />
 
         {/* Source Dropdown */}
-        <SelectFilter label="SOURCE" value={filterSource} onChange={setFilterSource} options={['ALL', 'system', 'syslog', 'eventlog', 'docker', 'kubernetes', 'security', 'application']} />
+        <SelectFilter label="SOURCE" value={filterSource} onChange={setFilterSource} options={['ALL', 'eventlog', 'journald', 'syslog', 'agent', 'terminal', 'docker', 'system', 'application']} />
 
         {/* Time Range Dropdown */}
         <SelectFilter label="TIME RANGE" value={filterTimeRange} onChange={setFilterTimeRange} options={['5m', '15m', '30m', '1h', '6h', '24h', '7d', 'ALL']} />
@@ -468,7 +603,7 @@ export default function FleetTerminal({ machine, machineName }) {
         {/* Service Input */}
         <input
           type="text"
-          placeholder="Filter Service (e.g. nginx)"
+          placeholder="Filter Service (e.g. sshd, nginx)"
           value={filterService}
           onChange={(e) => setFilterService(e.target.value)}
           style={{
@@ -494,7 +629,7 @@ export default function FleetTerminal({ machine, machineName }) {
 
       {/* Main Terminal View vs Patterns View */}
       {activeTab === 'patterns' ? (
-        <LogPatternsTab machineId={machineId} onSelectPattern={(sig) => { setSearchQuery(sig); setActiveTab('live'); }} />
+        <LogPatternsTab machineId={effectiveMachineId || machineId} onSelectPattern={(sig) => { setSearchQuery(sig); setActiveTab('live'); }} />
       ) : (
         <div style={{ background: '#020617', border: '1px solid #1e293b', borderRadius: '12px', overflow: 'hidden' }}>
           {/* Dense Professional Log Table */}
@@ -517,27 +652,42 @@ export default function FleetTerminal({ machine, machineName }) {
                     </td>
                   </tr>
                 ) : (
-                  filteredLogs.map((l) => (
-                    <tr
-                      key={l.id}
-                      onClick={() => setSelectedLog(l)}
-                      style={{
-                        borderBottom: '1px solid #0f172a',
-                        cursor: 'pointer',
-                        transition: 'background 0.15s',
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#0f172a')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <td style={{ padding: '8px 14px', color: '#94a3b8', whiteSpace: 'nowrap' }}>{l.ingestTs}</td>
-                      <td style={{ padding: '8px 14px', color: '#e2e8f0', fontWeight: 600 }}>{l.hostname}</td>
-                      <td style={{ padding: '8px 14px', color: '#38bdf8' }}>{l.service || 'sys'}</td>
-                      <td style={{ padding: '8px 14px' }}>
-                        <LogLevelBadge level={l.level} />
-                      </td>
-                      <td style={{ padding: '8px 14px', color: '#f1f5f9', wordBreak: 'break-word' }}>{l.message}</td>
-                    </tr>
-                  ))
+                  filteredLogs.map((l) => {
+                    const isTerminal = l.source === 'terminal';
+                    const isCli = l.service === 'cli';
+                    const isError = l.level === 'ERROR' || l.level === 'CRITICAL' || l.level === 'FATAL';
+                    const rowBg = isTerminal
+                      ? (isCli ? '#312e8125' : (isError ? '#7f1d1d25' : '#064e3b25'))
+                      : 'transparent';
+                    const msgColor = isTerminal
+                      ? (isCli ? '#facc15' : (isError ? '#f87171' : '#4ade80'))
+                      : '#f1f5f9';
+
+                    return (
+                      <tr
+                        key={l.id}
+                        onClick={() => setSelectedLog(l)}
+                        style={{
+                          borderBottom: '1px solid #0f172a',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s',
+                          background: rowBg,
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = '#0f172a')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = rowBg)}
+                      >
+                        <td style={{ padding: '8px 14px', color: '#94a3b8', whiteSpace: 'nowrap' }}>{l.ingestTs}</td>
+                        <td style={{ padding: '8px 14px', color: '#06b6d4', fontWeight: 600 }}>{l.hostname}</td>
+                        <td style={{ padding: '8px 14px', color: '#a855f7' }}>{l.service || 'sys'}</td>
+                        <td style={{ padding: '8px 14px' }}>
+                          <LogLevelBadge level={l.level} />
+                        </td>
+                        <td style={{ padding: '8px 14px', color: msgColor, wordBreak: 'break-word', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+                          {l.message}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
                 <tr ref={termBottomRef} />
               </tbody>

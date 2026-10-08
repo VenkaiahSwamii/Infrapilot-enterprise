@@ -27,11 +27,15 @@ import {
 } from 'lucide-react';
 import { useServerStore } from '../store/serverStore.jsx';
 import { getMachineId } from '../utils/machineId.js';
+import { apiClient } from '../api/client.js';
 import DeployAgentModal from '../components/dashboard/DeployAgentModal.jsx';
+import UninstallAgentModal from '../components/dashboard/UninstallAgentModal.jsx';
+import { useRBAC } from '../hooks/useRBAC.js';
 
 export default function AgentsPage() {
   const navigate = useNavigate();
   const { servers, liveMetricsMap, loading, fetchServers } = useServerStore();
+  const { isAdmin, isOperator } = useRBAC();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -40,8 +44,9 @@ export default function AgentsPage() {
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [deployTab, setDeployTab] = useState('linux');
   const [copiedSnippet, setCopiedSnippet] = useState(false);
-  const [customEndpoint, setCustomEndpoint] = useState('192.168.160.1');
+  const [customEndpoint, setCustomEndpoint] = useState(window.location.hostname || 'localhost');
   const [openMenuAgentId, setOpenMenuAgentId] = useState(null);
+  const [uninstallAgentTarget, setUninstallAgentTarget] = useState(null);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -99,15 +104,15 @@ export default function AgentsPage() {
     });
   }, [servers, search, statusFilter, osFilter]);
 
-  const backendHost = window.location.hostname || '192.168.1.2';
+  const backendHost = window.location.hostname || 'localhost';
   const backendPort = '8080';
   const installUrl = `http://${backendHost}:${backendPort}`;
-  const remoteHost = (backendHost === 'localhost' || backendHost === '127.0.0.1') ? '192.168.1.2' : backendHost;
+  const remoteHost = backendHost;
   const installUrlRemote = `http://${remoteHost}:${backendPort}`;
 
   const getNormalizedServerUrl = (endpoint) => {
     if (!endpoint || !endpoint.trim()) {
-      const host = window.location.hostname || '192.168.1.2';
+      const host = window.location.hostname || 'localhost';
       return `http://${host}:8080`;
     }
     let ep = endpoint.trim();
@@ -174,10 +179,12 @@ export default function AgentsPage() {
             <RefreshCw size={14} className={loading ? 'spin' : ''} />
             <span>Refresh</span>
           </button>
-          <button className="btn-primary" onClick={() => setShowDeployModal(true)} type="button">
-            <Plus size={15} />
-            <span>Deploy New Agent</span>
-          </button>
+          {isAdmin && (
+            <button className="btn-primary" onClick={() => setShowDeployModal(true)} type="button">
+              <Plus size={15} />
+              <span>Deploy New Agent</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -404,17 +411,19 @@ export default function AgentsPage() {
                             <span>View Full Metrics</span>
                           </button>
 
-                          <button
-                            className="menu-item"
-                            type="button"
-                            onClick={() => {
-                              setOpenMenuAgentId(null);
-                              navigate(`/machines/${aId}?tab=terminal`);
-                            }}
-                          >
-                            <Terminal size={14} color="#a855f7" />
-                            <span>Remote Web Terminal</span>
-                          </button>
+                          {isAdmin && (
+                            <button
+                              className="menu-item"
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuAgentId(null);
+                                navigate(`/machines/${aId}?tab=terminal`);
+                              }}
+                            >
+                              <Terminal size={14} color="#a855f7" />
+                              <span>Remote Web Terminal</span>
+                            </button>
+                          )}
 
                           <button
                             className="menu-item"
@@ -466,19 +475,39 @@ export default function AgentsPage() {
                             <span>Verify Heartbeat</span>
                           </button>
 
-                          <div className="menu-divider" />
+                          {isOperator && (
+                            <>
+                              <div className="menu-divider" />
+                              <button
+                                className="menu-item"
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuAgentId(null);
+                                  alert(`Restart signal sent to ${agent.hostname || aId}.`);
+                                }}
+                              >
+                                <RotateCcw size={14} color="#f59e0b" />
+                                <span>Restart Agent Daemon</span>
+                              </button>
+                            </>
+                          )}
 
-                          <button
-                            className="menu-item"
-                            type="button"
-                            onClick={() => {
-                              setOpenMenuAgentId(null);
-                              alert(`Restart signal sent to ${agent.hostname || aId}.`);
-                            }}
-                          >
-                            <RotateCcw size={14} color="#f59e0b" />
-                            <span>Restart Agent Daemon</span>
-                          </button>
+                          {isAdmin && (
+                            <>
+                              <div className="menu-divider" />
+                              <button
+                                className="menu-item danger"
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuAgentId(null);
+                                  setUninstallAgentTarget(agent);
+                                }}
+                              >
+                                <Trash2 size={14} color="#ef4444" />
+                                <span style={{ color: '#ef4444', fontWeight: 600 }}>Uninstall & Delete Agent</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       )}
                     </td>
@@ -495,6 +524,16 @@ export default function AgentsPage() {
         isOpen={showDeployModal}
         onClose={() => setShowDeployModal(false)}
         onDeployed={() => fetchServers()}
+      />
+
+      {/* 6. Remote SSH Agent Uninstall & Decommission Modal */}
+      <UninstallAgentModal
+        isOpen={!!uninstallAgentTarget}
+        onClose={() => setUninstallAgentTarget(null)}
+        agent={uninstallAgentTarget}
+        onUninstalled={() => {
+          fetchServers();
+        }}
       />
 
       <style>{`

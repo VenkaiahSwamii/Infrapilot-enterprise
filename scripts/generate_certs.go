@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -9,6 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"os"
 	"time"
 )
@@ -54,6 +57,23 @@ func main() {
 		panic(err)
 	}
 
+	dnsNames := []string{"localhost", "infrapilot-api", "infrapilot-backend"}
+	ipAddresses := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("0.0.0.0")}
+
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if addrs, err := iface.Addrs(); err == nil {
+				for _, addr := range addrs {
+					if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+						if ip4 := ipnet.IP.To4(); ip4 != nil {
+							ipAddresses = append(ipAddresses, ip4)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	serverTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject: pkix.Name{
@@ -68,7 +88,8 @@ func main() {
 		NotAfter:    time.Now().AddDate(1, 0, 0),
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:    []string{"localhost", "infrapilot-api"},
+		DNSNames:    dnsNames,
+		IPAddresses: ipAddresses,
 	}
 
 	serverCert, err := x509.CreateCertificate(rand.Reader, serverTemplate, caTemplate, &serverKey.PublicKey, caKey)

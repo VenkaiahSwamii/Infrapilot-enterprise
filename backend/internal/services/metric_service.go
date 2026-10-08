@@ -502,6 +502,17 @@ func (s *MetricService) persistLinuxTelemetry(machine *models.Machine, input Sav
 		})
 	}
 
+	_ = docker.SaveDockerMetrics(
+		machine.ID,
+		input.DockerInstalled,
+		input.DockerVersion,
+		input.DockerContainers,
+		input.DockerImages,
+		input.DockerVolumes,
+		input.DockerNetworks,
+		input.DockerEvents,
+	)
+
 	if input.K8sNodesJSON != "" || input.K8sPodsJSON != "" {
 		_ = database.DB.Create(&models.LinuxKubernetes{
 			ID:        uuid.New(),

@@ -80,7 +80,10 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 
 	ruleKey := fmt.Sprintf("%s:%s", machine.ID.String(), rule.ID.String())
 	cfg := config.Get()
-	reqBreaches := cfg.Alerts.ConsecutiveBreachesRequired
+	reqBreaches := rule.ConsecutiveBreaches
+	if reqBreaches <= 0 {
+		reqBreaches = cfg.Alerts.ConsecutiveBreachesRequired
+	}
 	if reqBreaches <= 0 {
 		reqBreaches = 2
 	}
@@ -207,6 +210,9 @@ func ProcessAlertCondition(machine models.Machine, rule models.AlertRule, value 
 
 		// Re-arm email cooldown so any subsequent failure immediately notifies developers
 		services.ResetAlertEmailCooldown(existingAlert.MachineID, existingAlert.Category, existingAlert.Title)
+
+		// Reset breach counter for this rule key upon auto-resolution
+		ResetBreachCounter(ruleKey)
 
 		BroadcastAlertPayload(*existingAlert, hostname, true)
 		return nil

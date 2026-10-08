@@ -55,20 +55,47 @@ export function remediateAlert(alertId) {
 }
 
 export function listAlertRules(orgId = '') {
-  if (orgId) {
-    return apiGet(`/orgs/${orgId}/alert-rules`);
+  const target = orgId ? `/orgs/${orgId}/alert-rules` : '/orgs/default/alert-rules';
+  return apiGet(target)
+    .catch(() => apiGet('/alert-rules'))
+    .catch(() => []);
+}
+
+export function createAlertRule(orgId = 'default', data = {}) {
+  const thresholdVal = data.threshold !== undefined ? data.threshold : (data.value !== undefined ? data.value : 0);
+  const payload = {
+    ...data,
+    organization_id: orgId || 'default',
+    threshold: Number(thresholdVal),
+    value: Number(thresholdVal),
+  };
+  return apiPost(`/orgs/${orgId || 'default'}/alert-rules`, payload)
+    .catch(() => apiPost('/alert-rules', payload));
+}
+
+export function updateAlertRule(orgId = 'default', ruleId, data = {}) {
+  const payload = { ...data };
+  if (data.threshold !== undefined || data.value !== undefined) {
+    const val = data.threshold !== undefined ? data.threshold : data.value;
+    payload.threshold = Number(val);
+    payload.value = Number(val);
   }
-  return apiGet('/orgs/default/alert-rules').catch(() => []);
-}
-
-export function createAlertRule(orgId = 'default', data) {
-  return apiPost(`/orgs/${orgId}/alert-rules`, data);
-}
-
-export function updateAlertRule(orgId = 'default', ruleId, data) {
-  return apiPatch(`/orgs/${orgId}/alert-rules/${ruleId}`, data);
+  return apiPatch(`/orgs/${orgId || 'default'}/alert-rules/${ruleId}`, payload)
+    .catch(() => apiPatch(`/alert-rules/${ruleId}`, payload));
 }
 
 export function deleteAlertRule(orgId = 'default', ruleId) {
-  return apiDelete(`/orgs/${orgId}/alert-rules/${ruleId}`);
+  return apiDelete(`/orgs/${orgId || 'default'}/alert-rules/${ruleId}`)
+    .catch(() => apiDelete(`/alert-rules/${ruleId}`));
+}
+
+export function toggleAlertRule(orgId = 'default', ruleId, enabled) {
+  const payload = { enabled: Boolean(enabled) };
+  return apiPatch(`/orgs/${orgId || 'default'}/alert-rules/${ruleId}/toggle`, payload)
+    .catch(() => apiPatch(`/alert-rules/${ruleId}/toggle`, payload));
+}
+
+export function seedAlertRulePresets(orgId = 'default') {
+  return apiPost(`/orgs/${orgId || 'default'}/alert-rules/presets`)
+    .catch(() => apiPost('/alert-rules/presets'));
 }

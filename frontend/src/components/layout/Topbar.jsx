@@ -526,13 +526,24 @@ export default function Topbar({ userProfile }) {
               <User size={16} color="#ffffff" />
             </div>
             <div className="profile-info">
-              <span className="profile-name">{userProfile?.username || 'Admin'}</span>
-              <span className="profile-role">{userProfile?.role || 'Super Admin'}</span>
+              <span className="profile-name">{userProfile?.username || 'User'}</span>
+              <span className="profile-role">{userProfile?.role || localStorage.getItem('user_role') || 'Viewer'}</span>
             </div>
           </button>
 
           {showDropdown && (
             <div className="profile-menu">
+              <button
+                className="menu-item"
+                onClick={() => {
+                  setShowDropdown(false);
+                  navigate('/admin/users');
+                }}
+                type="button"
+              >
+                <User size={14} style={{ marginRight: 8 }} />
+                User Management (RBAC)
+              </button>
               <button
                 className="menu-item"
                 onClick={() => {

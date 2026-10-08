@@ -41,10 +41,27 @@ if ! id -u "$SERVICE_USER" &>/dev/null; then
     useradd -r -s /usr/sbin/nologin -d /var/lib/infrapilot -c "InfraPilot Agent Daemon" "$SERVICE_USER" || true
 fi
 
+# Ensure service user has permissions for journalctl, syslog, and Docker socket
+if getent group systemd-journal >/dev/null 2>&1; then
+    usermod -aG systemd-journal "$SERVICE_USER" || true
+fi
+if getent group adm >/dev/null 2>&1; then
+    usermod -aG adm "$SERVICE_USER" || true
+fi
+if getent group docker >/dev/null 2>&1; then
+    echo "[+] Adding $SERVICE_USER to 'docker' group for container telemetry..."
+    usermod -aG docker "$SERVICE_USER" || true
+fi
+
 # 3. Create Required Directories
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$CERTS_DIR"
 mkdir -p /var/log/infrapilot
+
+# Stop existing running service or leftover processes to prevent file locking
+systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+pkill -9 -f "$SERVICE_NAME" 2>/dev/null || true
+rm -f "$CONFIG_DIR/config.json" 2>/dev/null || true
 
 # 4. Download Agent Binary, Config, and CA Certificate
 echo "[+] Fetching InfraPilot Agent binary package..."
@@ -113,6 +130,7 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
+SupplementaryGroups=docker
 ExecStart=$INSTALL_DIR/$SERVICE_NAME --config $CONFIG_DIR/config.toml
 Restart=always
 RestartSec=5s

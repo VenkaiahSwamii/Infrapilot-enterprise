@@ -36,6 +36,7 @@ import { wsClientInstance } from '../../websocket/client.js';
 import { useServerStore } from '../../store/serverStore.jsx';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
 import { getMachineId } from '../../utils/machineId.js';
+import UninstallAgentModal from '../../components/dashboard/UninstallAgentModal.jsx';
 
 const TABS = [
   { id: 'overview', label: 'Overview', component: OverviewTab },
@@ -65,6 +66,7 @@ export default function MachineDetailPage() {
   const [liveStatus, setLiveStatus] = useState('CONNECTED');
   const [activeTab, setActiveTab] = useState('overview');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showUninstallModal, setShowUninstallModal] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
 
   const normalizedId = getMachineId(machineId);
@@ -390,6 +392,20 @@ export default function MachineDetailPage() {
                     <span>Stop / Block Machine</span>
                   </button>
                 )}
+
+                <div className="menu-divider" />
+                <button
+                  className="menu-item"
+                  type="button"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    setShowUninstallModal(true);
+                  }}
+                  style={{ color: '#ef4444' }}
+                >
+                  <Trash2 size={14} color="#ef4444" />
+                  <span style={{ color: '#ef4444', fontWeight: 600 }}>Delete Host Permanently</span>
+                </button>
               </div>
             )}
           </div>
@@ -803,6 +819,16 @@ export default function MachineDetailPage() {
           margin: 4px 0;
         }
       `}</style>
+
+      {/* ── Remote Uninstall & Host Decommission Modal ── */}
+      <UninstallAgentModal
+        isOpen={showUninstallModal}
+        onClose={() => setShowUninstallModal(false)}
+        agent={resolvedMachine}
+        onUninstalled={() => {
+          navigate('/infrastructure');
+        }}
+      />
     </div>
   );
 }

@@ -23,7 +23,7 @@ type DockerHost struct {
 
 type DockerContainer struct {
 	ID           string    `gorm:"size:64;primaryKey" json:"id"`
-	ServerID     uuid.UUID `gorm:"type:uuid;index;not null" json:"server_id"`
+	ServerID     uuid.UUID `gorm:"type:uuid;primaryKey;not null" json:"server_id"`
 	Name         string    `gorm:"size:255;index" json:"name"`
 	Image        string    `gorm:"size:255" json:"image"`
 	Status       string    `gorm:"size:100" json:"status"`
@@ -45,7 +45,7 @@ type DockerContainer struct {
 
 type DockerImage struct {
 	ID          string    `gorm:"size:128;primaryKey" json:"id"`
-	ServerID    uuid.UUID `gorm:"type:uuid;index;not null" json:"server_id"`
+	ServerID    uuid.UUID `gorm:"type:uuid;primaryKey;not null" json:"server_id"`
 	Name        string    `gorm:"size:255;index" json:"name"`
 	Tag         string    `gorm:"size:100" json:"tag"`
 	Size        int64     `json:"size"`
@@ -56,7 +56,7 @@ type DockerImage struct {
 
 type DockerVolume struct {
 	Name       string    `gorm:"size:255;primaryKey" json:"name"`
-	ServerID   uuid.UUID `gorm:"type:uuid;index;not null" json:"server_id"`
+	ServerID   uuid.UUID `gorm:"type:uuid;primaryKey;not null" json:"server_id"`
 	Driver     string    `gorm:"size:100" json:"driver"`
 	MountPoint string    `gorm:"size:500" json:"mount_point"`
 	UsageBytes int64     `json:"usage_bytes"`
@@ -66,7 +66,7 @@ type DockerVolume struct {
 
 type DockerNetwork struct {
 	ID                  string    `gorm:"size:128;primaryKey" json:"id"`
-	ServerID            uuid.UUID `gorm:"type:uuid;index;not null" json:"server_id"`
+	ServerID            uuid.UUID `gorm:"type:uuid;primaryKey;not null" json:"server_id"`
 	Name                string    `gorm:"size:255;index" json:"name"`
 	Driver              string    `gorm:"size:100" json:"driver"`
 	Scope               string    `gorm:"size:100" json:"scope"`

@@ -39,3 +39,7 @@ export function getNetworkCheckMetrics(id, params = {}) {
 export function getHostNetworkViews() {
   return apiGet('/network/hosts');
 }
+
+export function remediateNetworkLatency(data) {
+  return apiPost('/network/remediate-latency', data);
+}

@@ -29,6 +29,8 @@ type LinuxAlert struct {
 	ResolvedBy         string     `json:"resolved_by"`
 	ResolutionNote     string     `json:"resolution_note"`
 	ResolvedAt         *time.Time `json:"resolved_at,omitempty"`
+	EmailSent          bool       `gorm:"default:false" json:"email_sent"`
+	MessageID          string     `gorm:"type:text" json:"message_id"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }

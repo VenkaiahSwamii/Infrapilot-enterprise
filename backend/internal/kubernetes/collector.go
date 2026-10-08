@@ -25,6 +25,8 @@ type K8sClusterInput struct {
 type K8sNodeInput struct {
 	Name             string  `json:"name"`
 	Role             string  `json:"role"`
+	InternalIP       string  `json:"internal_ip"`
+	Version          string  `json:"version"`
 	CPU              float64 `json:"cpu"`
 	Memory           float64 `json:"memory"`
 	Disk             float64 `json:"disk"`
@@ -38,6 +40,7 @@ type K8sPodInput struct {
 	Name         string  `json:"name"`
 	Namespace    string  `json:"namespace"`
 	Node         string  `json:"node"`
+	IP           string  `json:"ip"`
 	Status       string  `json:"status"`
 	Phase        string  `json:"phase"`
 	Reason       string  `json:"reason"`
@@ -143,23 +146,6 @@ func SaveKubernetesMetrics(
 			cluster.ControlPlaneStatus = "Unavailable"
 			cluster.UpdatedAt = time.Now()
 			db.Save(&cluster)
-		} else {
-			// Create a default placeholder cluster record to show it is missing
-			dummyID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("not-installed-"+serverID.String()))
-			cluster = models.KubernetesCluster{
-				ID:                 dummyID,
-				ServerID:           serverID,
-				Name:               "Not Installed",
-				Version:            "Unknown",
-				APIVersion:         "Unknown",
-				Provider:           "None",
-				Status:             "Kubernetes Not Installed",
-				ClusterID:          "not-installed-" + serverID.String(),
-				ControlPlaneStatus: "Unavailable",
-				CreatedAt:          time.Now(),
-				UpdatedAt:          time.Now(),
-			}
-			db.Create(&cluster)
 		}
 		return nil
 	}
@@ -192,27 +178,22 @@ func SaveKubernetesMetrics(
 		return err
 	}
 
-	// 3. Clear existing related records for this cluster to do a clean overwrite sync
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesNode{})
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesPod{})
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesDeployment{})
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesStatefulSet{})
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesDaemonSet{})
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesService{})
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesNamespace{})
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesStorage{})
-	db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesEvent{})
-
-	// 4. Parse and Insert Nodes
+	// 3. Upsert Nodes
+	var activeNodeIDs []uuid.UUID
 	if k8sNodesJSON != "" && k8sNodesJSON != "[]" {
 		var nodesInput []K8sNodeInput
 		if err := json.Unmarshal([]byte(k8sNodesJSON), &nodesInput); err == nil {
 			for _, n := range nodesInput {
+				nodeUUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(clusterUUID.String()+"/node/"+n.Name))
+				activeNodeIDs = append(activeNodeIDs, nodeUUID)
+
 				node := models.KubernetesNode{
-					ID:               uuid.New(),
+					ID:               nodeUUID,
 					ClusterID:        clusterUUID,
 					Name:             n.Name,
 					Role:             n.Role,
+					InternalIP:       n.InternalIP,
+					Version:          n.Version,
 					CPU:              n.CPU,
 					Memory:           n.Memory,
 					Disk:             n.Disk,
@@ -220,25 +201,40 @@ func SaveKubernetesMetrics(
 					Kernel:           n.Kernel,
 					ContainerRuntime: n.ContainerRuntime,
 					Status:           n.Status,
-					CreatedAt:        time.Now(),
 					UpdatedAt:        time.Now(),
 				}
-				db.Create(&node)
+
+				db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "id"}},
+					DoUpdates: clause.AssignmentColumns([]string{
+						"role", "internal_ip", "version", "cpu", "memory", "disk", "os", "kernel", "container_runtime", "status", "updated_at",
+					}),
+				}).Create(&node)
 			}
 		}
 	}
+	if len(activeNodeIDs) > 0 {
+		db.Where("cluster_id = ? AND id NOT IN ?", clusterUUID, activeNodeIDs).Delete(&models.KubernetesNode{})
+	} else {
+		db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesNode{})
+	}
 
-	// 5. Parse and Insert Pods
+	// 4. Upsert Pods
+	var activePodIDs []uuid.UUID
 	if k8sPodsJSON != "" && k8sPodsJSON != "[]" {
 		var podsInput []K8sPodInput
 		if err := json.Unmarshal([]byte(k8sPodsJSON), &podsInput); err == nil {
 			for _, p := range podsInput {
+				podUUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(clusterUUID.String()+"/pod/"+p.Namespace+"/"+p.Name))
+				activePodIDs = append(activePodIDs, podUUID)
+
 				pod := models.KubernetesPod{
-					ID:           uuid.New(),
+					ID:           podUUID,
 					ClusterID:    clusterUUID,
 					Name:         p.Name,
 					Namespace:    p.Namespace,
 					Node:         p.Node,
+					IP:           p.IP,
 					Status:       p.Status,
 					Phase:        p.Phase,
 					Reason:       p.Reason,
@@ -246,21 +242,35 @@ func SaveKubernetesMetrics(
 					Memory:       p.Memory,
 					RestartCount: p.RestartCount,
 					Age:          p.Age,
-					CreatedAt:    time.Now(),
 					UpdatedAt:    time.Now(),
 				}
-				db.Create(&pod)
+
+				db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "id"}},
+					DoUpdates: clause.AssignmentColumns([]string{
+						"node", "ip", "status", "phase", "reason", "cpu", "memory", "restart_count", "age", "updated_at",
+					}),
+				}).Create(&pod)
 			}
 		}
 	}
+	if len(activePodIDs) > 0 {
+		db.Where("cluster_id = ? AND id NOT IN ?", clusterUUID, activePodIDs).Delete(&models.KubernetesPod{})
+	} else {
+		db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesPod{})
+	}
 
-	// 6. Parse and Insert Deployments
+	// 5. Upsert Deployments
+	var activeDepIDs []uuid.UUID
 	if k8sDeploymentsJSON != "" && k8sDeploymentsJSON != "[]" {
 		var depsInput []K8sDeploymentInput
 		if err := json.Unmarshal([]byte(k8sDeploymentsJSON), &depsInput); err == nil {
 			for _, d := range depsInput {
+				depUUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(clusterUUID.String()+"/dep/"+d.Namespace+"/"+d.Name))
+				activeDepIDs = append(activeDepIDs, depUUID)
+
 				dep := models.KubernetesDeployment{
-					ID:                uuid.New(),
+					ID:                depUUID,
 					ClusterID:         clusterUUID,
 					Name:              d.Name,
 					Namespace:         d.Namespace,
@@ -268,21 +278,35 @@ func SaveKubernetesMetrics(
 					AvailableReplicas: d.AvailableReplicas,
 					UpdatedReplicas:   d.UpdatedReplicas,
 					ReadyReplicas:     d.ReadyReplicas,
-					CreatedAt:         time.Now(),
 					UpdatedAt:         time.Now(),
 				}
-				db.Create(&dep)
+
+				db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "id"}},
+					DoUpdates: clause.AssignmentColumns([]string{
+						"desired_replicas", "available_replicas", "updated_replicas", "ready_replicas", "updated_at",
+					}),
+				}).Create(&dep)
 			}
 		}
 	}
+	if len(activeDepIDs) > 0 {
+		db.Where("cluster_id = ? AND id NOT IN ?", clusterUUID, activeDepIDs).Delete(&models.KubernetesDeployment{})
+	} else {
+		db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesDeployment{})
+	}
 
-	// 7. Parse and Insert StatefulSets
+	// 6. Upsert StatefulSets
+	var activeSsIDs []uuid.UUID
 	if k8sStatefulSetsJSON != "" && k8sStatefulSetsJSON != "[]" {
 		var ssInput []K8sStatefulSetInput
 		if err := json.Unmarshal([]byte(k8sStatefulSetsJSON), &ssInput); err == nil {
 			for _, s := range ssInput {
+				ssUUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(clusterUUID.String()+"/ss/"+s.Namespace+"/"+s.Name))
+				activeSsIDs = append(activeSsIDs, ssUUID)
+
 				ss := models.KubernetesStatefulSet{
-					ID:              uuid.New(),
+					ID:              ssUUID,
 					ClusterID:       clusterUUID,
 					Name:            s.Name,
 					Namespace:       s.Namespace,
@@ -290,21 +314,35 @@ func SaveKubernetesMetrics(
 					ReadyReplicas:   s.ReadyReplicas,
 					CurrentRevision: s.CurrentRevision,
 					UpdateRevision:  s.UpdateRevision,
-					CreatedAt:       time.Now(),
 					UpdatedAt:       time.Now(),
 				}
-				db.Create(&ss)
+
+				db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "id"}},
+					DoUpdates: clause.AssignmentColumns([]string{
+						"desired_replicas", "ready_replicas", "current_revision", "update_revision", "updated_at",
+					}),
+				}).Create(&ss)
 			}
 		}
 	}
+	if len(activeSsIDs) > 0 {
+		db.Where("cluster_id = ? AND id NOT IN ?", clusterUUID, activeSsIDs).Delete(&models.KubernetesStatefulSet{})
+	} else {
+		db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesStatefulSet{})
+	}
 
-	// 8. Parse and Insert DaemonSets
+	// 7. Upsert DaemonSets
+	var activeDsIDs []uuid.UUID
 	if k8sDaemonSetsJSON != "" && k8sDaemonSetsJSON != "[]" {
 		var dsInput []K8sDaemonSetInput
 		if err := json.Unmarshal([]byte(k8sDaemonSetsJSON), &dsInput); err == nil {
 			for _, d := range dsInput {
+				dsUUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(clusterUUID.String()+"/ds/"+d.Namespace+"/"+d.Name))
+				activeDsIDs = append(activeDsIDs, dsUUID)
+
 				ds := models.KubernetesDaemonSet{
-					ID:              uuid.New(),
+					ID:              dsUUID,
 					ClusterID:       clusterUUID,
 					Name:            d.Name,
 					Namespace:       d.Namespace,
@@ -312,21 +350,35 @@ func SaveKubernetesMetrics(
 					ReadyReplicas:   d.ReadyReplicas,
 					Available:       d.Available,
 					Misscheduled:    d.Misscheduled,
-					CreatedAt:       time.Now(),
 					UpdatedAt:       time.Now(),
 				}
-				db.Create(&ds)
+
+				db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "id"}},
+					DoUpdates: clause.AssignmentColumns([]string{
+						"desired_replicas", "ready_replicas", "available", "misscheduled", "updated_at",
+					}),
+				}).Create(&ds)
 			}
 		}
 	}
+	if len(activeDsIDs) > 0 {
+		db.Where("cluster_id = ? AND id NOT IN ?", clusterUUID, activeDsIDs).Delete(&models.KubernetesDaemonSet{})
+	} else {
+		db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesDaemonSet{})
+	}
 
-	// 9. Parse and Insert Services
+	// 8. Upsert Services
+	var activeSvcIDs []uuid.UUID
 	if k8sServicesJSON != "" && k8sServicesJSON != "[]" {
 		var svcInput []K8sServiceInput
 		if err := json.Unmarshal([]byte(k8sServicesJSON), &svcInput); err == nil {
 			for _, s := range svcInput {
+				svcUUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(clusterUUID.String()+"/svc/"+s.Namespace+"/"+s.Name))
+				activeSvcIDs = append(activeSvcIDs, svcUUID)
+
 				svc := models.KubernetesService{
-					ID:         uuid.New(),
+					ID:         svcUUID,
 					ClusterID:  clusterUUID,
 					Name:       s.Name,
 					Namespace:  s.Namespace,
@@ -336,42 +388,70 @@ func SaveKubernetesMetrics(
 					Ports:      s.Ports,
 					Endpoints:  s.Endpoints,
 					Status:     s.Status,
-					CreatedAt:  time.Now(),
 					UpdatedAt:  time.Now(),
 				}
-				db.Create(&svc)
+
+				db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "id"}},
+					DoUpdates: clause.AssignmentColumns([]string{
+						"type", "cluster_ip", "external_ip", "ports", "endpoints", "status", "updated_at",
+					}),
+				}).Create(&svc)
 			}
 		}
 	}
+	if len(activeSvcIDs) > 0 {
+		db.Where("cluster_id = ? AND id NOT IN ?", clusterUUID, activeSvcIDs).Delete(&models.KubernetesService{})
+	} else {
+		db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesService{})
+	}
 
-	// 10. Parse and Insert Namespaces
+	// 9. Upsert Namespaces
+	var activeNsIDs []uuid.UUID
 	if k8sNamespacesJSON != "" && k8sNamespacesJSON != "[]" {
 		var nsInput []K8sNamespaceInput
 		if err := json.Unmarshal([]byte(k8sNamespacesJSON), &nsInput); err == nil {
 			for _, n := range nsInput {
+				nsUUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(clusterUUID.String()+"/ns/"+n.Name))
+				activeNsIDs = append(activeNsIDs, nsUUID)
+
 				ns := models.KubernetesNamespace{
-					ID:          uuid.New(),
+					ID:          nsUUID,
 					ClusterID:   clusterUUID,
 					Name:        n.Name,
 					Status:      n.Status,
 					PodCount:    n.PodCount,
 					CPUUsage:    n.CPUUsage,
 					MemoryUsage: n.MemoryUsage,
-					CreatedAt:   time.Now(),
 					UpdatedAt:   time.Now(),
 				}
-				db.Create(&ns)
+
+				db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "id"}},
+					DoUpdates: clause.AssignmentColumns([]string{
+						"status", "pod_count", "cpu_usage", "memory_usage", "updated_at",
+					}),
+				}).Create(&ns)
 			}
 		}
 	}
+	if len(activeNsIDs) > 0 {
+		db.Where("cluster_id = ? AND id NOT IN ?", clusterUUID, activeNsIDs).Delete(&models.KubernetesNamespace{})
+	} else {
+		db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesNamespace{})
+	}
 
-	// 11. Parse and Insert Storage
+	// 10. Upsert Storage
+	var activeStIDs []uuid.UUID
 	if k8sStorageJSON != "" && k8sStorageJSON != "[]" {
 		var storageInput []K8sStorageInput
 		if err := json.Unmarshal([]byte(k8sStorageJSON), &storageInput); err == nil {
 			for _, s := range storageInput {
+				stUUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(clusterUUID.String()+"/st/"+s.Type+"/"+s.Namespace+"/"+s.Name))
+				activeStIDs = append(activeStIDs, stUUID)
+
 				st := models.KubernetesStorage{
-					ID:            uuid.New(),
+					ID:            stUUID,
 					ClusterID:     clusterUUID,
 					Type:          s.Type,
 					Name:          s.Name,
@@ -382,15 +462,25 @@ func SaveKubernetesMetrics(
 					ReclaimPolicy: s.ReclaimPolicy,
 					Requested:     s.Requested,
 					Used:          s.Used,
-					CreatedAt:     time.Now(),
 					UpdatedAt:     time.Now(),
 				}
-				db.Create(&st)
+
+				db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "id"}},
+					DoUpdates: clause.AssignmentColumns([]string{
+						"capacity", "storage_class", "status", "reclaim_policy", "requested", "used", "updated_at",
+					}),
+				}).Create(&st)
 			}
 		}
 	}
+	if len(activeStIDs) > 0 {
+		db.Where("cluster_id = ? AND id NOT IN ?", clusterUUID, activeStIDs).Delete(&models.KubernetesStorage{})
+	} else {
+		db.Where("cluster_id = ?", clusterUUID).Delete(&models.KubernetesStorage{})
+	}
 
-	// 12. Parse and Insert Events
+	// 11. Parse and Insert Events (keep latest 100 per cluster)
 	if k8sEventsJSON != "" && k8sEventsJSON != "[]" {
 		var eventsInput []K8sEventInput
 		if err := json.Unmarshal([]byte(k8sEventsJSON), &eventsInput); err == nil {

@@ -29,6 +29,10 @@ var globalRuleCache = &RuleCache{
 	ruleRepo: repository.NewAlertRuleRepository(),
 }
 
+func init() {
+	services.RegisterRuleChangedCallback(InvalidateRuleCache)
+}
+
 // DefaultRules provides fallback rules if no alert rules exist in PostgreSQL DB.
 var DefaultRules = []models.AlertRule{
 	{
@@ -120,26 +124,97 @@ func (c *RuleCache) InvalidateCache() {
 	c.lastUpdated = time.Time{}
 }
 
+// InvalidateRuleCache exports cache reset to force immediate reload across services and handlers.
+func InvalidateRuleCache() {
+	globalRuleCache.InvalidateCache()
+}
+
 // SelectMetricValue converts rule metric names to actual float64 metric values.
-func SelectMetricValue(metric models.Metric, metricName string) (float64, bool) {
+func SelectMetricValue(metric models.Metric, metricName string, optionalInput ...services.SaveMetricInput) (float64, bool) {
 	name := strings.ToLower(strings.TrimSpace(metricName))
+	var input *services.SaveMetricInput
+	if len(optionalInput) > 0 {
+		input = &optionalInput[0]
+	}
+
 	switch name {
 	case "cpu_usage", "cpu":
-		return metric.CPUUsage, true
+		if metric.CPUUsage != 0 {
+			return metric.CPUUsage, true
+		}
+		if input != nil {
+			return input.CPUUsage, true
+		}
+		return 0, true
 	case "memory_percent", "memory_usage", "memory", "ram":
 		if metric.MemoryPercent != 0 {
 			return metric.MemoryPercent, true
 		}
-		return metric.MemoryUsage, true
+		if metric.MemoryUsage != 0 {
+			return metric.MemoryUsage, true
+		}
+		if input != nil && input.MemoryPercent != 0 {
+			return input.MemoryPercent, true
+		}
+		return 0, true
 	case "disk_percent", "disk_usage", "disk":
 		if metric.DiskPercent != 0 {
 			return metric.DiskPercent, true
 		}
-		return metric.DiskUsage, true
+		if metric.DiskUsage != 0 {
+			return metric.DiskUsage, true
+		}
+		if input != nil && input.DiskPercent != 0 {
+			return input.DiskPercent, true
+		}
+		return 0, true
 	case "latency_ms", "latency":
-		return metric.LatencyMs, true
+		if metric.LatencyMs != 0 {
+			return metric.LatencyMs, true
+		}
+		if input != nil && input.LatencyMs != 0 {
+			return input.LatencyMs, true
+		}
+		return 0, true
 	case "cpu_temperature", "temperature":
-		return metric.CPUTemperature, true
+		if metric.CPUTemperature != 0 {
+			return metric.CPUTemperature, true
+		}
+		if input != nil && input.CPUTemperature != 0 {
+			return input.CPUTemperature, true
+		}
+		return 0, true
+	case "packet_loss":
+		if input != nil {
+			return input.PacketLoss, true
+		}
+		return 0, true
+	case "upload_mbps", "upload":
+		if metric.UploadMbps != 0 {
+			return metric.UploadMbps, true
+		}
+		if input != nil {
+			return input.UploadMbps, true
+		}
+		return 0, true
+	case "download_mbps", "download":
+		if metric.DownloadMbps != 0 {
+			return metric.DownloadMbps, true
+		}
+		if input != nil {
+			return input.DownloadMbps, true
+		}
+		return 0, true
+	case "disk_read_bps":
+		if input != nil {
+			return input.DiskReadBps, true
+		}
+		return 0, true
+	case "disk_write_bps":
+		if input != nil {
+			return input.DiskWriteBps, true
+		}
+		return 0, true
 	default:
 		return 0, false
 	}
@@ -153,6 +228,22 @@ func EvaluateMetrics(machine models.Machine, metric models.Metric, optionalInput
 		hostname = machine.ID.String()
 	}
 
+	var input services.SaveMetricInput
+	if len(optionalInput) > 0 {
+		input = optionalInput[0]
+	} else {
+		input = services.SaveMetricInput{
+			CPUUsage:       metric.CPUUsage,
+			MemoryPercent:  metric.MemoryPercent,
+			DiskPercent:    metric.DiskPercent,
+			LatencyMs:      metric.LatencyMs,
+			CPUTemperature: metric.CPUTemperature,
+			CPUCores:       metric.CPUCores,
+			UploadMbps:     metric.UploadMbps,
+			DownloadMbps:   metric.DownloadMbps,
+		}
+	}
+
 	// 1. Evaluate Dynamic Alert Rules (skip fallback default rules to prevent duplicate alerts since GenerateLinuxAlerts covers them with richer detail)
 	rules := globalRuleCache.GetEnabledRules()
 	for _, rule := range rules {
@@ -160,7 +251,16 @@ func EvaluateMetrics(machine models.Machine, metric models.Metric, optionalInput
 			continue
 		}
 
-		val, ok := SelectMetricValue(metric, rule.Metric)
+		// Scope filtering
+		scope := strings.ToLower(strings.TrimSpace(rule.TargetScope))
+		if (scope == "machine" || scope == "server") && rule.TargetMachineID != nil && *rule.TargetMachineID != machine.ID {
+			continue
+		}
+		if scope == "os" && rule.TargetOS != "" && !strings.EqualFold(machine.OS, rule.TargetOS) {
+			continue
+		}
+
+		val, ok := SelectMetricValue(metric, rule.Metric, input)
 		if !ok {
 			continue
 		}
@@ -182,20 +282,6 @@ func EvaluateMetrics(machine models.Machine, metric models.Metric, optionalInput
 	}
 
 	// 2. Intelligent Linux Health Checkers & Domain Analysis
-	var input services.SaveMetricInput
-	if len(optionalInput) > 0 {
-		input = optionalInput[0]
-	} else {
-		input = services.SaveMetricInput{
-			CPUUsage:       metric.CPUUsage,
-			MemoryPercent:  metric.MemoryPercent,
-			DiskPercent:    metric.DiskPercent,
-			LatencyMs:      metric.LatencyMs,
-			CPUTemperature: metric.CPUTemperature,
-			CPUCores:       metric.CPUCores,
-		}
-	}
-
 	generatedAlerts := GenerateLinuxAlerts(machine, metric, input)
 	activeGeneratedKeys := make(map[string]bool)
 

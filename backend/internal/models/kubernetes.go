@@ -25,6 +25,8 @@ type KubernetesNode struct {
 	ClusterID        uuid.UUID `gorm:"type:uuid;index;not null" json:"cluster_id"`
 	Name             string    `gorm:"size:255;index" json:"name"`
 	Role             string    `gorm:"size:100" json:"role"`
+	InternalIP       string    `gorm:"size:100" json:"internal_ip"`
+	Version          string    `gorm:"size:100" json:"version"`
 	CPU              float64   `json:"cpu"`
 	Memory           float64   `json:"memory"`
 	Disk             float64   `json:"disk"`
@@ -42,6 +44,7 @@ type KubernetesPod struct {
 	Name         string    `gorm:"size:255;index" json:"name"`
 	Namespace    string    `gorm:"size:255;index" json:"namespace"`
 	Node         string    `gorm:"size:255" json:"node"`
+	IP           string    `gorm:"size:100" json:"ip"`
 	Status       string    `gorm:"size:100" json:"status"`
 	Phase        string    `gorm:"size:100" json:"phase"`
 	Reason       string    `gorm:"size:255" json:"reason"`

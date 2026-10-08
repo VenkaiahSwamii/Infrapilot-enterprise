@@ -3,9 +3,11 @@ package sender
 import (
 	"encoding/json"
 	"log"
+	"strings"
 
 	"infrapilot/agent/internal/cache"
 	"infrapilot/agent/internal/client"
+	"infrapilot/agent/internal/config"
 	"infrapilot/agent/internal/state"
 )
 
@@ -16,7 +18,8 @@ func SendMetrics(backendURL string, machineID string, apiKey string, metrics int
 		return err
 	}
 
-	endpoint := backendURL + "/api/v1/servers/" + machineID + "/metrics"
+	cleanBase := strings.TrimRight(backendURL, "/")
+	endpoint := cleanBase + "/api/v1/servers/" + machineID + "/metrics"
 	err = client.PostWithRetry(
 		endpoint,
 		data,
@@ -41,14 +44,18 @@ func SendMetrics(backendURL string, machineID string, apiKey string, metrics int
 	return nil
 }
 
-// SendLogs transmits a batch of log entries via HTTP POST to /api/v1/logs.
+// SendLogs transmits a batch of log entries via HTTP POST to /api/v1/agent/logs.
 func SendLogs(backendURL string, logsPayload interface{}) error {
 	data, err := json.Marshal(logsPayload)
 	if err != nil {
 		return err
 	}
 
-	endpoint := backendURL + "/api/v1/agent/logs"
+	cleanBase := strings.TrimRight(backendURL, "/")
+	endpoint := cleanBase + "/api/v1/agent/logs"
+	if mid := config.Get().MachineID; mid != "" {
+		endpoint += "?machine_id=" + mid
+	}
 	err = client.PostWithRetry(
 		endpoint,
 		data,
@@ -78,7 +85,8 @@ func ReplayCachedMetrics(backendURL string, machineID string) {
 			continue
 		}
 
-		endpoint := backendURL + "/api/v1/servers/" + machineID + "/metrics"
+		cleanBase := strings.TrimRight(backendURL, "/")
+		endpoint := cleanBase + "/api/v1/servers/" + machineID + "/metrics"
 		err = client.PostWithRetry(
 			endpoint,
 			data,

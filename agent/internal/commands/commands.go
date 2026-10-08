@@ -174,8 +174,9 @@ func executeTerminalCommand(client *http.Client, backendURL, apiKey string, tcmd
 
 	allowed := config.GetAllowedCommands()
 	allowedOK := false
+	cmdTrimmed := strings.TrimSpace(tcmd.Command)
 	for _, a := range allowed {
-		if strings.HasPrefix(tcmd.Command, a) {
+		if strings.HasPrefix(cmdTrimmed, a) {
 			allowedOK = true
 			break
 		}

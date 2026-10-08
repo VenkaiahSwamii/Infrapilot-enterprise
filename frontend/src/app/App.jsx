@@ -42,6 +42,29 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+function RoleRoute({ children, allowedRoles = [] }) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+  const rawRole = localStorage.getItem('user_role') || 'Viewer';
+  const role = rawRole.trim().toLowerCase();
+  const isSuperAdmin = role.includes('superadmin');
+  const isAdmin = isSuperAdmin || role.includes('admin') || role.includes('orgadmin');
+  const isDevOps = role.includes('devops');
+  const isOperator = isAdmin || isDevOps || role.includes('operator');
+
+  let hasAccess = false;
+  if (allowedRoles.includes('admin') && isAdmin) hasAccess = true;
+  if (allowedRoles.includes('operator') && isOperator) hasAccess = true;
+  if (allowedRoles.includes('viewer')) hasAccess = true;
+
+  if (!hasAccess) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
 export default function App() {
   return (
     <DashboardStoreProvider>
@@ -63,7 +86,7 @@ export default function App() {
               >
                 {/* Main Sidebar Pages */}
                 <Route index element={<EnterpriseDashboard />} />
-                <Route path="terminal" element={<FleetTerminalPage />} />
+                <Route path="terminal" element={<RoleRoute allowedRoles={['admin']}><FleetTerminalPage /></RoleRoute>} />
                 <Route path="synthetic" element={<SyntheticMonitoringPage />} />
                 <Route path="synthetic/:id" element={<SyntheticTestDetailsPage />} />
                 <Route path="network" element={<Navigate to="/sre-latency" replace />} />
@@ -87,14 +110,16 @@ export default function App() {
                 <Route path="reports" element={<Reports />} />
                 <Route path="agents" element={<AgentsPage />} />
                 <Route path="sre" element={<SREOperationsPage />} />
-                <Route path="cli" element={<TerminalPage />} />
-                <Route path="settings" element={<SettingsPage />} />
+                <Route path="cli" element={<RoleRoute allowedRoles={['admin']}><TerminalPage /></RoleRoute>} />
+                <Route path="settings" element={<RoleRoute allowedRoles={['admin']}><SettingsPage /></RoleRoute>} />
 
                 {/* Administration Section */}
-                <Route path="admin/users" element={<UsersPage />} />
-                <Route path="admin/orgs" element={<OrganizationsPage />} />
+                <Route path="users" element={<RoleRoute allowedRoles={['admin']}><UsersPage /></RoleRoute>} />
+                <Route path="user-management" element={<RoleRoute allowedRoles={['admin']}><UsersPage /></RoleRoute>} />
+                <Route path="admin/users" element={<RoleRoute allowedRoles={['admin']}><UsersPage /></RoleRoute>} />
+                <Route path="admin/orgs" element={<RoleRoute allowedRoles={['admin']}><OrganizationsPage /></RoleRoute>} />
                 <Route path="admin/audit-logs" element={<AuditLogsPage />} />
-                <Route path="admin/settings" element={<SettingsPage />} />
+                <Route path="admin/settings" element={<RoleRoute allowedRoles={['admin']}><SettingsPage /></RoleRoute>} />
                 <Route path="deploy" element={<DeployPage />} />
               </Route>
 

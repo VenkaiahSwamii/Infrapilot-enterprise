@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,8 +37,12 @@ func resolveDockerServerID(c *gin.Context) (uuid.UUID, error) {
 	}
 	if database.DB != nil {
 		var server models.Server
-		if err := database.DB.First(&server, "LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR id::text LIKE ? OR ip_address = ?", idStr, idStr, idStr+"%", idStr).Error; err == nil {
+		if err := database.DB.First(&server, "LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR CAST(id AS TEXT) LIKE ? OR ip_address = ?", idStr, idStr, idStr+"%", idStr).Error; err == nil {
 			return server.ID, nil
+		}
+		var machine models.Machine
+		if err := database.DB.First(&machine, "LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR CAST(id AS TEXT) LIKE ? OR ip_address = ?", idStr, idStr, idStr+"%", idStr).Error; err == nil {
+			return machine.ID, nil
 		}
 	}
 	return uuid.Nil, errors.New("server not found")
@@ -177,6 +183,24 @@ func (h *DockerHandler) GetContainerLogs(c *gin.Context) {
 	containerID := c.Param("containerId")
 	if containerID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing container ID"})
+		return
+	}
+
+	tailStr := c.DefaultQuery("tail", "100")
+	tail, err := strconv.Atoi(tailStr)
+	if err != nil || tail <= 0 {
+		tail = 100
+	}
+
+	// Try fetching real docker logs via CLI if container is local
+	cmd := exec.Command("docker", "logs", "--tail", strconv.Itoa(tail), containerID)
+	out, err := cmd.CombinedOutput()
+	if err == nil && len(out) > 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"container_id": containerID,
+			"tail":         tail,
+			"logs":         string(out),
+		})
 		return
 	}
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -152,6 +153,9 @@ func RunAPI() error {
 		"..",
 		"../agent",
 		"./agent",
+		"../agent/dist",
+		"./agent/dist",
+		"../../agent/dist",
 		"../InfraPilot-Release",
 		"./InfraPilot-Release",
 		"../../InfraPilot-Release",
@@ -197,9 +201,8 @@ func RunAPI() error {
 				if err == nil {
 					contentStr := string(contentBytes)
 					// Dynamically template backend URL so piped one-liners execute immediately with target server
-					contentStr = strings.ReplaceAll(contentStr, "http://192.168.1.86:8080", serverParam)
-					contentStr = strings.ReplaceAll(contentStr, "http://192.168.1.2:8080", serverParam)
-					contentStr = strings.ReplaceAll(contentStr, "http://localhost:8080", serverParam)
+					ipRegex := regexp.MustCompile(`https?://(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|localhost|127\.0\.0\.1):8080`)
+					contentStr = ipRegex.ReplaceAllString(contentStr, serverParam)
 					c.Header("Content-Type", "text/plain; charset=utf-8")
 					c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
 					c.String(http.StatusOK, contentStr)
@@ -215,6 +218,10 @@ func RunAPI() error {
 	router.GET("/api/v1/install.sh", func(c *gin.Context) { serveDownloadScript(c, "agent-install.sh") })
 	router.GET("/api/v1/agent/install.ps1", func(c *gin.Context) { serveDownloadScript(c, "agent-install.ps1") })
 	router.GET("/api/v1/agent/install.sh", func(c *gin.Context) { serveDownloadScript(c, "agent-install.sh") })
+	router.GET("/api/v1/uninstall.ps1", func(c *gin.Context) { serveDownloadScript(c, "agent-uninstall.ps1") })
+	router.GET("/api/v1/uninstall.sh", func(c *gin.Context) { serveDownloadScript(c, "agent-uninstall.sh") })
+	router.GET("/api/v1/agent/uninstall.ps1", func(c *gin.Context) { serveDownloadScript(c, "agent-uninstall.ps1") })
+	router.GET("/api/v1/agent/uninstall.sh", func(c *gin.Context) { serveDownloadScript(c, "agent-uninstall.sh") })
 
 	handleDownload := func(c *gin.Context) {
 		relPath := strings.TrimPrefix(c.Param("filepath"), "/")
@@ -224,6 +231,14 @@ func RunAPI() error {
 		}
 		if relPath == "install.sh" || relPath == "agent-install.sh" {
 			serveDownloadScript(c, "agent-install.sh")
+			return
+		}
+		if relPath == "uninstall.ps1" || relPath == "agent-uninstall.ps1" {
+			serveDownloadScript(c, "agent-uninstall.ps1")
+			return
+		}
+		if relPath == "uninstall.sh" || relPath == "agent-uninstall.sh" {
+			serveDownloadScript(c, "agent-uninstall.sh")
 			return
 		}
 		if relPath == "ca.crt" {
@@ -238,6 +253,9 @@ func RunAPI() error {
 		}
 		if relPath == "infrapilot-agent-windows-amd64.exe" || relPath == "infrapilot-agent.exe" || relPath == "agent.exe" {
 			agentCandidates := []string{
+				"../agent/dist/infrapilot-agent-windows-amd64.exe",
+				"./agent/dist/infrapilot-agent-windows-amd64.exe",
+				"../../agent/dist/infrapilot-agent-windows-amd64.exe",
 				"../infrapilot-agent.exe",
 				"./infrapilot-agent.exe",
 				"../agent/agent.exe",
@@ -250,6 +268,140 @@ func RunAPI() error {
 					c.Header("Content-Type", "application/octet-stream")
 					c.Header("Accept-Ranges", "bytes")
 					c.File(ac)
+					return
+				}
+			}
+		}
+		if relPath == "k8s-daemonset.yaml" {
+			host := c.Request.Host
+			if host == "" {
+				cfg := config.Get()
+				if cfg != nil && cfg.BackendURL != "" {
+					if u, err := url.Parse(cfg.BackendURL); err == nil && u.Host != "" {
+						host = u.Host
+					}
+				}
+				if host == "" {
+					host = "localhost:8080"
+				}
+			}
+			scheme := "http"
+			if c.Request.TLS != nil {
+				scheme = "https"
+			}
+			yamlManifest := fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: infrapilot
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: infrapilot-agent
+  namespace: infrapilot
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: infrapilot-agent-role
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/status", "nodes/proxy", "nodes/metrics", "pods", "pods/status", "services", "namespaces", "persistentvolumes", "persistentvolumeclaims", "events"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: infrapilot-agent-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: infrapilot-agent-role
+subjects:
+- kind: ServiceAccount
+  name: infrapilot-agent
+  namespace: infrapilot
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: infrapilot-agent
+  namespace: infrapilot
+  labels:
+    app: infrapilot-agent
+spec:
+  selector:
+    matchLabels:
+      app: infrapilot-agent
+  template:
+    metadata:
+      labels:
+        app: infrapilot-agent
+    spec:
+      serviceAccountName: infrapilot-agent
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: infrapilot-agent
+        image: infrapilot/agent:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: INFRAPILOT_BACKEND_URL
+          value: "%s://%s"
+        - name: INFRAPILOT_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        volumeMounts:
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: sys
+          mountPath: /host/sys
+          readOnly: true
+        - name: dockersock
+          mountPath: /var/run/docker.sock
+          readOnly: true
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: dockersock
+        hostPath:
+          path: /var/run/docker.sock
+`, scheme, host)
+			c.Header("Content-Type", "application/x-yaml")
+			c.String(http.StatusOK, yamlManifest)
+			return
+		}
+		if relPath == "infrapilot-agent-linux-amd64" || relPath == "infrapilot-agent-linux-arm64" || relPath == "infrapilot-agent" {
+			linuxCandidates := []string{
+				"../agent/dist/" + relPath,
+				"./agent/dist/" + relPath,
+				"../../agent/dist/" + relPath,
+				"../agent/dist/infrapilot-agent-linux-amd64",
+				"./agent/dist/infrapilot-agent-linux-amd64",
+				"../infrapilot-agent",
+				"./infrapilot-agent",
+			}
+			for _, lc := range linuxCandidates {
+				if stat, err := os.Stat(lc); err == nil && !stat.IsDir() {
+					c.Header("Content-Type", "application/octet-stream")
+					c.Header("Accept-Ranges", "bytes")
+					c.File(lc)
 					return
 				}
 			}

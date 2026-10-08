@@ -30,6 +30,7 @@ import {
   Sliders,
   ExternalLink,
   ShieldCheck,
+  Edit3,
 } from 'lucide-react';
 import { useAlertStore } from '../../store/alertStore.jsx';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
@@ -40,7 +41,10 @@ import {
   createAlertRule,
   updateAlertRule,
   deleteAlertRule,
+  toggleAlertRule,
+  seedAlertRulePresets,
 } from '../../api/alerts.js';
+import { useRBAC } from '../../hooks/useRBAC.js';
 
 const SEVERITY_CONFIG = {
   critical: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', border: '#ef4444', label: 'P1 CRITICAL', icon: XCircle },
@@ -55,6 +59,7 @@ const SEVERITY_CONFIG = {
 
 export default function AlertsPage() {
   const navigate = useNavigate();
+  const { isOperator } = useRBAC();
   const {
     alerts,
     stats,
@@ -95,13 +100,21 @@ export default function AlertsPage() {
   // Alert Rules State
   const [rules, setRules] = useState([]);
   const [rulesLoading, setRulesLoading] = useState(false);
+  const [seedingPresets, setSeedingPresets] = useState(false);
   const [showCreateRuleModal, setShowCreateRuleModal] = useState(false);
+  const [showEditRuleModal, setShowEditRuleModal] = useState(false);
+  const [editingRule, setEditingRule] = useState(null);
   const [newRule, setNewRule] = useState({
     name: '',
     metric: 'cpu_usage',
     operator: '>',
+    threshold: 90,
     value: 90,
     severity: 'critical',
+    target_scope: 'all',
+    target_machine_id: '',
+    target_os: '',
+    consecutive_breaches: 2,
   });
 
   // Load alert rules if on rules tab
@@ -116,6 +129,11 @@ export default function AlertsPage() {
       setRulesLoading(false);
     }
   }, []);
+
+  // Fetch rules on initial mount so tab badges reflect real count
+  useEffect(() => {
+    fetchRules();
+  }, [fetchRules]);
 
   useEffect(() => {
     if (statusFilter === 'rules') {
@@ -272,16 +290,108 @@ export default function AlertsPage() {
     }
   };
 
+  // Metric Unit helper
+  const getMetricUnit = (metric) => {
+    const m = (metric || '').toLowerCase();
+    if (m.includes('cpu_temp') || m.includes('temperature')) return '°C';
+    if (m.includes('cpu') || m.includes('memory') || m.includes('disk') || m.includes('packet')) return '%';
+    if (m.includes('latency')) return 'ms';
+    if (m.includes('mbps')) return 'MB/s';
+    if (m.includes('bps')) return 'B/s';
+    return '';
+  };
+
   // Create Rule Handler
   const handleCreateRuleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await createAlertRule('default', newRule);
-      addToast('success', 'Rule Created', `Rule ${newRule.name} created successfully`);
+      const payload = {
+        ...newRule,
+        threshold: Number(newRule.threshold || newRule.value || 0),
+        value: Number(newRule.threshold || newRule.value || 0),
+      };
+      await createAlertRule('default', payload);
+      addToast('success', 'Rule Created', `Rule "${newRule.name}" created successfully`);
       setShowCreateRuleModal(false);
+      setNewRule({
+        name: '',
+        metric: 'cpu_usage',
+        operator: '>',
+        threshold: 90,
+        value: 90,
+        severity: 'critical',
+        target_scope: 'all',
+        target_machine_id: '',
+        target_os: '',
+        consecutive_breaches: 2,
+      });
       fetchRules();
     } catch (err) {
-      addToast('error', 'Failed', err.message);
+      addToast('error', 'Creation Failed', err.message);
+    }
+  };
+
+  // Toggle Rule Status
+  const handleToggleRule = async (rule) => {
+    const id = rule.id || rule.ID;
+    const currentState = rule.is_enabled !== false;
+    const targetState = !currentState;
+    try {
+      await toggleAlertRule('default', id, targetState);
+      addToast('success', targetState ? 'Rule Enabled' : 'Rule Disabled', `Rule "${rule.name}" is now ${targetState ? 'enabled' : 'disabled'}`);
+      setRules((prev) => prev.map((r) => ((r.id || r.ID) === id ? { ...r, is_enabled: targetState } : r)));
+    } catch (err) {
+      addToast('error', 'Toggle Failed', err.message);
+    }
+  };
+
+  // Seed Default Presets
+  const handleSeedPresets = async () => {
+    try {
+      setSeedingPresets(true);
+      await seedAlertRulePresets('default');
+      addToast('success', 'Presets Loaded', 'Standard enterprise alert rule presets have been loaded');
+      fetchRules();
+    } catch (err) {
+      addToast('error', 'Preset Error', err.message);
+    } finally {
+      setSeedingPresets(false);
+    }
+  };
+
+  // Edit Rule Handlers
+  const handleEditRuleClick = (rule) => {
+    setEditingRule({
+      id: rule.id || rule.ID,
+      name: rule.name || '',
+      metric: rule.metric || 'cpu_usage',
+      operator: rule.operator || '>',
+      threshold: rule.threshold !== undefined ? rule.threshold : (rule.value !== undefined ? rule.value : 90),
+      severity: rule.severity || 'critical',
+      target_scope: rule.target_scope || 'all',
+      target_machine_id: rule.target_machine_id || '',
+      target_os: rule.target_os || '',
+      consecutive_breaches: rule.consecutive_breaches || 2,
+    });
+    setShowEditRuleModal(true);
+  };
+
+  const handleUpdateRuleSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingRule) return;
+    try {
+      const payload = {
+        ...editingRule,
+        threshold: Number(editingRule.threshold),
+        value: Number(editingRule.threshold),
+      };
+      await updateAlertRule('default', editingRule.id, payload);
+      addToast('success', 'Rule Updated', `Rule "${editingRule.name}" updated successfully`);
+      setShowEditRuleModal(false);
+      setEditingRule(null);
+      fetchRules();
+    } catch (err) {
+      addToast('error', 'Update Failed', err.message);
     }
   };
 
@@ -546,7 +656,7 @@ export default function AlertsPage() {
               onClick={() => setStatusFilter('rules')}
             >
               <Sliders size={13} style={{ marginRight: 5 }} />
-              <span>Alert Rules ({rules.length || 6})</span>
+              <span>Alert Rules ({rules.length})</span>
             </button>
           </div>
         </div>
@@ -613,7 +723,7 @@ export default function AlertsPage() {
       </div>
 
       {/* ── 4. BULK ACTION BANNER ── */}
-      {selectedAlertIds.size > 0 && statusFilter !== 'rules' && (
+      {isOperator && selectedAlertIds.size > 0 && statusFilter !== 'rules' && (
         <div className="bulk-actions-floating-bar">
           <div className="bulk-left-info">
             <span className="selected-count-badge">{selectedAlertIds.size}</span>
@@ -657,12 +767,23 @@ export default function AlertsPage() {
           <div className="rules-header">
             <div>
               <h3>Configured Alert Rules</h3>
-              <p>Automated threshold evaluation engine rules for CPU, Memory, Disk, Services and Containers</p>
+              <p>Automated threshold evaluation engine rules for CPU, Memory, Disk, Network and Telemetry</p>
             </div>
-            <button className="action-btn primary" onClick={() => setShowCreateRuleModal(true)}>
-              <Plus size={15} />
-              <span>Create Rule</span>
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                className="action-btn secondary"
+                onClick={handleSeedPresets}
+                disabled={seedingPresets}
+                title="Seed standard production enterprise alert rules"
+              >
+                <Sparkles size={14} color="#38bdf8" />
+                <span>{seedingPresets ? 'Seeding...' : 'Load Presets'}</span>
+              </button>
+              <button className="action-btn primary" onClick={() => setShowCreateRuleModal(true)}>
+                <Plus size={15} />
+                <span>Create Rule</span>
+              </button>
+            </div>
           </div>
 
           <div className="rules-table-wrap">
@@ -672,6 +793,7 @@ export default function AlertsPage() {
                   <th>RULE NAME</th>
                   <th>METRIC</th>
                   <th>CONDITION</th>
+                  <th>TARGET SCOPE</th>
                   <th>SEVERITY</th>
                   <th>STATUS</th>
                   <th style={{ textAlign: 'right' }}>ACTIONS</th>
@@ -679,54 +801,95 @@ export default function AlertsPage() {
               </thead>
               <tbody>
                 {rules && rules.length > 0 ? (
-                  rules.map((r) => (
-                    <tr key={r.id || r.ID}>
-                      <td className="rule-name-cell">
-                        <strong>{r.name}</strong>
-                      </td>
-                      <td>
-                        <span className="metric-tag">{r.metric}</span>
-                      </td>
-                      <td>
-                        <span className="condition-pill">
-                          {r.operator || '>'} {r.value || r.threshold}%
-                        </span>
-                      </td>
-                      <td>
-                        <span
-                          className="severity-pill-table"
-                          style={{
-                            color: getSeverityObj(r.severity).color,
-                            backgroundColor: getSeverityObj(r.severity).bg,
-                          }}
-                        >
-                          {(r.severity || 'Critical').toUpperCase()}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`status-dot-indicator ${r.is_enabled !== false ? 'green' : 'gray'}`}>
-                          {r.is_enabled !== false ? 'Enabled' : 'Disabled'}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button
-                          className="rule-del-btn"
-                          onClick={async () => {
-                            if (window.confirm(`Delete alert rule "${r.name}"?`)) {
-                              await deleteAlertRule('default', r.id || r.ID);
-                              addToast('info', 'Deleted', 'Alert rule deleted');
-                              fetchRules();
-                            }
-                          }}
-                        >
-                          <Trash2 size={14} color="#ef4444" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  rules.map((r) => {
+                    const ruleId = r.id || r.ID;
+                    const scopeType = (r.target_scope || 'all').toLowerCase();
+                    let scopeLabel = 'All Machines (Global)';
+                    if (scopeType === 'os') {
+                      scopeLabel = `${(r.target_os || 'OS').toUpperCase()} Only`;
+                    } else if (scopeType === 'machine' || scopeType === 'server') {
+                      const matched = machineList.find((m) => m.id === r.target_machine_id);
+                      scopeLabel = matched ? matched.name : `Machine (${String(r.target_machine_id || '').slice(0, 8)}...)`;
+                    }
+
+                    return (
+                      <tr key={ruleId}>
+                        <td className="rule-name-cell">
+                          <strong>{r.name}</strong>
+                          {r.consecutive_breaches && r.consecutive_breaches > 1 && (
+                            <span className="breach-window-hint">{r.consecutive_breaches} checks window</span>
+                          )}
+                        </td>
+                        <td>
+                          <span className="metric-tag">{r.metric}</span>
+                        </td>
+                        <td>
+                          <span className="condition-pill">
+                            {r.operator || '>'} {r.threshold !== undefined ? r.threshold : r.value}
+                            {getMetricUnit(r.metric)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`scope-badge ${scopeType}`}>
+                            {scopeLabel}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className="severity-pill-table"
+                            style={{
+                              color: getSeverityObj(r.severity).color,
+                              backgroundColor: getSeverityObj(r.severity).bg,
+                            }}
+                          >
+                            {(r.severity || 'Critical').toUpperCase()}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="rule-toggle-wrapper">
+                            <button
+                              type="button"
+                              className={`rule-toggle-switch ${r.is_enabled !== false ? 'active' : ''}`}
+                              onClick={() => handleToggleRule(r)}
+                              title={r.is_enabled !== false ? 'Click to disable rule' : 'Click to enable rule'}
+                            >
+                              <span className="toggle-thumb" />
+                            </button>
+                            <span className={`status-dot-indicator ${r.is_enabled !== false ? 'green' : 'gray'}`}>
+                              {r.is_enabled !== false ? 'Enabled' : 'Disabled'}
+                            </span>
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div className="rule-action-btns">
+                            <button
+                              className="rule-action-btn edit"
+                              onClick={() => handleEditRuleClick(r)}
+                              title="Edit rule parameters"
+                            >
+                              <Edit3 size={14} color="#38bdf8" />
+                            </button>
+                            <button
+                              className="rule-action-btn delete"
+                              onClick={async () => {
+                                if (window.confirm(`Delete alert rule "${r.name}"?`)) {
+                                  await deleteAlertRule('default', ruleId);
+                                  addToast('info', 'Deleted', 'Alert rule deleted');
+                                  fetchRules();
+                                }
+                              }}
+                              title="Delete rule"
+                            >
+                              <Trash2 size={14} color="#ef4444" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
                       No custom alert rules configured. Default system rules are actively monitoring.
                     </td>
                   </tr>
@@ -903,58 +1066,60 @@ export default function AlertsPage() {
                         <span>AI Fix</span>
                       </button>
 
-                      {/* Acknowledge Button */}
-                      {!isResolved && !isAck && (
-                        <button
-                          className="btn-quick-ack"
-                          onClick={async () => {
-                            try {
-                              await acknowledgeAlert(aId);
-                              addToast('success', 'Acknowledged', 'Alert acknowledged');
-                            } catch (err) {
-                              addToast('error', 'Failed', err.message);
-                            }
-                          }}
-                          title="Acknowledge Alert"
-                        >
-                          ACK
-                        </button>
-                      )}
+                      {/* Acknowledge, Resolve, Silence Controls */}
+                      {isOperator && (
+                        <>
+                          {!isResolved && !isAck && (
+                            <button
+                              className="btn-quick-ack"
+                              onClick={async () => {
+                                try {
+                                  await acknowledgeAlert(aId);
+                                  addToast('success', 'Acknowledged', 'Alert acknowledged');
+                                } catch (err) {
+                                  addToast('error', 'Failed', err.message);
+                                }
+                              }}
+                              title="Acknowledge Alert"
+                            >
+                              ACK
+                            </button>
+                          )}
 
-                      {/* Resolve Button */}
-                      {!isResolved && (
-                        <button
-                          className="btn-quick-resolve"
-                          onClick={async () => {
-                            try {
-                              await resolveAlert(aId);
-                              addToast('success', 'Resolved', 'Alert resolved');
-                            } catch (err) {
-                              addToast('error', 'Failed', err.message);
-                            }
-                          }}
-                          title="Mark Resolved"
-                        >
-                          <Check size={14} />
-                        </button>
-                      )}
+                          {!isResolved && (
+                            <button
+                              className="btn-quick-resolve"
+                              onClick={async () => {
+                                try {
+                                  await resolveAlert(aId);
+                                  addToast('success', 'Resolved', 'Alert resolved');
+                                } catch (err) {
+                                  addToast('error', 'Failed', err.message);
+                                }
+                              }}
+                              title="Mark Resolved"
+                            >
+                              <Check size={14} />
+                            </button>
+                          )}
 
-                      {/* Silence Button */}
-                      {!isResolved && !isSilenced && (
-                        <button
-                          className="btn-quick-silence"
-                          onClick={async () => {
-                            try {
-                              await silenceAlert(aId, 60, 'Operator snoozed');
-                              addToast('info', 'Silenced', 'Alert silenced for 1h');
-                            } catch (err) {
-                              addToast('error', 'Failed', err.message);
-                            }
-                          }}
-                          title="Silence for 1 Hour"
-                        >
-                          <BellOff size={13} />
-                        </button>
+                          {!isResolved && !isSilenced && (
+                            <button
+                              className="btn-quick-silence"
+                              onClick={async () => {
+                                try {
+                                  await silenceAlert(aId, 60, 'Operator snoozed');
+                                  addToast('info', 'Silenced', 'Alert silenced for 1h');
+                                } catch (err) {
+                                  addToast('error', 'Failed', err.message);
+                                }
+                              }}
+                              title="Silence for 1 Hour"
+                            >
+                              <BellOff size={13} />
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -1117,16 +1282,19 @@ export default function AlertsPage() {
                     value={newRule.metric}
                     onChange={(e) => setNewRule({ ...newRule, metric: e.target.value })}
                   >
-                    <option value="cpu_usage">CPU Usage (%)</option>
-                    <option value="memory_usage">Memory Usage (%)</option>
-                    <option value="disk_usage">Disk Usage (%)</option>
-                    <option value="latency_ms">Latency (ms)</option>
-                    <option value="packet_loss">Packet Loss (%)</option>
+                    <option value="cpu_usage">CPU Utilization (%)</option>
+                    <option value="memory_percent">Memory Usage (%)</option>
+                    <option value="disk_percent">Disk Storage Used (%)</option>
+                    <option value="latency_ms">Network Latency (ms)</option>
+                    <option value="packet_loss">Network Packet Loss (%)</option>
+                    <option value="upload_mbps">Upload Bandwidth (MB/s)</option>
+                    <option value="download_mbps">Download Bandwidth (MB/s)</option>
+                    <option value="cpu_temperature">CPU Temperature (°C)</option>
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label>Condition</label>
+                  <label>Condition & Threshold</label>
                   <div className="condition-input-group">
                     <select
                       value={newRule.operator}
@@ -1135,15 +1303,80 @@ export default function AlertsPage() {
                       <option value=">">&gt; (Greater than)</option>
                       <option value=">=">&gt;= (Greater or equal)</option>
                       <option value="<">&lt; (Less than)</option>
+                      <option value="<=">&lt;= (Less or equal)</option>
+                      <option value="==">== (Equals)</option>
                     </select>
-                    <input
-                      type="number"
-                      required
-                      value={newRule.value}
-                      onChange={(e) => setNewRule({ ...newRule, value: parseFloat(e.target.value) })}
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', position: 'relative' }}>
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        value={newRule.threshold}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setNewRule({ ...newRule, threshold: val, value: val });
+                        }}
+                        style={{ width: '100%', paddingRight: '36px' }}
+                      />
+                      <span className="metric-unit-badge">{getMetricUnit(newRule.metric)}</span>
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="form-row-2">
+                <div className="form-group">
+                  <label>Target Scope</label>
+                  <select
+                    value={newRule.target_scope}
+                    onChange={(e) => setNewRule({ ...newRule, target_scope: e.target.value })}
+                  >
+                    <option value="all">All Machines (Global)</option>
+                    <option value="os">Specific Operating System</option>
+                    <option value="machine">Specific Single Server</option>
+                  </select>
+                </div>
+
+                {newRule.target_scope === 'os' ? (
+                  <div className="form-group">
+                    <label>Target OS</label>
+                    <select
+                      value={newRule.target_os}
+                      onChange={(e) => setNewRule({ ...newRule, target_os: e.target.value })}
+                    >
+                      <option value="linux">Linux Hosts</option>
+                      <option value="windows">Windows Hosts</option>
+                      <option value="darwin">macOS Hosts</option>
+                    </select>
+                  </div>
+                ) : newRule.target_scope === 'machine' ? (
+                  <div className="form-group">
+                    <label>Target Machine</label>
+                    <select
+                      value={newRule.target_machine_id}
+                      onChange={(e) => setNewRule({ ...newRule, target_machine_id: e.target.value })}
+                    >
+                      <option value="">Select a server...</option>
+                      {machineList.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label>Sustained Window (Checks)</label>
+                    <select
+                      value={newRule.consecutive_breaches}
+                      onChange={(e) => setNewRule({ ...newRule, consecutive_breaches: parseInt(e.target.value, 10) || 2 })}
+                    >
+                      <option value={1}>1 Check (Immediate Trigger)</option>
+                      <option value={2}>2 Consecutive Checks (Recommended)</option>
+                      <option value={3}>3 Consecutive Checks (Dampened)</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -1169,6 +1402,162 @@ export default function AlertsPage() {
                 </button>
                 <button type="submit" className="action-btn primary">
                   Create Alert Rule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── 8. EDIT ALERT RULE MODAL ── */}
+      {showEditRuleModal && editingRule && (
+        <div className="ai-modal-overlay" onClick={() => setShowEditRuleModal(false)}>
+          <div className="rule-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="ai-modal-header">
+              <h3>Edit Alert Rule</h3>
+              <button className="ai-modal-close" onClick={() => setShowEditRuleModal(false)}>
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateRuleSubmit} className="rule-form">
+              <div className="form-group">
+                <label>Rule Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingRule.name}
+                  onChange={(e) => setEditingRule({ ...editingRule, name: e.target.value })}
+                />
+              </div>
+
+              <div className="form-row-2">
+                <div className="form-group">
+                  <label>Metric</label>
+                  <select
+                    value={editingRule.metric}
+                    onChange={(e) => setEditingRule({ ...editingRule, metric: e.target.value })}
+                  >
+                    <option value="cpu_usage">CPU Utilization (%)</option>
+                    <option value="memory_percent">Memory Usage (%)</option>
+                    <option value="disk_percent">Disk Storage Used (%)</option>
+                    <option value="latency_ms">Network Latency (ms)</option>
+                    <option value="packet_loss">Network Packet Loss (%)</option>
+                    <option value="upload_mbps">Upload Bandwidth (MB/s)</option>
+                    <option value="download_mbps">Download Bandwidth (MB/s)</option>
+                    <option value="cpu_temperature">CPU Temperature (°C)</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Condition & Threshold</label>
+                  <div className="condition-input-group">
+                    <select
+                      value={editingRule.operator}
+                      onChange={(e) => setEditingRule({ ...editingRule, operator: e.target.value })}
+                    >
+                      <option value=">">&gt; (Greater than)</option>
+                      <option value=">=">&gt;= (Greater or equal)</option>
+                      <option value="<">&lt; (Less than)</option>
+                      <option value="<=">&lt;= (Less or equal)</option>
+                      <option value="==">== (Equals)</option>
+                    </select>
+                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', position: 'relative' }}>
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        value={editingRule.threshold}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setEditingRule({ ...editingRule, threshold: val, value: val });
+                        }}
+                        style={{ width: '100%', paddingRight: '36px' }}
+                      />
+                      <span className="metric-unit-badge">{getMetricUnit(editingRule.metric)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-row-2">
+                <div className="form-group">
+                  <label>Target Scope</label>
+                  <select
+                    value={editingRule.target_scope}
+                    onChange={(e) => setEditingRule({ ...editingRule, target_scope: e.target.value })}
+                  >
+                    <option value="all">All Machines (Global)</option>
+                    <option value="os">Specific Operating System</option>
+                    <option value="machine">Specific Single Server</option>
+                  </select>
+                </div>
+
+                {editingRule.target_scope === 'os' ? (
+                  <div className="form-group">
+                    <label>Target OS</label>
+                    <select
+                      value={editingRule.target_os}
+                      onChange={(e) => setEditingRule({ ...editingRule, target_os: e.target.value })}
+                    >
+                      <option value="linux">Linux Hosts</option>
+                      <option value="windows">Windows Hosts</option>
+                      <option value="darwin">macOS Hosts</option>
+                    </select>
+                  </div>
+                ) : editingRule.target_scope === 'machine' ? (
+                  <div className="form-group">
+                    <label>Target Machine</label>
+                    <select
+                      value={editingRule.target_machine_id || ''}
+                      onChange={(e) => setEditingRule({ ...editingRule, target_machine_id: e.target.value })}
+                    >
+                      <option value="">Select a server...</option>
+                      {machineList.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label>Sustained Window (Checks)</label>
+                    <select
+                      value={editingRule.consecutive_breaches || 2}
+                      onChange={(e) => setEditingRule({ ...editingRule, consecutive_breaches: parseInt(e.target.value, 10) || 2 })}
+                    >
+                      <option value={1}>1 Check (Immediate Trigger)</option>
+                      <option value={2}>2 Consecutive Checks (Recommended)</option>
+                      <option value={3}>3 Consecutive Checks (Dampened)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label>Severity Level</label>
+                <select
+                  value={editingRule.severity}
+                  onChange={(e) => setEditingRule({ ...editingRule, severity: e.target.value })}
+                >
+                  <option value="critical">Critical (P1)</option>
+                  <option value="major">Major (P2)</option>
+                  <option value="warning">Warning (P3)</option>
+                  <option value="info">Info (P4)</option>
+                </select>
+              </div>
+
+              <div className="modal-footer-btn-row">
+                <button
+                  type="button"
+                  className="action-btn secondary"
+                  onClick={() => setShowEditRuleModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="action-btn primary">
+                  Save Changes
                 </button>
               </div>
             </form>
@@ -2198,6 +2587,105 @@ export default function AlertsPage() {
         }
         .status-dot-indicator.green { color: #4ade80; }
         .status-dot-indicator.gray { color: #64748b; }
+        
+        .rule-toggle-wrapper {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .rule-toggle-switch {
+          position: relative;
+          width: 36px;
+          height: 20px;
+          border-radius: 9999px;
+          background: #334155;
+          border: none;
+          cursor: pointer;
+          transition: background-color 0.2s ease;
+          padding: 2px;
+          display: flex;
+          align-items: center;
+        }
+        .rule-toggle-switch.active {
+          background: #10b981;
+        }
+        .rule-toggle-switch .toggle-thumb {
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          background: #ffffff;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+          transition: transform 0.2s ease;
+          transform: translateX(0);
+        }
+        .rule-toggle-switch.active .toggle-thumb {
+          transform: translateX(16px);
+        }
+
+        .scope-badge {
+          display: inline-block;
+          font-size: 10.5px;
+          font-weight: 700;
+          padding: 3px 8px;
+          border-radius: 6px;
+          background: rgba(56, 189, 248, 0.12);
+          color: #38bdf8;
+          border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+        .scope-badge.os {
+          background: rgba(168, 85, 247, 0.12);
+          color: #c084fc;
+          border-color: rgba(168, 85, 247, 0.3);
+        }
+        .scope-badge.machine {
+          background: rgba(234, 179, 8, 0.12);
+          color: #facc15;
+          border-color: rgba(234, 179, 8, 0.3);
+        }
+
+        .breach-window-hint {
+          display: block;
+          font-size: 10px;
+          color: #94a3b8;
+          font-weight: 500;
+          margin-top: 2px;
+        }
+
+        .metric-unit-badge {
+          position: absolute;
+          right: 10px;
+          color: #94a3b8;
+          font-size: 11.5px;
+          font-weight: 700;
+          pointer-events: none;
+        }
+
+        .rule-action-btns {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 6px;
+        }
+        .rule-action-btn {
+          background: transparent;
+          border: 1px solid #1e293b;
+          cursor: pointer;
+          padding: 5px 7px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.15s ease;
+        }
+        .rule-action-btn.edit:hover {
+          background: rgba(56, 189, 248, 0.15);
+          border-color: rgba(56, 189, 248, 0.4);
+        }
+        .rule-action-btn.delete:hover {
+          background: rgba(239, 68, 68, 0.15);
+          border-color: rgba(239, 68, 68, 0.4);
+        }
+
         .rule-del-btn {
           background: transparent;
           border: none;

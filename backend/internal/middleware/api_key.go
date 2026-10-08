@@ -44,8 +44,11 @@ func APIKeyAuthMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		// Fallback for agent requests: check machine_id query parameter
-		machineID := c.Query("machine_id")
+		// Fallback for agent requests: check machine_id query parameter or headers
+		machineID := c.GetHeader("X-Machine-ID")
+		if machineID == "" {
+			machineID = c.Query("machine_id")
+		}
 		if machineID == "" {
 			machineID = c.Param("id")
 		}

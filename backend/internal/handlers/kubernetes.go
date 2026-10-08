@@ -74,7 +74,7 @@ func GetLinuxKubernetes(c *gin.Context) {
 	})
 }
 
-// GetKubernetesOverview serves legacy cluster overview.
+// GetKubernetesOverview serves cluster overview.
 func GetKubernetesOverview(c *gin.Context) {
 	machineIDStr := strings.TrimSpace(c.Param("id"))
 	var machineUUID uuid.UUID
@@ -88,8 +88,8 @@ func GetKubernetesOverview(c *gin.Context) {
 	}
 
 	k8sInstalled := false
+	var cluster models.KubernetesCluster
 	if database.DB != nil && machineUUID != uuid.Nil {
-		var cluster models.KubernetesCluster
 		if err := database.DB.Where("server_id = ?", machineUUID).First(&cluster).Error; err == nil {
 			if cluster.Status != "Kubernetes Not Installed" && cluster.Status != "" {
 				k8sInstalled = true
@@ -111,33 +111,66 @@ func GetKubernetesOverview(c *gin.Context) {
 		return
 	}
 
-	var record models.LinuxKubernetes
-	if database.DB != nil && machineUUID != uuid.Nil {
-		_ = database.DB.Where("machine_id = ?", machineUUID).Order("sampled_at desc").First(&record).Error
-	}
+	var dbNodes []models.KubernetesNode
+	var dbPods []models.KubernetesPod
+	_ = database.DB.Where("cluster_id = ?", cluster.ID).Find(&dbNodes).Error
+	_ = database.DB.Where("cluster_id = ?", cluster.ID).Find(&dbPods).Error
 
 	var nodes []KubernetesNode
-	var pods []models.KubernetesPod
-
-	if record.NodesJSON != "" {
-		_ = json.Unmarshal([]byte(record.NodesJSON), &nodes)
+	for _, n := range dbNodes {
+		nodes = append(nodes, KubernetesNode{
+			Name:             n.Name,
+			Status:           n.Status,
+			Role:             n.Role,
+			Version:          n.Version,
+			InternalIP:       n.InternalIP,
+			CPUUsagePercent:  n.CPU,
+			MemoryUsageBytes: int64(n.Memory * 1024 * 1024 * 1024 / 100),
+			Ready:            n.Status == "Ready",
+		})
 	}
-	if record.PodsJSON != "" {
-		_ = json.Unmarshal([]byte(record.PodsJSON), &pods)
+
+	if len(nodes) == 0 && len(dbPods) == 0 {
+		var record models.LinuxKubernetes
+		_ = database.DB.Where("machine_id = ?", machineUUID).Order("sampled_at desc").First(&record).Error
+		if record.NodesJSON != "" {
+			_ = json.Unmarshal([]byte(record.NodesJSON), &nodes)
+		}
+		if record.PodsJSON != "" {
+			_ = json.Unmarshal([]byte(record.PodsJSON), &dbPods)
+		}
+	}
+
+	readyCount := 0
+	for _, n := range nodes {
+		if n.Ready || n.Status == "Ready" {
+			readyCount++
+		}
+	}
+
+	runningPods := 0
+	for _, p := range dbPods {
+		if strings.ToLower(p.Status) == "running" || strings.ToLower(p.Phase) == "running" {
+			runningPods++
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"machine_id":         machineUUID,
-		"cluster_name":       "k8s-cluster",
-		"kubernetes_version": "v1.28",
-		"cluster_status":     "Healthy",
-		"total_nodes":        len(nodes),
-		"ready_nodes":        len(nodes),
-		"total_pods":         len(pods),
-		"running_pods":       len(pods),
-		"sampled_at":         time.Now().Format(time.RFC3339),
-		"nodes":              nodes,
-		"pods":               pods,
+		"machine_id":           machineUUID,
+		"kubernetes_installed": true,
+		"cluster_id":           cluster.ID,
+		"cluster_name":         cluster.Name,
+		"kubernetes_version":   cluster.Version,
+		"cluster_status":       cluster.Status,
+		"control_plane_status": cluster.ControlPlaneStatus,
+		"provider":             cluster.Provider,
+		"total_nodes":          len(nodes),
+		"ready_nodes":          readyCount,
+		"total_pods":           len(dbPods),
+		"running_pods":         runningPods,
+		"sampled_at":           cluster.UpdatedAt.Format(time.RFC3339),
+		"nodes":                nodes,
+		"pods":                 dbPods,
 	})
 }
 
@@ -216,26 +249,117 @@ func GetKubernetesResourceYAML(c *gin.Context) {
 	namespace := c.Query("namespace")
 
 	if kind == "" {
-		kind = "deployment"
-	}
-	if name == "" {
-		name = "api-gateway"
+		kind = "pod"
 	}
 	if namespace == "" {
-		namespace = "prod"
+		namespace = "default"
 	}
 
-	yamlContent := fmt.Sprintf(`apiVersion: apps/v1
-kind: Deployment
+	var yamlContent string
+	db := database.DB
+
+	switch kind {
+	case "pod":
+		var pod models.KubernetesPod
+		if db != nil && name != "" && db.Where("name = ? AND namespace = ?", name, namespace).First(&pod).Error == nil {
+			yamlContent = fmt.Sprintf(`apiVersion: v1
+kind: Pod
 metadata:
   name: %s
   namespace: %s
-  labels:
-    app: %s
-    tier: backend
-    environment: production
 spec:
-  replicas: 3
+  nodeName: %s
+  restartPolicy: Always
+  containers:
+  - name: %s
+    image: %s:latest
+    resources:
+      requests:
+        cpu: "%.2f"
+        memory: "%.0fMi"
+status:
+  phase: %s
+  podIP: %s
+`, pod.Name, pod.Namespace, pod.Node, pod.Name, pod.Name, pod.CPU, pod.Memory, pod.Phase, pod.IP)
+		} else {
+			yamlContent = fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  containers:
+  - name: %s
+    image: nginx:alpine
+status:
+  phase: Running
+`, name, namespace, name)
+		}
+
+	case "node":
+		var node models.KubernetesNode
+		if db != nil && name != "" && db.Where("name = ?", name).First(&node).Error == nil {
+			yamlContent = fmt.Sprintf(`apiVersion: v1
+kind: Node
+metadata:
+  name: %s
+  labels:
+    kubernetes.io/role: %s
+status:
+  addresses:
+  - type: InternalIP
+    address: %s
+  nodeInfo:
+    kubeletVersion: %s
+    osImage: %s
+    kernelVersion: %s
+    containerRuntimeVersion: %s
+`, node.Name, node.Role, node.InternalIP, node.Version, node.OS, node.Kernel, node.ContainerRuntime)
+		} else {
+			yamlContent = fmt.Sprintf(`apiVersion: v1
+kind: Node
+metadata:
+  name: %s
+status:
+  phase: Ready
+`, name)
+		}
+
+	case "service":
+		var svc models.KubernetesService
+		if db != nil && name != "" && db.Where("name = ? AND namespace = ?", name, namespace).First(&svc).Error == nil {
+			yamlContent = fmt.Sprintf(`apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  type: %s
+  clusterIP: %s
+  externalIP: %s
+  ports:
+  # %s
+`, svc.Name, svc.Namespace, svc.Type, svc.ClusterIP, svc.ExternalIP, svc.Ports)
+		} else {
+			yamlContent = fmt.Sprintf(`apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  type: ClusterIP
+`, name, namespace)
+		}
+
+	case "daemonset":
+		var ds models.KubernetesDaemonSet
+		if db != nil && name != "" && db.Where("name = ? AND namespace = ?", name, namespace).First(&ds).Error == nil {
+			yamlContent = fmt.Sprintf(`apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: %s
+  namespace: %s
+spec:
   selector:
     matchLabels:
       app: %s
@@ -243,26 +367,63 @@ spec:
     metadata:
       labels:
         app: %s
-    spec:
-      containers:
-      - name: %s
-        image: infrapilot/%s:v2.1
-        ports:
-        - containerPort: 8080
-        resources:
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
-          requests:
-            cpu: "100m"
-            memory: "128Mi"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 15
-          periodSeconds: 10
-`, name, namespace, name, name, name, name, name)
+status:
+  desiredNumberScheduled: %d
+  numberReady: %d
+  numberAvailable: %d
+`, ds.Name, ds.Namespace, ds.Name, ds.Name, ds.DesiredReplicas, ds.ReadyReplicas, ds.Available)
+		} else {
+			yamlContent = fmt.Sprintf(`apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: %s
+  namespace: %s
+`, name, namespace)
+		}
+
+	case "deployment":
+		var dep models.KubernetesDeployment
+		if db != nil && name != "" && db.Where("name = ? AND namespace = ?", name, namespace).First(&dep).Error == nil {
+			yamlContent = fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app: %s
+spec:
+  replicas: %d
+  selector:
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+status:
+  availableReplicas: %d
+  readyReplicas: %d
+  updatedReplicas: %d
+`, dep.Name, dep.Namespace, dep.Name, dep.DesiredReplicas, dep.Name, dep.Name, dep.AvailableReplicas, dep.ReadyReplicas, dep.UpdatedReplicas)
+		} else {
+			yamlContent = fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 1
+`, name, namespace)
+		}
+
+	default:
+		yamlContent = fmt.Sprintf(`apiVersion: v1
+kind: %s
+metadata:
+  name: %s
+  namespace: %s
+`, strings.Title(kind), name, namespace)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"kind":      kind,

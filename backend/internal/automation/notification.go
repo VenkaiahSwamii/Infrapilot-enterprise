@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/smtp"
 	"os"
+
+	"infrapilot/backend/internal/config"
 )
 
 type NotificationEngine struct{}
@@ -13,29 +15,50 @@ func NewNotificationEngine() *NotificationEngine {
 }
 
 func (n *NotificationEngine) NotifyAll(title, message string) error {
-	to := "infrapilotadmin@gmail.com"
-	host := os.Getenv("SMTP_HOST")
+	cfg := config.Get()
+	to := cfg.SMTP.DefaultRecipient
+	if to == "" {
+		to = cfg.Alerts.AdminEmail
+	}
+	if to == "" {
+		to = os.Getenv("ADMIN_EMAIL")
+	}
+
+	host := cfg.SMTP.Host
+	if host == "" {
+		host = os.Getenv("SMTP_HOST")
+	}
 	if host == "" {
 		host = "smtp.gmail.com"
 	}
-	user := os.Getenv("SMTP_USER")
+	user := cfg.SMTP.User
 	if user == "" {
-		user = "infrapilotadmin@gmail.com"
+		user = os.Getenv("SMTP_USER")
 	}
-	password := os.Getenv("SMTP_PASSWORD")
+	password := cfg.SMTP.Password
 	if password == "" {
-		password = "ajrlswurhrurjddk"
+		password = os.Getenv("SMTP_PASSWORD")
 	}
-	from := os.Getenv("SMTP_FROM")
+	from := cfg.SMTP.From
 	if from == "" {
-		from = "InfraPilot Enterprise <infrapilotadmin@gmail.com>"
+		from = os.Getenv("SMTP_FROM")
+	}
+	if from == "" {
+		from = "InfraPilot Enterprise <notifications@infrapilot.enterprise>"
 	}
 
 	fmt.Printf("[NOTIFICATION DISPATCH] Title: %s | Message: %s | Recipient: %s\n", title, message, to)
 
+	if to == "" || user == "" || password == "" {
+		return nil
+	}
+
 	// Send direct SMTP email
 	msg := fmt.Sprintf("To: %s\r\nFrom: %s\r\nSubject: [InfraPilot Update] %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n\r\n-- InfraPilot Enterprise Engine", to, from, title, message)
-	addr := fmt.Sprintf("%s:587", host)
+	addr := fmt.Sprintf("%s:%d", host, cfg.SMTP.Port)
+	if cfg.SMTP.Port <= 0 {
+		addr = fmt.Sprintf("%s:587", host)
+	}
 	auth := smtp.PlainAuth("", user, password, host)
 	_ = smtp.SendMail(addr, auth, user, []string{to}, []byte(msg))
 

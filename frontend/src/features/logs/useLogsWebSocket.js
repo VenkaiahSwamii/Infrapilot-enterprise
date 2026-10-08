@@ -29,8 +29,11 @@ export function useLogsWebSocket(wsUrl = null) {
         if (isPausedRef.current) return;
         try {
           const payload = JSON.parse(event.data);
-          if (payload.event === 'log_entry' && payload.data) {
-            setLiveLogs((prev) => [payload.data, ...prev.slice(0, 499)]);
+          if (payload.event === 'log_entry' || payload.log || payload.data) {
+            const logData = payload.data || payload.log || payload;
+            if (logData && typeof logData === 'object') {
+              setLiveLogs((prev) => [logData, ...prev.slice(0, 499)]);
+            }
           }
         } catch (e) {
           // Ignore non-JSON or unrelated WS messages

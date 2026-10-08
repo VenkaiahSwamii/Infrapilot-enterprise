@@ -3,8 +3,10 @@ package logs
 import (
 	"encoding/json"
 	"log"
+	"strings"
 
 	"infrapilot/agent/internal/client"
+	"infrapilot/agent/internal/config"
 )
 
 func SendLogBatch(backendURL string, payload interface{}) error {
@@ -13,7 +15,11 @@ func SendLogBatch(backendURL string, payload interface{}) error {
 		return err
 	}
 
-	endpoint := backendURL + "/api/v1/agent/logs"
+	cleanBase := strings.TrimRight(backendURL, "/")
+	endpoint := cleanBase + "/api/v1/agent/logs"
+	if mid := config.Get().MachineID; mid != "" {
+		endpoint += "?machine_id=" + mid
+	}
 	err = client.PostWithRetry(
 		endpoint,
 		data,

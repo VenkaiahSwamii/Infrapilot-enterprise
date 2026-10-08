@@ -94,7 +94,7 @@ export default function KubernetesTab({ machine }) {
   const [copiedId, setCopiedId] = useState(null);
   const [copiedK8sCmd, setCopiedK8sCmd] = useState(false);
 
-  const backendHost = typeof window !== 'undefined' ? (window.location.hostname || '192.168.1.2') : '192.168.1.2';
+  const backendHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost';
   const k8sDeployCmd = `kubectl apply -f http://${backendHost}:8080/downloads/k8s-daemonset.yaml`;
 
   const handleCopyK8sCmd = () => {
@@ -153,14 +153,14 @@ export default function KubernetesTab({ machine }) {
       if (eventsRes.status === 'fulfilled' && Array.isArray(eventsRes.value)) setEvents(eventsRes.value);
 
       // Record Time Series Data Point
-      const totalCpu = currentPods.reduce((acc, p) => acc + (p.cpu_percent || (p.cpu_usage ? parseFloat(p.cpu_usage) : 0)), 0);
-      const totalMem = currentPods.reduce((acc, p) => acc + (p.memory_used_bytes || (p.memory_usage ? parseFloat(p.memory_usage) : 0)), 0);
+      const totalCpu = currentPods.reduce((acc, p) => acc + (p.cpu ?? p.cpu_percent ?? (p.cpu_usage ? parseFloat(p.cpu_usage) : 0)), 0);
+      const totalMem = currentPods.reduce((acc, p) => acc + (p.memory ?? p.memory_used_bytes ?? (p.memory_usage ? parseFloat(p.memory_usage) : 0)), 0);
 
       setTimeSeriesData(prev => {
         const next = [...prev, {
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
           cpu: Math.min(parseFloat(totalCpu.toFixed(1)), 100),
-          mem: parseFloat((totalMem / (1024 * 1024 * 1024)).toFixed(2)) || (totalMem / 100).toFixed(1),
+          mem: parseFloat((totalMem / (1024 * 1024 * 1024)).toFixed(2)) || (totalMem > 100 ? (totalMem / 1024).toFixed(1) : totalMem.toFixed(1)),
           podsCount: currentPods.length
         }];
         return next.length > 30 ? next.slice(next.length - 30) : next;
@@ -295,8 +295,8 @@ export default function KubernetesTab({ machine }) {
       const isCrash = status.includes('crashloop') || restarts > 5;
       const isErr = status.includes('error') || status.includes('oom') || status.includes('failed') || status.includes('evicted');
       const isPend = status.includes('pending') || status.includes('creating');
-      const cpu = p.cpu_percent || 0;
-      const mem = p.memory_used_bytes || p.memory_used || 0;
+      const cpu = p.cpu ?? p.cpu_percent ?? 0;
+      const mem = p.memory ?? p.memory_used_bytes ?? p.memory_used ?? 0;
 
       totalCpu += cpu;
       totalMem += mem;
@@ -320,7 +320,7 @@ export default function KubernetesTab({ machine }) {
 
   // Unique Namespaces
   const availableNamespaces = useMemo(() => {
-    const nsSet = new Set(['default', 'kube-system']);
+    const nsSet = new Set();
     pods.forEach(p => {
       if (p.namespace) nsSet.add(p.namespace);
     });
@@ -662,40 +662,65 @@ export default function KubernetesTab({ machine }) {
         gap: '12px'
       }}>
         {/* Cluster Status Card */}
-        <div style={{
-          backgroundColor: '#0d1220',
-          border: '1px solid var(--border-soft)',
-          borderRadius: '12px',
-          padding: '16px 18px',
-          borderLeft: '4px solid #a855f7'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Control Plane</span>
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '2px 8px',
-              backgroundColor: 'rgba(34, 197, 94, 0.15)',
-              border: '1px solid rgba(34, 197, 94, 0.4)',
+        {(() => {
+          const isClusterActive = (overview?.kubernetes_installed !== false && (overview?.cluster_status === 'Healthy' || overview?.cluster_status === 'Active' || nodes.length > 0 || clusters.length > 0));
+          return (
+            <div style={{
+              backgroundColor: '#0d1220',
+              border: '1px solid var(--border-soft)',
               borderRadius: '12px',
-              fontSize: '11px',
-              fontWeight: 700,
-              color: '#22c55e'
+              padding: '16px 18px',
+              borderLeft: isClusterActive ? '4px solid #a855f7' : '4px solid #ef4444'
             }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22c55e' }} />
-              Cluster Active
-            </span>
-          </div>
-          <div style={{ marginTop: '6px' }}>
-            <div style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9' }}>
-              {overview?.cluster_name || (nodes.length > 0 ? 'k8s-cluster' : 'No Cluster Connected')}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Control Plane</span>
+                {isClusterActive ? (
+                  <span style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '2px 8px',
+                    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                    border: '1px solid rgba(34, 197, 94, 0.4)',
+                    borderRadius: '12px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#22c55e'
+                  }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22c55e' }} />
+                    Cluster Active
+                  </span>
+                ) : (
+                  <span style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '2px 8px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    borderRadius: '12px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#ef4444'
+                  }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444' }} />
+                    No Cluster
+                  </span>
+                )}
+              </div>
+              <div style={{ marginTop: '6px' }}>
+                <div style={{ fontSize: '18px', fontWeight: 800, color: '#f1f5f9' }}>
+                  {isClusterActive ? (overview?.cluster_name || (nodes.length > 0 ? 'k8s-cluster' : 'Kubernetes Active')) : 'No Cluster Connected'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', fontFamily: 'monospace' }}>
+                  {isClusterActive 
+                    ? (overview?.kubernetes_version ? `Kubernetes ${overview.kubernetes_version} • HA Control Plane` : 'Kubernetes Connected')
+                    : 'Kubernetes agent or cluster not detected'}
+                </div>
+              </div>
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', fontFamily: 'monospace' }}>
-              {overview?.kubernetes_version ? `Kubernetes ${overview.kubernetes_version} • HA Control Plane` : (nodes.length > 0 ? 'Kubernetes Active' : 'Kubernetes Unreachable')}
-            </div>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* Nodes Health Card */}
         <div style={{
@@ -1237,13 +1262,13 @@ export default function KubernetesTab({ machine }) {
                       {node.roles || (idx === 0 ? 'control-plane' : 'worker')}
                     </td>
                     <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--muted)' }}>
-                      {node.version || node.kubelet_version || 'v1.28.2'}
+                      {node.version || node.kubelet_version || '--'}
                     </td>
                     <td style={{ padding: '12px 16px', color: '#38bdf8', fontFamily: 'monospace' }}>
-                      {node.internal_ip || node.ip || '192.168.1.10'}
+                      {node.internal_ip || node.ip || '--'}
                     </td>
                     <td style={{ padding: '12px 16px', color: 'var(--muted)' }}>
-                      {node.os_image || 'Ubuntu 22.04 LTS (x86_64)'}
+                      {node.os || node.os_image || '--'}
                     </td>
                   </tr>
                 );
@@ -1313,30 +1338,38 @@ export default function KubernetesTab({ machine }) {
               </tr>
             </thead>
             <tbody>
-              {availableNamespaces.map((ns, idx) => {
-                const count = pods.filter(p => (p.namespace || 'default') === ns).length;
-                return (
-                  <tr key={ns} style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--text)' }}>
-                    <td style={{ padding: '12px 16px', fontWeight: 700, color: '#f1f5f9' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <FolderTree size={16} color="#c084fc" />
-                        {ns}
-                      </div>
-                    </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
-                        Active
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px 16px', fontWeight: 600, color: '#38bdf8' }}>
-                      {count} Pods
-                    </td>
-                    <td style={{ padding: '12px 16px', color: 'var(--muted)' }}>
-                      14d
-                    </td>
-                  </tr>
-                );
-              })}
+              {availableNamespaces.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ textAlign: 'center', padding: '36px', color: 'var(--muted)', fontSize: '13px' }}>
+                    No namespaces discovered. Connect a Kubernetes cluster to view active namespaces.
+                  </td>
+                </tr>
+              ) : (
+                availableNamespaces.map((ns, idx) => {
+                  const count = pods.filter(p => (p.namespace || 'default') === ns).length;
+                  return (
+                    <tr key={ns} style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--text)' }}>
+                      <td style={{ padding: '12px 16px', fontWeight: 700, color: '#f1f5f9' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <FolderTree size={16} color="#c084fc" />
+                          {ns}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
+                          Active
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', fontWeight: 600, color: '#38bdf8' }}>
+                        {count} Pods
+                      </td>
+                      <td style={{ padding: '12px 16px', color: 'var(--muted)' }}>
+                        14d
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

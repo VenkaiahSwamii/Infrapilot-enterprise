@@ -10,6 +10,8 @@ import (
 	"net/smtp"
 	"strings"
 	"time"
+
+	"infrapilot/backend/internal/config"
 )
 
 type SREAlertEvent struct {
@@ -34,15 +36,32 @@ type WebhookPayload struct {
 }
 
 func SendAlertEmail(event *SREAlertEvent, db *sql.DB, serverID string) {
-	enabled := true
-	host := "smtp.gmail.com"
-	port := 587
-	user := "infrapilotadmin@gmail.com"
-	password := "ajrlswurhrurjddk"
-	fromAddress := "InfraPilot Enterprise <infrapilotadmin@gmail.com>"
+	cfg := config.Get()
+	enabled := cfg.SMTP.Enabled
+	host := cfg.SMTP.Host
+	if host == "" {
+		host = "smtp.gmail.com"
+	}
+	port := cfg.SMTP.Port
+	if port <= 0 {
+		port = 587
+	}
+	user := cfg.SMTP.User
+	password := cfg.SMTP.Password
+	fromAddress := cfg.SMTP.From
+	if fromAddress == "" {
+		fromAddress = "InfraPilot Enterprise <notifications@infrapilot.enterprise>"
+	}
+	defaultRecip := cfg.SMTP.DefaultRecipient
+	if defaultRecip == "" {
+		defaultRecip = cfg.Alerts.AdminEmail
+	}
 	var webhookURL string
 	var webhookEnabled bool
-	recipients := []string{"infrapilotadmin@gmail.com"}
+	recipients := []string{}
+	if defaultRecip != "" {
+		recipients = append(recipients, defaultRecip)
+	}
 
 	if db != nil {
 		var dbEnabled, dbWebhookEnabled bool

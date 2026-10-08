@@ -101,24 +101,24 @@ func (r *postgresRepository) GetCheckByID(id uuid.UUID) (*models.NetworkCheck, e
 
 func (r *postgresRepository) GetAllChecks() ([]models.NetworkCheck, error) {
 	var checks []models.NetworkCheck
+	if database.DB == nil {
+		return []models.NetworkCheck{}, nil
+	}
 	err := database.DB.Order("created_at DESC").Find(&checks).Error
 	if err != nil && !strings.Contains(err.Error(), "no such table") {
 		return nil, err
-	}
-	if len(checks) == 0 {
-		return r.getSeedChecks(), nil
 	}
 	return checks, nil
 }
 
 func (r *postgresRepository) GetEnabledChecks() ([]models.NetworkCheck, error) {
 	var checks []models.NetworkCheck
+	if database.DB == nil {
+		return []models.NetworkCheck{}, nil
+	}
 	err := database.DB.Where("enabled = ?", true).Find(&checks).Error
 	if err != nil && !strings.Contains(err.Error(), "no such table") {
 		return nil, err
-	}
-	if len(checks) == 0 {
-		return r.getSeedChecks(), nil
 	}
 	return checks, nil
 }
@@ -172,7 +172,7 @@ func (r *postgresRepository) GetCheckMetrics(checkID uuid.UUID, timeRange string
 func (r *postgresRepository) GetOverviewStats() (*OverviewStats, error) {
 	checks, err := r.GetAllChecks()
 	if err != nil {
-		checks = r.getSeedChecks()
+		return &OverviewStats{}, err
 	}
 
 	var healthy, degraded, critical, failed int64
@@ -212,9 +212,8 @@ func (r *postgresRepository) GetOverviewStats() (*OverviewStats, error) {
 
 	// Query monitored machines & servers count
 	var serverCount int64
-	database.DB.Model(&models.Server{}).Count(&serverCount)
-	if serverCount == 0 {
-		serverCount = 1
+	if database.DB != nil {
+		database.DB.Model(&models.Server{}).Count(&serverCount)
 	}
 
 	return &OverviewStats{
@@ -224,20 +223,19 @@ func (r *postgresRepository) GetOverviewStats() (*OverviewStats, error) {
 		Critical:          critical,
 		AvgLatencyMs:      avgLat,
 		PacketLossPct:     avgLoss,
-		NetworkInterfaces: serverCount * 3,
+		NetworkInterfaces: serverCount,
 		FailedChecks:      failed,
 	}, nil
 }
 
 func (r *postgresRepository) GetHostNetworkViews() ([]HostNetworkView, error) {
 	var servers []models.Server
-	database.DB.Find(&servers)
+	if database.DB != nil {
+		database.DB.Find(&servers)
+	}
 
 	if len(servers) == 0 {
-		servers = []models.Server{
-			{Hostname: "infrapilot-prod-node01", IPAddress: "10.10.20.15", OS: "Ubuntu 22.04 LTS"},
-			{Hostname: "infrapilot-db-primary", IPAddress: "10.10.20.20", OS: "Ubuntu 22.04 LTS"},
-		}
+		return []HostNetworkView{}, nil
 	}
 
 	checks, _ := r.GetAllChecks()
@@ -264,15 +262,11 @@ func (r *postgresRepository) GetHostNetworkViews() ([]HostNetworkView, error) {
 		}
 
 		views = append(views, HostNetworkView{
-			Hostname:      hostname,
-			IPAddress:     s.IPAddress,
-			OS:            s.OS,
-			OverallStatus: "HEALTHY",
-			Interfaces: []HostInterfaceItem{
-				{Name: "eth0", Status: "UP", Speed: "1 Gbps", ReceiveRateMBps: 42.3, TransmitRateMBps: 8.7, Errors: 0, Drops: 0},
-				{Name: "docker0", Status: "UP", Speed: "10 Gbps", ReceiveRateMBps: 12.1, TransmitRateMBps: 12.1, Errors: 0, Drops: 0},
-				{Name: "wlan0", Status: "DOWN", Speed: "N/A", ReceiveRateMBps: 0.0, TransmitRateMBps: 0.0, Errors: 0, Drops: 0},
-			},
+			Hostname:       hostname,
+			IPAddress:      s.IPAddress,
+			OS:             s.OS,
+			OverallStatus:  "HEALTHY",
+			Interfaces:     []HostInterfaceItem{},
 			Connectivities: hostConnectivities,
 		})
 	}
@@ -281,76 +275,5 @@ func (r *postgresRepository) GetHostNetworkViews() ([]HostNetworkView, error) {
 }
 
 func (r *postgresRepository) getSeedChecks() []models.NetworkCheck {
-	now := time.Now()
-	return []models.NetworkCheck{
-		{
-			ID:                     uuid.MustParse("11111111-1111-1111-1111-111111111111"),
-			Name:                   "Primary Gateway ICMP Ping",
-			Type:                   "PING",
-			Target:                 "8.8.8.8",
-			Host:                   "8.8.8.8",
-			IntervalSeconds:        30,
-			TimeoutMs:              3000,
-			ThresholdLatencyMs:     100,
-			ThresholdPacketLossPct: 5,
-			Enabled:                true,
-			LastStatus:             "HEALTHY",
-			LastLatencyMs:          14.2,
-			LastPacketLossPct:      0.0,
-			LastCheckAt:            &now,
-		},
-		{
-			ID:                     uuid.MustParse("22222222-2222-2222-2222-222222222222"),
-			Name:                   "PostgreSQL Primary TCP Endpoint",
-			Type:                   "TCP",
-			Target:                 "10.10.20.20:5432",
-			Host:                   "10.10.20.20",
-			Port:                   5432,
-			IntervalSeconds:        30,
-			TimeoutMs:              5000,
-			ThresholdLatencyMs:     150,
-			Enabled:                true,
-			LastStatus:             "HEALTHY",
-			LastLatencyMs:          18.5,
-			LastCheckAt:            &now,
-		},
-		{
-			ID:                     uuid.MustParse("33333333-3333-3333-3333-333333333333"),
-			Name:                   "Core DNS Resolver Check",
-			Type:                   "DNS",
-			Target:                 "api.example.com",
-			IntervalSeconds:        30,
-			TimeoutMs:              3000,
-			ThresholdLatencyMs:     100,
-			Enabled:                true,
-			LastStatus:             "HEALTHY",
-			LastLatencyMs:          12.1,
-			LastCheckAt:            &now,
-		},
-		{
-			ID:                     uuid.MustParse("44444444-4444-4444-4444-444444444444"),
-			Name:                   "Nginx Unix Socket Health Probe",
-			Type:                   "UNIX_SOCKET",
-			Target:                 "/var/run/docker.sock",
-			IntervalSeconds:        30,
-			TimeoutMs:              3000,
-			ThresholdLatencyMs:     50,
-			Enabled:                true,
-			LastStatus:             "HEALTHY",
-			LastLatencyMs:          4.8,
-			LastCheckAt:            &now,
-		},
-		{
-			ID:                     uuid.MustParse("55555555-5555-5555-5555-555555555555"),
-			Name:                   "Ethernet Interface Throughput Probe",
-			Type:                   "INTERFACE",
-			Target:                 "eth0",
-			InterfaceName:          "eth0",
-			IntervalSeconds:        15,
-			Enabled:                true,
-			LastStatus:             "HEALTHY",
-			LastLatencyMs:          0.0,
-			LastCheckAt:            &now,
-		},
-	}
+	return []models.NetworkCheck{}
 }

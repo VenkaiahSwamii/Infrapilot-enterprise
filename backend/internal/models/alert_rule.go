@@ -14,8 +14,12 @@ type AlertRule struct {
 	Operator       string    `gorm:"not null" json:"operator"` // >, <, ==
 	Value          float64   `gorm:"not null" json:"value"`
 	Threshold      float64   `json:"threshold"`
-	Severity       string    `gorm:"default:critical;not null" json:"severity"` // critical, warning, info
-	IsEnabled      bool      `gorm:"default:true;not null" json:"is_enabled"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	Severity            string     `gorm:"default:critical;not null" json:"severity"` // critical, warning, info
+	IsEnabled           bool       `gorm:"default:true;not null" json:"is_enabled"`
+	TargetScope         string     `gorm:"default:all" json:"target_scope"` // all, machine, os
+	TargetMachineID     *uuid.UUID `gorm:"type:uuid;index" json:"target_machine_id,omitempty"`
+	TargetOS            string     `json:"target_os,omitempty"` // linux, windows
+	ConsecutiveBreaches int        `gorm:"default:2" json:"consecutive_breaches"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
