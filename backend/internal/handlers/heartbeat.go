@@ -60,6 +60,11 @@ func Heartbeat(c *gin.Context) {
 				found = true
 			}
 		}
+		if !found && strings.TrimSpace(req.Hostname) != "" {
+			if err := database.DB.Where("LOWER(hostname) = LOWER(?)", strings.TrimSpace(req.Hostname)).First(&machine).Error; err == nil {
+				found = true
+			}
+		}
 	}
 
 	if !found {

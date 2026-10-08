@@ -15,6 +15,40 @@ func IsHostDecommissioned(db *gorm.DB, id uuid.UUID, hostname string, ip string)
 		return false
 	}
 
+	cleanedHost := strings.TrimSpace(hostname)
+	cleanedIP := strings.TrimSpace(ip)
+
+	// 1. If an active server or machine record exists in the database, the host is explicitly NOT decommissioned.
+	// Any active registration or redeployment automatically supersedes previous tombstones.
+	if id != uuid.Nil {
+		var count int64
+		if db.Migrator().HasTable("servers") {
+			_ = db.Table("servers").Where("id = ?", id).Count(&count).Error
+			if count > 0 {
+				_ = UndecommissionHost(db, id, cleanedHost, cleanedIP)
+				return false
+			}
+		}
+		if db.Migrator().HasTable("machines") {
+			_ = db.Table("machines").Where("id = ?", id).Count(&count).Error
+			if count > 0 {
+				_ = UndecommissionHost(db, id, cleanedHost, cleanedIP)
+				return false
+			}
+		}
+	}
+
+	if cleanedHost != "" {
+		var hCount int64
+		if db.Migrator().HasTable("servers") {
+			_ = db.Table("servers").Where("LOWER(hostname) = LOWER(?)", cleanedHost).Count(&hCount).Error
+			if hCount > 0 {
+				_ = UndecommissionHost(db, id, cleanedHost, cleanedIP)
+				return false
+			}
+		}
+	}
+
 	var count int64
 	var conds []string
 	var vals []interface{}
@@ -24,15 +58,8 @@ func IsHostDecommissioned(db *gorm.DB, id uuid.UUID, hostname string, ip string)
 		vals = append(vals, id)
 	}
 
-	cleanedHost := strings.TrimSpace(hostname)
-	if cleanedHost != "" {
-		conds = append(conds, "LOWER(hostname) = LOWER(?)")
-		vals = append(vals, cleanedHost)
-	}
-
 	// Only evaluate IP if neither specific ID nor Hostname were provided (avoids DHCP false-positive bans)
 	if len(conds) == 0 {
-		cleanedIP := strings.TrimSpace(ip)
 		if cleanedIP != "" && cleanedIP != "127.0.0.1" && cleanedIP != "localhost" && cleanedIP != "0.0.0.0" {
 			conds = append(conds, "ip_address = ?")
 			vals = append(vals, cleanedIP)
