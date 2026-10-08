@@ -13,7 +13,6 @@ import (
 	"infrapilot/backend/internal/events"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/services"
-	"infrapilot/backend/internal/utils"
 	"infrapilot/backend/internal/websocket"
 
 	"github.com/gin-gonic/gin"
@@ -127,15 +126,6 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		parsedURLID, _ = uuid.Parse(c.Param("id"))
 	}
 
-	// 0. Check if this host has been permanently deleted / decommissioned
-	if utils.IsHostDecommissioned(database.DB, parsedURLID, req.Hostname, req.IPAddress) {
-		c.JSON(http.StatusGone, gin.H{
-			"error":  "Machine has been permanently deleted and decommissioned by administrator. Telemetry transmission halted.",
-			"status": "decommissioned",
-		})
-		return
-	}
-
 	var machine *models.Machine
 
 	// 1. If explicit server ID passed in URL param
@@ -195,8 +185,8 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		}
 	}
 
-	// 7. Auto-provision distinct server record if this is a newly connected host / OS (and NOT decommissioned)
-	if machine == nil && req.Hostname != "" && !utils.IsHostDecommissioned(database.DB, parsedURLID, req.Hostname, req.IPAddress) {
+	// 7. Auto-provision distinct server record if this is a newly connected host / OS
+	if machine == nil && req.Hostname != "" {
 		newID := uuid.New()
 		if parsedURLID != uuid.Nil {
 			var count int64

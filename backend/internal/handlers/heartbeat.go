@@ -8,7 +8,6 @@ import (
 
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
-	"infrapilot/backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -34,14 +33,6 @@ func Heartbeat(c *gin.Context) {
 	var machineID uuid.UUID
 	if machineIDStr != "" {
 		machineID, _ = uuid.Parse(machineIDStr)
-	}
-
-	if utils.IsHostDecommissioned(database.DB, machineID, req.Hostname, "") {
-		c.JSON(http.StatusGone, gin.H{
-			"error":  "Machine has been permanently deleted and decommissioned by administrator. Telemetry transmission halted.",
-			"status": "decommissioned",
-		})
-		return
 	}
 
 	var machine models.Machine
