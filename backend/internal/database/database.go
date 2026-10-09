@@ -325,6 +325,7 @@ func Connect() {
 		&models.TerminalSession{},
 		&models.TerminalCommand{},
 		&models.RemoteDeploymentRecord{},
+		&models.InstalledSoftware{},
 	)
 
 	if err != nil {
