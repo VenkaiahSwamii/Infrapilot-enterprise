@@ -86,7 +86,7 @@ export default function App() {
               >
                 {/* Main Sidebar Pages */}
                 <Route index element={<EnterpriseDashboard />} />
-                <Route path="terminal" element={<RoleRoute allowedRoles={['admin']}><FleetTerminalPage /></RoleRoute>} />
+                <Route path="terminal" element={<FleetTerminalPage />} />
                 <Route path="synthetic" element={<SyntheticMonitoringPage />} />
                 <Route path="synthetic/:id" element={<SyntheticTestDetailsPage />} />
                 <Route path="network" element={<Navigate to="/sre-latency" replace />} />

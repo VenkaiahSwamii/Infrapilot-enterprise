@@ -32,31 +32,58 @@ export default function LogPatternsTab({ machineId, onSelectPattern }) {
   }, [machineId]);
 
   return (
-    <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div>
-          <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#f8fafc', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Layers size={18} color="#38bdf8" />
-            Error Log Patterns & Aggregated Groups
-          </h3>
-          <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 0' }}>
-            Identifies repetitive error signatures across hosts, services, and containers.
-          </p>
+    <div
+      style={{
+        background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.8) 0%, rgba(10, 15, 29, 0.85) 100%)',
+        backdropFilter: 'blur(16px)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '14px',
+        padding: '20px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '10px',
+              background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(99, 102, 241, 0.25))',
+              border: '1px solid rgba(168, 85, 247, 0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Layers size={18} color="#c084fc" />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '15px', fontWeight: 800, color: '#f8fafc', margin: 0 }}>
+              Error Log Patterns &amp; Aggregated Groups
+            </h3>
+            <p style={{ fontSize: '12px', color: '#94a3b8', margin: '2px 0 0 0' }}>
+              Identifies repetitive error signatures across hosts, services, and containers.
+            </p>
+          </div>
         </div>
+
         <button
           onClick={fetchPatterns}
           disabled={loading}
           style={{
-            background: '#1e293b',
-            border: '1px solid #334155',
+            background: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
             color: '#94a3b8',
-            padding: '6px 12px',
-            borderRadius: '6px',
+            padding: '7px 14px',
+            borderRadius: '8px',
             fontSize: '12px',
+            fontWeight: 600,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
+            transition: 'all 0.2s ease',
           }}
         >
           <RefreshCw size={14} className={loading ? 'spin' : ''} />
@@ -65,11 +92,12 @@ export default function LogPatternsTab({ machineId, onSelectPattern }) {
       </div>
 
       {loading ? (
-        <div style={{ padding: '32px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+        <div style={{ padding: '48px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+          <RefreshCw className="spin" size={20} style={{ margin: '0 auto 10px auto', display: 'block', color: '#38bdf8' }} />
           Analyzing log patterns and aggregating signatures...
         </div>
       ) : patterns.length === 0 ? (
-        <div style={{ padding: '32px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+        <div style={{ padding: '48px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
           No recurring error patterns detected.
         </div>
       ) : (
@@ -79,15 +107,23 @@ export default function LogPatternsTab({ machineId, onSelectPattern }) {
               key={idx}
               onClick={() => onSelectPattern && onSelectPattern(p.Signature)}
               style={{
-                backgroundColor: '#020617',
-                border: '1px solid #1e293b',
-                borderRadius: '8px',
+                backgroundColor: 'rgba(2, 6, 23, 0.7)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                borderRadius: '10px',
                 padding: '16px',
                 cursor: 'pointer',
-                transition: 'border-color 0.2s',
+                transition: 'all 0.2s ease',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#38bdf8')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#1e293b')}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.5)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.06)';
+                e.currentTarget.style.transform = 'none';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -110,11 +146,12 @@ export default function LogPatternsTab({ machineId, onSelectPattern }) {
                 </div>
                 <span
                   style={{
-                    backgroundColor: '#38bdf820',
+                    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                    border: '1px solid rgba(56, 189, 248, 0.3)',
                     color: '#38bdf8',
                     padding: '3px 10px',
                     borderRadius: '12px',
-                    fontSize: '12px',
+                    fontSize: '11px',
                     fontWeight: 800,
                   }}
                 >
@@ -122,16 +159,27 @@ export default function LogPatternsTab({ machineId, onSelectPattern }) {
                 </span>
               </div>
 
-              <div style={{ fontSize: '12px', color: '#94a3b8', margin: '8px 0', fontFamily: 'monospace', backgroundColor: '#090d16', padding: '8px 12px', borderRadius: '4px' }}>
+              <div
+                style={{
+                  fontSize: '12px',
+                  color: '#94a3b8',
+                  margin: '8px 0',
+                  fontFamily: 'monospace',
+                  backgroundColor: '#070b14',
+                  border: '1px solid rgba(255, 255, 255, 0.04)',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                }}
+              >
                 {p.SampleLog || p.sample_log}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', marginTop: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#64748b', marginTop: '10px' }}>
                 <div style={{ display: 'flex', gap: '16px' }}>
                   <span>Services: <strong style={{ color: '#cbd5e1' }}>{(p.Services || p.services || []).join(', ') || 'N/A'}</strong></span>
                   <span>Hosts: <strong style={{ color: '#cbd5e1' }}>{(p.Hosts || p.hosts || []).join(', ') || 'N/A'}</strong></span>
                 </div>
-                <div style={{ display: 'flex', items: 'center', gap: '4px', color: '#38bdf8', fontWeight: 600 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#38bdf8', fontWeight: 600 }}>
                   <span>Filter this pattern</span>
                   <ChevronRight size={14} />
                 </div>

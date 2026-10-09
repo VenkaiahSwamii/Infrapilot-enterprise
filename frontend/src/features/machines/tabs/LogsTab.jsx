@@ -24,12 +24,16 @@ import {
   Layers,
   ChevronRight,
   Sparkles,
-  TerminalSquare
+  TerminalSquare,
+  BookOpen
 } from 'lucide-react';
 import { apiClient } from '../../../api/client.js';
 import { useDashboardStore } from '../../../store/dashboardStore.jsx';
 import { executeMiniSPL, parseSPLPipeline } from '../../../utils/miniSPL.js';
 import MiniSPLStatsWidget from '../../logs/MiniSPLStatsWidget.jsx';
+import VisualFieldExtractorModal from '../../logs/VisualFieldExtractorModal.jsx';
+import SavedExtractionRulesCatalog from '../../logs/SavedExtractionRulesCatalog.jsx';
+import DiscoveredFieldsSidebar from '../../logs/DiscoveredFieldsSidebar.jsx';
 
 export default function LogsTab({ machine }) {
   const machineId = machine?.id || machine?.ID || machine?.Id;
@@ -45,6 +49,12 @@ export default function LogsTab({ machine }) {
   // Mini-SPL Query Engine
   const [splQuery, setSplQuery] = useState('');
   const [activeDrilldown, setActiveDrilldown] = useState(null);
+
+  // Pillar 2: Schema-on-Read states
+  const [isExtractorOpen, setIsExtractorOpen] = useState(false);
+  const [extractorLogText, setExtractorLogText] = useState('');
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [isFieldsSidebarOpen, setIsFieldsSidebarOpen] = useState(true);
 
   // Live Stream Controls
   const [isLiveStreaming, setIsLiveStreaming] = useState(true);
@@ -397,7 +407,7 @@ export default function LogsTab({ machine }) {
               type="text"
               value={splQuery}
               onChange={(e) => setSplQuery(e.target.value)}
-              placeholder='Mini-SPL pipeline: e.g. error | stats count by source   OR   where level="CRITICAL" | sort -timestamp'
+              placeholder='Mini-SPL pipeline: e.g. error | stats count by source   OR   extract "(?<user>\S+)" | count() by user'
               style={{
                 width: '100%',
                 height: '34px',
@@ -433,6 +443,80 @@ export default function LogsTab({ machine }) {
               </button>
             )}
           </div>
+
+          {/* Pillar 2 Quick Schema-on-Read Buttons */}
+          <button
+            type="button"
+            onClick={() => setIsFieldsSidebarOpen(!isFieldsSidebarOpen)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              height: '34px',
+              padding: '0 10px',
+              borderRadius: '6px',
+              backgroundColor: isFieldsSidebarOpen ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+              border: isFieldsSidebarOpen ? '1px solid rgba(99, 102, 241, 0.5)' : '1px solid #1a253a',
+              color: isFieldsSidebarOpen ? '#a5b4fc' : '#94a3b8',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+            title="Toggle Discovered Fields Explorer"
+          >
+            <Layers size={13} />
+            <span>Fields</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsCatalogOpen(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              height: '34px',
+              padding: '0 10px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(99, 102, 241, 0.12)',
+              border: '1px solid rgba(99, 102, 241, 0.35)',
+              color: '#a5b4fc',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+            title="Open Dynamic Extraction Rules Catalog"
+          >
+            <BookOpen size={13} />
+            <span>Catalog</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const sample = processedLogs[0]?.message || logs[0]?.message || '';
+              setExtractorLogText(sample);
+              setIsExtractorOpen(true);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              height: '34px',
+              padding: '0 12px',
+              borderRadius: '6px',
+              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))',
+              border: '1px solid rgba(168, 85, 247, 0.4)',
+              color: '#c084fc',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+            title="Visual 1-Click Schema-on-Read Extractor"
+          >
+            <Sparkles size={13} />
+            <span>Extract</span>
+          </button>
         </div>
 
         {/* Pipeline Chips & Preset Diagnostic Pills */}
@@ -779,170 +863,243 @@ export default function LogsTab({ machine }) {
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. LOG VIEWER CANVAS: TERMINAL MONOSPACE OR STRUCTURED TABLE */}
+      {/* 3. LOG VIEWER CANVAS WITH DISCOVERED FIELDS SIDEBAR */}
       {/* ========================================================================= */}
-      {viewMode === 'terminal' ? (
-        <div 
-          ref={logContainerRef}
-          style={{
-            backgroundColor: '#070a11',
-            border: '1px solid var(--border-soft)',
-            borderRadius: '12px',
-            padding: '16px',
-            minHeight: '480px',
-            maxHeight: '620px',
-            overflowY: 'auto',
-            fontFamily: '"Fira Code", Menlo, Monaco, Consolas, monospace',
-            fontSize: '12px',
-            lineHeight: 1.6,
-            boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.6)'
-          }}
-        >
-          {loading && logs.length === 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px', color: '#06b6d4', gap: '8px' }}>
-              <RefreshCw size={18} className="spin" />
-              <span>Connecting to host telemetry log buffer...</span>
-            </div>
-          ) : processedLogs.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px', color: 'var(--muted)' }}>
-              No log entries match the current filter criteria.
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+        {/* Discovered Fields Sidebar */}
+        {isFieldsSidebarOpen && (
+          <DiscoveredFieldsSidebar
+            discoveredFields={miniSPLResult?.discoveredFields || []}
+            isOpen={isFieldsSidebarOpen}
+            onToggleOpen={() => setIsFieldsSidebarOpen(!isFieldsSidebarOpen)}
+            onSelectFieldFilter={(field, val, type) => {
+              const isNum = type === 'number';
+              const filterPart = isNum ? `${field}:${val}` : `${field}:"${val}"`;
+              setSplQuery((prev) => (prev ? `${prev} ${filterPart}` : filterPart));
+            }}
+            onAggregateField={(field) => {
+              setSplQuery((prev) => (prev ? `${prev} | stats count by ${field}` : `* | stats count by ${field}`));
+            }}
+          />
+        )}
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {viewMode === 'terminal' ? (
+            <div 
+              ref={logContainerRef}
+              style={{
+                backgroundColor: '#070a11',
+                border: '1px solid var(--border-soft)',
+                borderRadius: '12px',
+                padding: '16px',
+                minHeight: '480px',
+                maxHeight: '620px',
+                overflowY: 'auto',
+                fontFamily: '"Fira Code", Menlo, Monaco, Consolas, monospace',
+                fontSize: '12px',
+                lineHeight: 1.6,
+                boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.6)'
+              }}
+            >
+              {loading && logs.length === 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px', color: '#06b6d4', gap: '8px' }}>
+                  <RefreshCw size={18} className="spin" />
+                  <span>Connecting to host telemetry log buffer...</span>
+                </div>
+              ) : processedLogs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '48px', color: 'var(--muted)' }}>
+                  No log entries match the current filter criteria.
+                </div>
+              ) : (
+                processedLogs.map((log, index) => {
+                  const lvlStyle = getLevelStyle(log.level);
+                  const isCopied = copiedLineId === (log.id || index);
+                  const ts = log.timestamp || log.created_at;
+                  const formattedTime = ts ? new Date(ts).toISOString().replace('T', ' ').replace('Z', '') : '0000-00-00 00:00:00';
+
+                  return (
+                    <div
+                      key={log.id || index}
+                      onClick={() => setSelectedLogEntry(log)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '8px',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.12s'
+                      }}
+                      className="terminal-log-row"
+                    >
+                      {/* Timestamp */}
+                      <span style={{ color: '#64748b', userSelect: 'none', flexShrink: 0 }}>
+                        {formattedTime}
+                      </span>
+
+                      {/* Level Badge */}
+                      <span style={{
+                        color: lvlStyle.color,
+                        fontWeight: 700,
+                        minWidth: '55px',
+                        flexShrink: 0,
+                        userSelect: 'none'
+                      }}>
+                        [{lvlStyle.text}]
+                      </span>
+
+                      {/* Source / Facility */}
+                      <span style={{
+                        color: '#94a3b8',
+                        backgroundColor: 'rgba(255,255,255,0.03)',
+                        padding: '0 4px',
+                        borderRadius: '3px',
+                        fontSize: '11px',
+                        flexShrink: 0,
+                        userSelect: 'none'
+                      }}>
+                        [{log.source || 'sys'}]
+                      </span>
+
+                      {/* Log Message */}
+                      <span style={{ color: '#e2e8f0', flex: 1, wordBreak: 'break-word' }}>
+                        {log.message}
+                      </span>
+
+                      {/* Quick Extract Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExtractorLogText(log.message || log.text || log.raw_log || '');
+                          setIsExtractorOpen(true);
+                        }}
+                        style={{
+                          background: 'rgba(99, 102, 241, 0.15)',
+                          border: '1px solid rgba(99, 102, 241, 0.35)',
+                          color: '#c084fc',
+                          cursor: 'pointer',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          flexShrink: 0,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '2px'
+                        }}
+                        className="log-extract-btn"
+                        title="Extract dynamic field from this log entry"
+                      >
+                        <Sparkles size={10} />
+                        <span>Extract</span>
+                      </button>
+
+                      {/* Quick Copy on Hover */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyLine(log);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: isCopied ? '#34d399' : 'var(--muted)',
+                          cursor: 'pointer',
+                          opacity: 0.4,
+                          padding: '2px',
+                          flexShrink: 0
+                        }}
+                        className="log-copy-btn"
+                        title="Copy this line"
+                      >
+                        {isCopied ? <Check size={11} /> : <Copy size={11} />}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
             </div>
           ) : (
-            processedLogs.map((log, index) => {
-              const lvlStyle = getLevelStyle(log.level);
-              const isCopied = copiedLineId === (log.id || index);
-              const ts = log.timestamp || log.created_at;
-              const formattedTime = ts ? new Date(ts).toISOString().replace('T', ' ').replace('Z', '') : '0000-00-00 00:00:00';
-
-              return (
-                <div
-                  key={log.id || index}
-                  onClick={() => setSelectedLogEntry(log)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '8px',
-                    padding: '3px 6px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    transition: 'background-color 0.12s'
-                  }}
-                  className="terminal-log-row"
-                >
-                  {/* Timestamp */}
-                  <span style={{ color: '#64748b', userSelect: 'none', flexShrink: 0 }}>
-                    {formattedTime}
-                  </span>
-
-                  {/* Level Badge */}
-                  <span style={{
-                    color: lvlStyle.color,
-                    fontWeight: 700,
-                    minWidth: '55px',
-                    flexShrink: 0,
-                    userSelect: 'none'
-                  }}>
-                    [{lvlStyle.text}]
-                  </span>
-
-                  {/* Source / Facility */}
-                  <span style={{
-                    color: '#94a3b8',
-                    backgroundColor: 'rgba(255,255,255,0.03)',
-                    padding: '0 4px',
-                    borderRadius: '3px',
-                    fontSize: '11px',
-                    flexShrink: 0,
-                    userSelect: 'none'
-                  }}>
-                    [{log.source || 'sys'}]
-                  </span>
-
-                  {/* Log Message */}
-                  <span style={{ color: '#e2e8f0', flex: 1, wordBreak: 'break-word' }}>
-                    {log.message}
-                  </span>
-
-                  {/* Quick Copy on Hover */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCopyLine(log);
-                    }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: isCopied ? '#34d399' : 'var(--muted)',
-                      cursor: 'pointer',
-                      opacity: 0.4,
-                      padding: '2px',
-                      flexShrink: 0
-                    }}
-                    className="log-copy-btn"
-                    title="Copy this line"
-                  >
-                    {isCopied ? <Check size={11} /> : <Copy size={11} />}
-                  </button>
-                </div>
-              );
-            })
+            /* Structured Table Mode */
+            <div style={{ backgroundColor: '#0d1220', border: '1px solid var(--border-soft)', borderRadius: '12px', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--muted)', fontSize: '11px', textTransform: 'uppercase', backgroundColor: 'rgba(255, 255, 255, 0.02)' }}>
+                    <th style={{ width: '170px', padding: '10px 14px' }}>Timestamp</th>
+                    <th style={{ width: '90px', padding: '10px 14px' }}>Level</th>
+                    <th style={{ width: '100px', padding: '10px 14px' }}>Source</th>
+                    <th style={{ padding: '10px 14px' }}>Message</th>
+                    <th style={{ width: '100px', padding: '10px 14px', textAlign: 'center' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {processedLogs.map((log, index) => {
+                    const lvlStyle = getLevelStyle(log.level);
+                    return (
+                      <tr 
+                        key={log.id || index}
+                        onClick={() => setSelectedLogEntry(log)}
+                        style={{ borderBottom: '1px solid var(--border-soft)', cursor: 'pointer' }}
+                        className="terminal-log-row"
+                      >
+                        <td style={{ padding: '10px 14px', color: 'var(--muted)', fontFamily: 'monospace' }}>
+                          {new Date(log.timestamp || log.created_at).toLocaleString()}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            backgroundColor: lvlStyle.bg,
+                            color: lvlStyle.color,
+                            border: `1px solid ${lvlStyle.border}`
+                          }}>
+                            {lvlStyle.text}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#38bdf8', fontFamily: 'monospace' }}>
+                          {log.source || 'system'}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: '#f1f5f9' }}>
+                          {log.message}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExtractorLogText(log.message || log.text || log.raw_log || '');
+                              setIsExtractorOpen(true);
+                            }}
+                            style={{
+                              background: 'rgba(99, 102, 241, 0.15)',
+                              border: '1px solid rgba(99, 102, 241, 0.35)',
+                              color: '#c084fc',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}
+                            title="Extract dynamic field"
+                          >
+                            <Sparkles size={10} />
+                            <span>Extract</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
-      ) : (
-        /* Structured Table Mode */
-        <div style={{ backgroundColor: '#0d1220', border: '1px solid var(--border-soft)', borderRadius: '12px', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-soft)', color: 'var(--muted)', fontSize: '11px', textTransform: 'uppercase', backgroundColor: 'rgba(255, 255, 255, 0.02)' }}>
-                <th style={{ width: '170px', padding: '10px 14px' }}>Timestamp</th>
-                <th style={{ width: '90px', padding: '10px 14px' }}>Level</th>
-                <th style={{ width: '100px', padding: '10px 14px' }}>Source</th>
-                <th style={{ padding: '10px 14px' }}>Message</th>
-                <th style={{ width: '60px', padding: '10px 14px', textAlign: 'right' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processedLogs.map((log, index) => {
-                const lvlStyle = getLevelStyle(log.level);
-                return (
-                  <tr 
-                    key={log.id || index}
-                    onClick={() => setSelectedLogEntry(log)}
-                    style={{ borderBottom: '1px solid var(--border-soft)', cursor: 'pointer' }}
-                    className="terminal-log-row"
-                  >
-                    <td style={{ padding: '10px 14px', color: 'var(--muted)', fontFamily: 'monospace' }}>
-                      {new Date(log.timestamp || log.created_at).toLocaleString()}
-                    </td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        backgroundColor: lvlStyle.bg,
-                        color: lvlStyle.color,
-                        border: `1px solid ${lvlStyle.border}`
-                      }}>
-                        {lvlStyle.text}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 14px', color: '#38bdf8', fontFamily: 'monospace' }}>
-                      {log.source || 'system'}
-                    </td>
-                    <td style={{ padding: '10px 14px', color: '#f1f5f9' }}>
-                      {log.message}
-                    </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                      <ChevronRight size={14} color="var(--muted)" />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      </div>
 
       {/* ========================================================================= */}
       {/* 4. BOTTOM STATUS BAR & BUFFER STATS */}
@@ -1078,6 +1235,34 @@ export default function LogsTab({ machine }) {
                 }}>
                   {selectedLogEntry.message}
                 </div>
+
+                {/* Extract Fields Action Button */}
+                <div style={{ marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExtractorLogText(selectedLogEntry.message || '');
+                      setSelectedLogEntry(null);
+                      setIsExtractorOpen(true);
+                    }}
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))',
+                      border: '1px solid rgba(168, 85, 247, 0.4)',
+                      color: '#c084fc',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <Sparkles size={12} />
+                    <span>Extract Dynamic Fields from This Log</span>
+                  </button>
+                </div>
               </div>
 
               {/* Raw JSON */}
@@ -1123,6 +1308,30 @@ export default function LogsTab({ machine }) {
         </div>
       )}
 
+      {/* Visual Field Extractor Modal (Pillar 2) */}
+      <VisualFieldExtractorModal
+        isOpen={isExtractorOpen}
+        onClose={() => setIsExtractorOpen(false)}
+        sampleLogText={extractorLogText}
+        logsBuffer={logs}
+        onApplyQuery={(q) => {
+          setSplQuery((prev) => (prev ? `${prev} | ${q}` : q));
+        }}
+      />
+
+      {/* Saved Extraction Rules Catalog (Pillar 2) */}
+      <SavedExtractionRulesCatalog
+        isOpen={isCatalogOpen}
+        onClose={() => setIsCatalogOpen(false)}
+        onApplyQuery={(q) => {
+          setSplQuery((prev) => (prev ? `${prev} | ${q}` : q));
+        }}
+        onOpenNewRuleModal={() => {
+          setExtractorLogText(processedLogs[0]?.message || logs[0]?.message || '');
+          setIsExtractorOpen(true);
+        }}
+      />
+
       {/* Internal Custom CSS */}
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -1130,7 +1339,8 @@ export default function LogsTab({ machine }) {
         .terminal-log-row:hover { 
           background-color: rgba(255, 255, 255, 0.05) !important; 
         }
-        .terminal-log-row:hover .log-copy-btn {
+        .terminal-log-row:hover .log-copy-btn,
+        .terminal-log-row:hover .log-extract-btn {
           opacity: 1 !important;
         }
       `}</style>

@@ -76,6 +76,13 @@ type Repository interface {
 	GetLogStats(filter LogFilter) (*LogStats, error)
 	GetLogPatterns(filter LogFilter) ([]LogPattern, error)
 	GetLogCorrelations(logID uuid.UUID) (*LogCorrelations, error)
+
+	// Pillar 2: Dynamic Extraction Rules
+	GetExtractionRules() ([]models.ExtractionRule, error)
+	CreateExtractionRule(rule *models.ExtractionRule) error
+	UpdateExtractionRule(rule *models.ExtractionRule) error
+	DeleteExtractionRule(id uuid.UUID) error
+	ToggleExtractionRule(id uuid.UUID) (*models.ExtractionRule, error)
 }
 
 type postgresRepository struct{}
@@ -502,3 +509,158 @@ func filterMockLogs(logs []models.Log, level, source, query string) []models.Log
 	}
 	return result
 }
+
+// Pillar 2: Dynamic Extraction Rules
+func (r *postgresRepository) GetExtractionRules() ([]models.ExtractionRule, error) {
+	if database.DB == nil {
+		return getDefaultBuiltinRules(), nil
+	}
+
+	var rules []models.ExtractionRule
+	err := database.DB.Order("is_builtin desc, created_at desc").Find(&rules).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rules) == 0 {
+		builtins := getDefaultBuiltinRules()
+		for i := range builtins {
+			_ = database.DB.Create(&builtins[i]).Error
+		}
+		return builtins, nil
+	}
+
+	return rules, nil
+}
+
+func (r *postgresRepository) CreateExtractionRule(rule *models.ExtractionRule) error {
+	if database.DB == nil {
+		return nil
+	}
+	if rule.ID == uuid.Nil {
+		rule.ID = uuid.New()
+	}
+	if rule.CreatedAt.IsZero() {
+		rule.CreatedAt = time.Now()
+	}
+	rule.UpdatedAt = time.Now()
+	return database.DB.Create(rule).Error
+}
+
+func (r *postgresRepository) UpdateExtractionRule(rule *models.ExtractionRule) error {
+	if database.DB == nil {
+		return nil
+	}
+	rule.UpdatedAt = time.Now()
+	return database.DB.Save(rule).Error
+}
+
+func (r *postgresRepository) DeleteExtractionRule(id uuid.UUID) error {
+	if database.DB == nil {
+		return nil
+	}
+	return database.DB.Where("id = ? AND is_builtin = false", id).Delete(&models.ExtractionRule{}).Error
+}
+
+func (r *postgresRepository) ToggleExtractionRule(id uuid.UUID) (*models.ExtractionRule, error) {
+	if database.DB == nil {
+		return nil, nil
+	}
+	var rule models.ExtractionRule
+	if err := database.DB.First(&rule, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	rule.IsEnabled = !rule.IsEnabled
+	rule.UpdatedAt = time.Now()
+	if err := database.DB.Save(&rule).Error; err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+func getDefaultBuiltinRules() []models.ExtractionRule {
+	now := time.Now()
+	return []models.ExtractionRule{
+		{
+			ID:          uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+			Name:        "Nginx / Apache Combined Access Log",
+			Category:    "Web Server",
+			Description: "Extracts client IP, timestamp, HTTP method, request path, status code, response bytes, and referrer",
+			Source:      "all",
+			Service:     "nginx",
+			RuleType:    "regex",
+			Pattern:     `^(?<client_ip>\S+) \S+ \S+ \[(?<timestamp>[^\]]+)\] "(?<method>[A-Z]+) (?<path>\S+) [^"]*" (?<status>\d{3}) (?<bytes>\d+)`,
+			FieldNames:  "client_ip,timestamp,method,path,status,bytes",
+			SampleLog:   `192.168.1.104 - - [09/Oct/2026:14:32:10 +0000] "GET /api/v1/servers HTTP/1.1" 200 4521 "-" "Mozilla/5.0"`,
+			IsEnabled:   true,
+			IsBuiltin:   true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+			Name:        "SSH / Security Authentication Log",
+			Category:    "Security",
+			Description: "Extracts authentication status (Failed/Accepted), user, client IP, and SSH port",
+			Source:      "auth",
+			Service:     "sshd",
+			RuleType:    "regex",
+			Pattern:     `(?<auth_status>Failed|Accepted) password for (?:invalid user )?(?<user>\S+) from (?<client_ip>\S+) port (?<port>\d+)`,
+			FieldNames:  "auth_status,user,client_ip,port",
+			SampleLog:   `Failed password for invalid user admin from 203.0.113.42 port 49152 ssh2`,
+			IsEnabled:   true,
+			IsBuiltin:   true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          uuid.MustParse("00000000-0000-0000-0000-000000000003"),
+			Name:        "PostgreSQL Slow Query Log",
+			Category:    "Database",
+			Description: "Extracts query execution duration in milliseconds, process ID, and SQL statement",
+			Source:      "all",
+			Service:     "postgresql",
+			RuleType:    "regex",
+			Pattern:     `duration: (?<duration_ms>\d+(?:\.\d+)?) ms\s+statement:\s*(?<query>.+)`,
+			FieldNames:  "duration_ms,query",
+			SampleLog:   `2026-10-09 14:10:02 UTC [14820]: [3-1] user=postgres,db=infrapilot LOG: duration: 428.512 ms statement: SELECT * FROM servers;`,
+			IsEnabled:   true,
+			IsBuiltin:   true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          uuid.MustParse("00000000-0000-0000-0000-000000000004"),
+			Name:        "Docker / Microservice JSON Log",
+			Category:    "Containers",
+			Description: "Parses structured JSON payloads embedded inside log lines",
+			Source:      "docker",
+			Service:     "all",
+			RuleType:    "json",
+			Pattern:     "json",
+			FieldNames:  "level,msg,caller,latency_ms,trace_id,service",
+			SampleLog:   `{"level":"error","service":"auth-service","msg":"token expired","user_id":"usr_9812","latency_ms":18.4}`,
+			IsEnabled:   true,
+			IsBuiltin:   true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          uuid.MustParse("00000000-0000-0000-0000-000000000005"),
+			Name:        "Key-Value Pair Auto-Extractor",
+			Category:    "Generic",
+			Description: "Automatically detects and extracts all key=value, key=\"val\", and key='val' pairs",
+			Source:      "all",
+			Service:     "all",
+			RuleType:    "kv",
+			Pattern:     "kv",
+			FieldNames:  "*",
+			SampleLog:   `level=WARN host=ssa-node-01 action=disk_cleanup freed_bytes=1048576 duration=240ms status=success`,
+			IsEnabled:   true,
+			IsBuiltin:   true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+	}
+}
+

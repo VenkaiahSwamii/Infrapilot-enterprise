@@ -184,3 +184,90 @@ func (h *Handler) GetLogCorrelations(c *gin.Context) {
 
 	c.JSON(http.StatusOK, correlations)
 }
+
+// Pillar 2: Dynamic Extraction Rules
+func (h *Handler) GetExtractionRules(c *gin.Context) {
+	rules, err := h.service.GetExtractionRules()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"rules": rules, "total": len(rules)})
+}
+
+func (h *Handler) CreateExtractionRule(c *gin.Context) {
+	var rule models.ExtractionRule
+	if err := c.ShouldBindJSON(&rule); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if rule.Name == "" || rule.RuleType == "" || rule.Pattern == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name, rule_type, and pattern are required fields"})
+		return
+	}
+
+	if err := h.service.CreateExtractionRule(&rule); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"message": "Extraction rule created successfully", "rule": rule})
+}
+
+func (h *Handler) UpdateExtractionRule(c *gin.Context) {
+	idStr := c.Param("id")
+	ruleID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID format"})
+		return
+	}
+
+	var rule models.ExtractionRule
+	if err := c.ShouldBindJSON(&rule); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	rule.ID = ruleID
+	if err := h.service.UpdateExtractionRule(&rule); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Extraction rule updated successfully", "rule": rule})
+}
+
+func (h *Handler) DeleteExtractionRule(c *gin.Context) {
+	idStr := c.Param("id")
+	ruleID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID format"})
+		return
+	}
+
+	if err := h.service.DeleteExtractionRule(ruleID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Extraction rule deleted successfully"})
+}
+
+func (h *Handler) ToggleExtractionRule(c *gin.Context) {
+	idStr := c.Param("id")
+	ruleID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID format"})
+		return
+	}
+
+	rule, err := h.service.ToggleExtractionRule(ruleID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Extraction rule toggled successfully", "rule": rule})
+}
+

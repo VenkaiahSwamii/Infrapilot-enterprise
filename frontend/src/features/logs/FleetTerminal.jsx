@@ -29,6 +29,7 @@ import {
   Code2,
   HelpCircle,
   Zap,
+  BookOpen,
 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
 import { createLiveEventsSocket } from '../../websocket/liveEvents.js';
@@ -36,6 +37,12 @@ import { getMachineId } from '../../utils/machineId.js';
 import { useServerStore } from '../../store/serverStore.jsx';
 import { executeMiniSPL, getLogFieldValue } from '../../utils/miniSPL.js';
 import MiniSPLStatsWidget from './MiniSPLStatsWidget.jsx';
+import LogDetailsDrawer from './LogDetailsDrawer.jsx';
+import LogPatternsTab from './LogPatternsTab.jsx';
+import VisualFieldExtractorModal from './VisualFieldExtractorModal.jsx';
+import SavedExtractionRulesCatalog from './SavedExtractionRulesCatalog.jsx';
+import DiscoveredFieldsSidebar from './DiscoveredFieldsSidebar.jsx';
+
 
 const MINI_SPL_PRESETS = [
   {
@@ -119,6 +126,12 @@ export default function FleetTerminal({ machine, machineName }) {
   const [activeDrilldown, setActiveDrilldown] = useState(null);
   const [showPresetMenu, setShowPresetMenu] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState(null);
+
+  // Pillar 2: Schema-on-Read states
+  const [isExtractorOpen, setIsExtractorOpen] = useState(false);
+  const [extractorLogText, setExtractorLogText] = useState('');
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [isFieldsSidebarOpen, setIsFieldsSidebarOpen] = useState(false);
 
   // Filters
   const [filterLevel, setFilterLevel] = useState('ALL');
@@ -468,67 +481,285 @@ export default function FleetTerminal({ machine, machineName }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: '#f1f5f9' }}>
-      {/* Top Controls & View Switcher */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        {/* Stream View Indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#0f172a', padding: '6px 14px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-          <TermIcon size={15} color="#38bdf8" />
-          <span style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9' }}>Terminal &amp; Live Stream</span>
+      {/* Top Glassmorphic Navigation Bar & Live Stream Controls */}
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '14px',
+          background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.75) 0%, rgba(10, 15, 29, 0.75) 100%)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '14px',
+          padding: '8px 14px',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.35)',
+        }}
+      >
+        {/* Sleek Pill Capsule Navigation Tabs */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '6px',
+            background: 'rgba(2, 6, 23, 0.6)',
+            padding: '4px',
+            borderRadius: '10px',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+          }}
+        >
+          {/* Tab 1: Terminal & Live Stream */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('live')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: activeTab === 'live' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
+              fontSize: '13px',
+              fontWeight: activeTab === 'live' ? 700 : 600,
+              cursor: 'pointer',
+              background: activeTab === 'live'
+                ? 'linear-gradient(135deg, rgba(14, 165, 233, 0.22) 0%, rgba(99, 102, 241, 0.22) 100%)'
+                : 'transparent',
+              color: activeTab === 'live' ? '#ffffff' : '#94a3b8',
+              boxShadow: activeTab === 'live' ? '0 2px 12px rgba(6, 182, 212, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          >
+            <TermIcon size={15} color={activeTab === 'live' ? '#38bdf8' : '#64748b'} />
+            <span>Terminal &amp; Live Stream</span>
+            <span
+              style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                background: streaming ? '#22c55e' : '#f59e0b',
+                boxShadow: streaming ? '0 0 8px #22c55e' : 'none',
+              }}
+            />
+            <span
+              style={{
+                background: activeTab === 'live' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255, 255, 255, 0.06)',
+                color: activeTab === 'live' ? '#38bdf8' : '#94a3b8',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                fontWeight: 800,
+              }}
+            >
+              {logs.length}
+            </span>
+          </button>
+
+          {/* Tab 2: Pattern Clustering */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('patterns')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: activeTab === 'patterns' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+              fontSize: '13px',
+              fontWeight: activeTab === 'patterns' ? 700 : 600,
+              cursor: 'pointer',
+              background: activeTab === 'patterns'
+                ? 'linear-gradient(135deg, rgba(168, 85, 247, 0.22) 0%, rgba(99, 102, 241, 0.22) 100%)'
+                : 'transparent',
+              color: activeTab === 'patterns' ? '#ffffff' : '#94a3b8',
+              boxShadow: activeTab === 'patterns' ? '0 2px 12px rgba(168, 85, 247, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          >
+            <Layers size={15} color={activeTab === 'patterns' ? '#c084fc' : '#64748b'} />
+            <span>Log Pattern Groups</span>
+            <span
+              style={{
+                background: activeTab === 'patterns' ? 'rgba(168, 85, 247, 0.25)' : 'rgba(255, 255, 255, 0.06)',
+                color: activeTab === 'patterns' ? '#c084fc' : '#94a3b8',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                fontWeight: 800,
+              }}
+            >
+              Patterns
+            </span>
+          </button>
+
+          {/* Tab 3: Schema-on-Read Rules */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('schema')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: activeTab === 'schema' ? '1px solid rgba(6, 182, 212, 0.5)' : '1px solid transparent',
+              fontSize: '13px',
+              fontWeight: activeTab === 'schema' ? 700 : 600,
+              cursor: 'pointer',
+              background: activeTab === 'schema'
+                ? 'linear-gradient(135deg, rgba(6, 182, 212, 0.22) 0%, rgba(59, 130, 246, 0.22) 100%)'
+                : 'transparent',
+              color: activeTab === 'schema' ? '#ffffff' : '#94a3b8',
+              boxShadow: activeTab === 'schema' ? '0 2px 12px rgba(6, 182, 212, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          >
+            <Sparkles size={15} color={activeTab === 'schema' ? '#38bdf8' : '#64748b'} />
+            <span>Schema-on-Read Rules</span>
+            <span
+              style={{
+                background: activeTab === 'schema' ? 'rgba(6, 182, 212, 0.25)' : 'rgba(255, 255, 255, 0.06)',
+                color: activeTab === 'schema' ? '#38bdf8' : '#94a3b8',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                fontWeight: 800,
+              }}
+            >
+              Catalog
+            </span>
+          </button>
         </div>
 
-        {/* Streaming & Pause Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+
+        {/* Right-side Quick Actions & Stream Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Visual Extractor Trigger */}
+          <button
+            type="button"
+            onClick={() => {
+              setExtractorLogText(displayedLogs[0]?.message || logs[logs.length - 1]?.message || '');
+              setIsExtractorOpen(true);
+            }}
+            style={{
+              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.18) 0%, rgba(168, 85, 247, 0.18) 100%)',
+              border: '1px solid rgba(168, 85, 247, 0.4)',
+              color: '#c084fc',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s ease',
+            }}
+            title="Launch Interactive Highlight-to-Extract Visual Builder"
+          >
+            <Sparkles size={14} />
+            <span>Visual Extractor</span>
+          </button>
+
+          {/* Discovered Fields Sidebar Toggle (for Live View) */}
+          {activeTab === 'live' && (
+            <button
+              type="button"
+              onClick={() => setIsFieldsSidebarOpen(!isFieldsSidebarOpen)}
+              style={{
+                background: isFieldsSidebarOpen ? 'rgba(6, 182, 212, 0.18)' : 'rgba(255, 255, 255, 0.04)',
+                border: isFieldsSidebarOpen ? '1px solid rgba(6, 182, 212, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+                color: isFieldsSidebarOpen ? '#38bdf8' : '#94a3b8',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s ease',
+              }}
+              title="Toggle Discovered Schema Fields Sidebar"
+            >
+              <SlidersHorizontal size={14} />
+              <span>Fields ({splExecution.discoveredFields?.length || 0})</span>
+            </button>
+          )}
+
+          {/* Streaming & Pause Controls */}
           {streaming ? (
             <button
+              type="button"
               onClick={() => setStreaming(false)}
               style={{
-                background: '#ef444420',
-                border: '1px solid #ef444450',
-                color: '#ef4444',
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                color: '#f87171',
                 padding: '6px 14px',
-                borderRadius: '6px',
+                borderRadius: '8px',
                 fontSize: '12px',
                 fontWeight: 700,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
+                transition: 'all 0.2s ease',
               }}
             >
               <Pause size={14} />
-              <span>Pause Live</span>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444', animation: 'pulse 1.5s infinite' }} />
+              <span>Pause Stream</span>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
             </button>
           ) : (
             <button
+              type="button"
               onClick={handleResumeLive}
               style={{
-                background: '#22c55e20',
-                border: '1px solid #22c55e50',
-                color: '#22c55e',
+                background: 'rgba(34, 197, 94, 0.15)',
+                border: '1px solid rgba(34, 197, 94, 0.4)',
+                color: '#4ade80',
                 padding: '6px 14px',
-                borderRadius: '6px',
+                borderRadius: '8px',
                 fontSize: '12px',
                 fontWeight: 700,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
+                transition: 'all 0.2s ease',
               }}
             >
               <Play size={14} />
-              <span>Resume Live</span>
+              <span>Resume Stream</span>
               {pausedQueue.length > 0 && (
-                <span style={{ background: '#22c55e', color: '#000000', padding: '2px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 800 }}>
-                  +{pausedQueue.length} new
+                <span style={{ background: '#22c55e', color: '#000000', padding: '1px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 800 }}>
+                  +{pausedQueue.length}
                 </span>
               )}
             </button>
           )}
 
+          {/* Refresh Stream Button */}
           <button
+            type="button"
             onClick={fetchLogsHistory}
-            style={{ background: '#0f172a', border: '1px solid #1e293b', color: '#94a3b8', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+            style={{
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              color: '#94a3b8',
+              padding: '6px 10px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease',
+            }}
+            title="Refresh stream history"
           >
             <RefreshCw size={14} className={loading ? 'spin' : ''} />
           </button>
@@ -537,14 +768,35 @@ export default function FleetTerminal({ machine, machineName }) {
 
       {/* Paused Stream Banner */}
       {!streaming && (
-        <div style={{ background: '#f59e0b15', border: '1px solid #f59e0b40', borderRadius: '8px', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div
+          style={{
+            background: 'linear-gradient(90deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%)',
+            border: '1px solid rgba(245, 158, 11, 0.35)',
+            borderRadius: '10px',
+            padding: '10px 16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <div style={{ fontSize: '13px', fontWeight: 600, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Pause size={15} />
             <span>LIVE STREAM PAUSED — {pausedQueue.length} new log entries buffered while paused.</span>
           </div>
           <button
+            type="button"
             onClick={handleResumeLive}
-            style={{ background: '#f59e0b', color: '#000000', border: 'none', padding: '4px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+            style={{
+              background: '#f59e0b',
+              color: '#000000',
+              border: 'none',
+              padding: '5px 14px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(245, 158, 11, 0.3)',
+            }}
           >
             Resume Stream
           </button>
@@ -561,24 +813,35 @@ export default function FleetTerminal({ machine, machineName }) {
       </div>
 
       {/* Structured Filter Bar & Mini-SPL Engine Controls */}
-      <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '10px', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+      <div
+        style={{
+          background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.7) 0%, rgba(10, 15, 29, 0.75) 100%)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '12px',
+          padding: '12px 16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+        }}
+      >
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
           {/* Node Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '10px', fontWeight: 700, color: '#64748b' }}>NODE:</span>
+            <span style={{ fontSize: '10px', fontWeight: 800, color: '#64748b', letterSpacing: '0.04em' }}>NODE:</span>
             <select
               value={selectedNodeId}
               onChange={(e) => setSelectedNodeId(e.target.value)}
               style={{
-                backgroundColor: '#020617',
-                border: '1px solid #1e293b',
+                backgroundColor: '#070b14',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
                 borderRadius: '6px',
-                padding: '6px 8px',
+                padding: '6px 10px',
                 color: '#f1f5f9',
                 fontSize: '12px',
                 outline: 'none',
                 cursor: 'pointer',
-                maxWidth: '180px',
+                maxWidth: '160px',
               }}
             >
               <option value="ALL">ALL NODES</option>
@@ -590,12 +853,12 @@ export default function FleetTerminal({ machine, machineName }) {
             </select>
           </div>
 
-          {/* Mini-SPL Query Input with Badges & Actions */}
-          <div style={{ flex: 1, minWidth: '320px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+          {/* Mini-SPL Query Input (Clean, No overlapping buttons!) */}
+          <div style={{ flex: 1, minWidth: '280px', position: 'relative', display: 'flex', alignItems: 'center' }}>
             <div
               style={{
                 position: 'absolute',
-                left: '8px',
+                left: '10px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '4px',
@@ -632,10 +895,10 @@ export default function FleetTerminal({ machine, machineName }) {
               }}
               style={{
                 width: '100%',
-                backgroundColor: '#020617',
-                border: searchQuery.includes('|') ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid #1e293b',
+                backgroundColor: '#070b14',
+                border: searchQuery.includes('|') ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid rgba(255, 255, 255, 0.1)',
                 borderRadius: '6px',
-                padding: searchQuery.includes('|') ? '7px 75px 7px 44px' : '7px 75px 7px 30px',
+                padding: searchQuery.includes('|') ? '7px 95px 7px 42px' : '7px 95px 7px 32px',
                 color: '#f1f5f9',
                 fontSize: '12px',
                 fontFamily: searchQuery.includes('|') ? 'monospace' : 'inherit',
@@ -644,7 +907,7 @@ export default function FleetTerminal({ machine, machineName }) {
               }}
             />
 
-            {/* Quick Actions inside Search Bar */}
+            {/* Quick Actions inside Search Bar: Clear X + Presets Menu only */}
             <div style={{ position: 'absolute', right: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
               {searchQuery && (
                 <button
@@ -763,31 +1026,47 @@ export default function FleetTerminal({ machine, machineName }) {
           <SelectFilter label="SOURCE" value={filterSource} onChange={setFilterSource} options={['ALL', 'eventlog', 'journald', 'syslog', 'agent', 'terminal', 'docker', 'system', 'application']} />
 
           {/* Time Range Dropdown */}
-          <SelectFilter label="TIME RANGE" value={filterTimeRange} onChange={setFilterTimeRange} options={['5m', '15m', '30m', '1h', '6h', '24h', '7d', 'ALL']} />
+          <SelectFilter label="TIME" value={filterTimeRange} onChange={setFilterTimeRange} options={['5m', '15m', '30m', '1h', '6h', '24h', '7d', 'ALL']} />
 
           {/* Service Input */}
           <input
             type="text"
-            placeholder="Filter Service (e.g. sshd, nginx)"
+            placeholder="Service (e.g. sshd)"
             value={filterService}
             onChange={(e) => setFilterService(e.target.value)}
             style={{
-              backgroundColor: '#020617',
-              border: '1px solid #1e293b',
+              backgroundColor: '#070b14',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
               borderRadius: '6px',
-              padding: '6px 10px',
+              padding: '5px 10px',
               color: '#f1f5f9',
               fontSize: '12px',
               outline: 'none',
-              width: '160px',
+              width: '130px',
             }}
           />
 
+          {/* Copy logs */}
           <button
+            type="button"
             onClick={handleCopyLogs}
-            style={{ background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              color: copied ? '#4ade80' : '#94a3b8',
+              padding: '5px 10px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s ease',
+            }}
+            title="Copy displayed logs to clipboard"
           >
-            {copied ? <Check size={14} color="#22c55e" /> : <Copy size={14} />}
+            {copied ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
             <span>{copied ? 'Copied' : 'Copy'}</span>
           </button>
         </div>
@@ -880,118 +1159,205 @@ export default function FleetTerminal({ machine, machineName }) {
         />
       )}
 
-      {/* Main Terminal View */}
-      <div style={{ background: '#020617', border: '1px solid #1e293b', borderRadius: '12px', overflow: 'hidden' }}>
-          {/* Dense Professional Log Table */}
-          <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', fontFamily: 'monospace', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: '#0f172a', borderBottom: '1px solid #1e293b', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  <th style={{ padding: '10px 8px', width: '30px', textAlign: 'center' }}></th>
-                  <th style={{ padding: '10px 14px', width: '180px' }}>TIME</th>
-                  <th style={{ padding: '10px 14px', width: '130px' }}>HOST</th>
-                  <th style={{ padding: '10px 14px', width: '130px' }}>SERVICE</th>
-                  <th style={{ padding: '10px 14px', width: '90px' }}>LEVEL</th>
-                  <th style={{ padding: '10px 14px', width: '220px' }}>HARDWARE TELEMETRY</th>
-                  <th style={{ padding: '10px 14px' }}>MESSAGE</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>
-                      {loading ? 'Fetching centralized logs...' : 'No logs match the current search filters.'}
-                    </td>
+      {/* Main Terminal View vs Patterns View vs Schema View */}
+      {activeTab === 'patterns' ? (
+        <LogPatternsTab
+          machineId={effectiveMachineId || machineId}
+          onSelectPattern={(sig) => {
+            setSearchQuery(sig);
+            setActiveTab('live');
+          }}
+        />
+      ) : activeTab === 'schema' ? (
+        <SavedExtractionRulesCatalog
+          isOpen={true}
+          embedded={true}
+          onClose={() => setActiveTab('live')}
+          onApplyQuery={(q) => {
+            setSearchQuery((prev) => (prev ? `${prev} | ${q}` : q));
+            setActiveTab('live');
+          }}
+          onOpenNewRuleModal={() => {
+            setExtractorLogText(displayedLogs[0]?.message || logs[logs.length - 1]?.message || '');
+            setIsExtractorOpen(true);
+          }}
+        />
+      ) : (
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+          {/* Discovered Fields Sidebar */}
+          {isFieldsSidebarOpen && (
+            <DiscoveredFieldsSidebar
+              discoveredFields={splExecution.discoveredFields || []}
+              isOpen={isFieldsSidebarOpen}
+              onToggleOpen={() => setIsFieldsSidebarOpen(!isFieldsSidebarOpen)}
+              onSelectFieldFilter={(field, val, type) => {
+                const isNum = type === 'number';
+                const filterPart = isNum ? `${field}:${val}` : `${field}:"${val}"`;
+                setSearchQuery((prev) => (prev ? `${prev} ${filterPart}` : filterPart));
+              }}
+              onAggregateField={(field) => {
+                setSearchQuery((prev) => (prev ? `${prev} | count() by ${field}` : `count() by ${field}`));
+              }}
+            />
+          )}
+
+          <div style={{ flex: 1, minWidth: 0, background: '#020617', border: '1px solid #1e293b', borderRadius: '12px', overflow: 'hidden' }}>
+            {/* Dense Professional Log Table */}
+            <div style={{ overflowX: 'auto', maxHeight: '600px', overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', fontFamily: 'monospace', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ background: '#0f172a', borderBottom: '1px solid #1e293b', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <th style={{ padding: '10px 14px', width: '180px' }}>TIME</th>
+                    <th style={{ padding: '10px 14px', width: '140px' }}>HOST</th>
+                    <th style={{ padding: '10px 14px', width: '130px' }}>SERVICE</th>
+                    <th style={{ padding: '10px 14px', width: '100px' }}>LEVEL</th>
+                    <th style={{ padding: '10px 14px' }}>MESSAGE</th>
+                    <th style={{ padding: '10px 14px', width: '70px', textAlign: 'center' }}>ACTION</th>
                   </tr>
-                ) : (
-                  displayedLogs.map((l) => {
-                    const isTerminal = l.source === 'terminal';
-                    const isCli = l.service === 'cli';
-                    const isError = l.level === 'ERROR' || l.level === 'CRITICAL' || l.level === 'FATAL';
-                    const rowBg = isTerminal
-                      ? (isCli ? '#312e8125' : (isError ? '#7f1d1d25' : '#064e3b25'))
-                      : 'transparent';
-                    const msgColor = isTerminal
-                      ? (isCli ? '#facc15' : (isError ? '#f87171' : '#4ade80'))
-                      : '#f1f5f9';
+                </thead>
+                <tbody>
+                  {displayedLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>
+                        {loading ? 'Fetching centralized logs...' : 'No logs match the current search filters.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    displayedLogs.map((l) => {
+                      const isTerminal = l.source === 'terminal';
+                      const isCli = l.service === 'cli';
+                      const isError = l.level === 'ERROR' || l.level === 'CRITICAL' || l.level === 'FATAL';
+                      const rowBg = isTerminal
+                        ? (isCli ? '#312e8125' : (isError ? '#7f1d1d25' : '#064e3b25'))
+                        : 'transparent';
+                      const msgColor = isTerminal
+                        ? (isCli ? '#facc15' : (isError ? '#f87171' : '#4ade80'))
+                        : '#f1f5f9';
 
-                    const cleanMsg = getFormattedLogMessage(l);
-                    const isExpanded = expandedLogId === l.id;
-
-                    return (
-                      <React.Fragment key={l.id}>
+                      return (
                         <tr
-                          onClick={() => setExpandedLogId(isExpanded ? null : l.id)}
+                          key={l.id}
+                          onClick={() => setSelectedLog(l)}
                           style={{
                             borderBottom: '1px solid #0f172a',
                             cursor: 'pointer',
                             transition: 'background 0.15s',
-                            background: isExpanded ? '#0f172a' : rowBg,
+                            background: rowBg,
                           }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = '#0f172a')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = isExpanded ? '#0f172a' : rowBg)}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = rowBg)}
                         >
-                          <td style={{ padding: '8px 6px 8px 12px', width: '28px', textAlign: 'center' }}>
-                            {isExpanded ? <ChevronDown size={14} color="#38bdf8" /> : <ChevronRight size={14} color="#64748b" />}
-                          </td>
                           <td style={{ padding: '8px 14px', color: '#94a3b8', whiteSpace: 'nowrap' }}>{l.ingestTs}</td>
                           <td style={{ padding: '8px 14px', color: '#06b6d4', fontWeight: 600 }}>{l.hostname}</td>
                           <td style={{ padding: '8px 14px', color: '#a855f7' }}>{l.service || 'sys'}</td>
                           <td style={{ padding: '8px 14px' }}>
                             <LogLevelBadge level={l.level} />
                           </td>
-                          <td style={{ padding: '8px 14px' }}>
-                            {getHardwareBadges(l)}
-                          </td>
                           <td style={{ padding: '8px 14px', color: msgColor, wordBreak: 'break-word', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
-                            {cleanMsg}
+                            {l.message}
+                          </td>
+                          <td style={{ padding: '8px 14px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExtractorLogText(l.message || l.text || l.raw_log || '');
+                                setIsExtractorOpen(true);
+                              }}
+                              title="Extract dynamic field from this log entry"
+                              style={{
+                                background: 'rgba(99, 102, 241, 0.15)',
+                                border: '1px solid rgba(99, 102, 241, 0.35)',
+                                color: '#c084fc',
+                                padding: '3px 7px',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                              }}
+                            >
+                              <Sparkles size={10} />
+                              <span>Extract</span>
+                            </button>
                           </td>
                         </tr>
-                        {isExpanded && (
-                          <tr style={{ background: '#090d16', borderBottom: '1px solid #1e293b' }}>
-                            <td colSpan={7} style={{ padding: '12px 16px' }}>
-                              <InlineLogEventDetails log={l} />
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })
-                )}
-                <tr ref={termBottomRef} />
-              </tbody>
-            </table>
-          </div>
+                      );
+                    })
+                  )}
+                  <tr ref={termBottomRef} />
+                </tbody>
+              </table>
+            </div>
 
-          {/* Interactive Command Bar */}
-          <form onSubmit={handleExecuteCommand} style={{ background: '#090d16', borderTop: '1px solid #1e293b', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ color: '#38bdf8', fontWeight: 800, fontSize: '13px', fontFamily: 'monospace' }}>$</span>
-            <input
-              type="text"
-              placeholder={`Execute CLI command on ${hostLabel}...`}
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              disabled={executing}
-              style={{
-                flex: 1,
-                background: 'transparent',
-                border: 'none',
-                color: '#f8fafc',
-                fontSize: '13px',
-                fontFamily: 'monospace',
-                outline: 'none',
-              }}
-            />
-            <button
-              type="submit"
-              disabled={executing || !command.trim()}
-              style={{ background: '#0284c7', border: 'none', color: '#ffffff', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <Send size={13} />
-              <span>Exec</span>
-            </button>
-          </form>
+            {/* Interactive Command Bar */}
+            <form onSubmit={handleExecuteCommand} style={{ background: '#090d16', borderTop: '1px solid #1e293b', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ color: '#38bdf8', fontWeight: 800, fontSize: '13px', fontFamily: 'monospace' }}>$</span>
+              <input
+                type="text"
+                placeholder={`Execute CLI command on ${hostLabel}...`}
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                disabled={executing}
+                style={{
+                  flex: 1,
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#f8fafc',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  outline: 'none',
+                }}
+              />
+              <button
+                type="submit"
+                disabled={executing || !command.trim()}
+                style={{ background: '#0284c7', border: 'none', color: '#ffffff', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Send size={13} />
+                <span>Exec</span>
+              </button>
+            </form>
+          </div>
         </div>
+      )}
+
+      {/* Slide-out Log Details Drawer */}
+      <LogDetailsDrawer
+        log={selectedLog}
+        onClose={() => setSelectedLog(null)}
+        onExtractField={(text) => {
+          setExtractorLogText(text);
+          setIsExtractorOpen(true);
+        }}
+      />
+
+      {/* Visual Field Extractor Modal (Pillar 2) */}
+      <VisualFieldExtractorModal
+        isOpen={isExtractorOpen}
+        onClose={() => setIsExtractorOpen(false)}
+        sampleLogText={extractorLogText}
+        logsBuffer={logs}
+        onApplyQuery={(q) => {
+          setSearchQuery((prev) => (prev ? `${prev} | ${q}` : q));
+        }}
+      />
+
+      {/* Saved Extraction Rules Catalog (Pillar 2) */}
+      <SavedExtractionRulesCatalog
+        isOpen={isCatalogOpen}
+        onClose={() => setIsCatalogOpen(false)}
+        onApplyQuery={(q) => {
+          setSearchQuery((prev) => (prev ? `${prev} | ${q}` : q));
+        }}
+        onOpenNewRuleModal={() => {
+          setExtractorLogText(displayedLogs[0]?.message || logs[logs.length - 1]?.message || '');
+          setIsExtractorOpen(true);
+        }}
+      />
+
     </div>
   );
 }
@@ -1039,16 +1405,35 @@ function StatBadge({ label, count, color, active, onClick }) {
     <div
       onClick={onClick}
       style={{
-        background: active ? `${color}20` : '#0f172a',
-        border: `1px solid ${active ? color : '#1e293b'}`,
-        borderRadius: '8px',
+        background: active
+          ? `linear-gradient(135deg, ${color}20 0%, rgba(15, 23, 42, 0.85) 100%)`
+          : 'linear-gradient(180deg, rgba(15, 23, 42, 0.7) 0%, rgba(10, 15, 29, 0.7) 100%)',
+        border: active ? `1px solid ${color}` : '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '10px',
         padding: '10px 14px',
         cursor: 'pointer',
-        transition: 'all 0.2s',
+        boxShadow: active ? `0 4px 16px ${color}25` : '0 2px 8px rgba(0, 0, 0, 0.25)',
+        transition: 'all 0.2s ease',
+      }}
+      onMouseEnter={(e) => {
+        if (!active) {
+          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+          e.currentTarget.style.transform = 'translateY(-1px)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!active) {
+          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          e.currentTarget.style.transform = 'none';
+        }
       }}
     >
-      <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: '18px', fontWeight: 800, color: color, marginTop: '2px' }}>{count}</div>
+      <div style={{ fontSize: '10px', fontWeight: 800, color: active ? color : '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {label}
+      </div>
+      <div style={{ fontSize: '20px', fontWeight: 800, color: color, marginTop: '2px' }}>
+        {count}
+      </div>
     </div>
   );
 }
@@ -1056,23 +1441,26 @@ function StatBadge({ label, count, color, active, onClick }) {
 function SelectFilter({ label, value, onChange, options }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-      <span style={{ fontSize: '10px', fontWeight: 700, color: '#64748b' }}>{label}:</span>
+      <span style={{ fontSize: '10px', fontWeight: 800, color: '#64748b', letterSpacing: '0.04em' }}>{label}:</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         style={{
-          backgroundColor: '#020617',
-          border: '1px solid #1e293b',
+          backgroundColor: '#070b14',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
           borderRadius: '6px',
-          padding: '4px 8px',
+          padding: '5px 8px',
           color: '#f1f5f9',
           fontSize: '12px',
           outline: 'none',
           cursor: 'pointer',
+          transition: 'border-color 0.2s ease',
         }}
+        onFocus={(e) => (e.target.style.borderColor = '#38bdf8')}
+        onBlur={(e) => (e.target.style.borderColor = 'rgba(255, 255, 255, 0.1)')}
       >
         {options.map((opt) => (
-          <option key={opt} value={opt}>
+          <option key={opt} value={opt} style={{ background: '#090d16', color: '#f1f5f9' }}>
             {opt}
           </option>
         ))}
