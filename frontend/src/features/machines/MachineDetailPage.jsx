@@ -10,10 +10,7 @@ import StorageTab from './tabs/StorageTab.jsx';
 import DockerTab from './tabs/DockerTab.jsx';
 import KubernetesTab from './tabs/KubernetesTab.jsx';
 import LogsTab from './tabs/LogsTab.jsx';
-import TerminalTab from './tabs/TerminalTab.jsx';
-import FilesTab from './tabs/FilesTab.jsx';
 import SoftwareTab from './tabs/SoftwareTab.jsx';
-import HistoryTab from './tabs/HistoryTab.jsx';
 import {
   ArrowLeft,
   RefreshCw,
@@ -47,10 +44,7 @@ const TABS = [
   { id: 'docker', label: 'Docker', component: DockerTab },
   { id: 'kubernetes', label: 'Kubernetes', component: KubernetesTab },
   { id: 'logs', label: 'Logs', component: LogsTab },
-  { id: 'terminal', label: 'Terminal', component: TerminalTab },
-  { id: 'files', label: 'Files', component: FilesTab },
   { id: 'software', label: 'Software', component: SoftwareTab },
-  { id: 'history', label: 'History', component: HistoryTab },
 ];
 
 export default function MachineDetailPage() {
@@ -355,18 +349,6 @@ export default function MachineDetailPage() {
                 >
                   <ShieldCheck size={14} color="#22c55e" />
                   <span>Run Latency Diagnostic</span>
-                </button>
-
-                <button
-                  className="menu-item"
-                  type="button"
-                  onClick={() => {
-                    setShowMoreMenu(false);
-                    setActiveTab('terminal');
-                  }}
-                >
-                  <Terminal size={14} color="#a855f7" />
-                  <span>Switch to Terminal Tab</span>
                 </button>
 
                 <div className="menu-divider" />

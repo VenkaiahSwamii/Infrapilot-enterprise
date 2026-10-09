@@ -1,4 +1,4 @@
-import { apiGet } from './client.js';
+import { apiGet, apiPost } from './client.js';
 
 export function listMachines() {
   return apiGet('/machines').then((payload) => {
@@ -44,7 +44,23 @@ export function getMachineStorage(id) {
 }
 
 export function getMachineSoftware(id) {
-  return apiGet(`/machines/${id}/software`);
+  return apiGet(`/machines/${id}/software`).catch(() => apiGet(`/software/${id}`));
+}
+
+export function updateSoftwarePackage(machineId, pkg) {
+  return apiPost('/software/update', { machine_id: machineId, package: pkg });
+}
+
+export function installSoftwarePackage(machineId, pkg) {
+  return apiPost('/software/install', { machine_id: machineId, package: pkg });
+}
+
+export function removeSoftwarePackage(machineId, pkg) {
+  return apiPost('/software/remove', { machine_id: machineId, package: pkg });
+}
+
+export function patchAllSoftwarePackages(machineId) {
+  return apiPost('/software/patch-all', { machine_id: machineId });
 }
 
 export function getMachineHistory(id, range = '1h') {
