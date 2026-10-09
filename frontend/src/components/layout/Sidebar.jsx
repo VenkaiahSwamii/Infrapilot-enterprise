@@ -31,14 +31,13 @@ export default function Sidebar({ collapsed, userProfile }) {
 
   const navItems = useMemo(() => [
     { id: 'overview', label: 'Overview', icon: Home, path: '/' },
-    { id: 'terminal', label: 'Fleet Terminal', icon: Terminal, path: '/terminal', badge: 'CLI', badgeColor: '#0284c7' },
-    { id: 'synthetic', label: 'Synthetic Probes', icon: Globe, path: '/synthetic', badge: 'PROBE', badgeColor: '#6366f1' },
-    { id: 'sre', label: 'SRE Disk Space', icon: HardDrive, path: '/sre-disk', badge: 'DISK', badgeColor: '#d97706' },
-    { id: 'sre', label: 'Crash & Service Health', icon: Zap, path: '/sre-crash', badge: 'SRE', badgeColor: '#e11d48' },
-    { id: 'sre', label: 'Latency & Gateway', icon: Radio, path: '/sre-latency', badge: 'SLO', badgeColor: '#7c3aed' },
+    { id: 'terminal', label: 'Fleet Terminal', icon: Terminal, path: '/terminal' },
+    { id: 'sre', label: 'SRE Disk Space', icon: HardDrive, path: '/sre-disk' },
+    { id: 'sre', label: 'Crash & Service Health', icon: Zap, path: '/sre-crash' },
+    { id: 'sre', label: 'Latency & Gateway', icon: Radio, path: '/sre-latency' },
     { id: 'machines', label: 'Machines', icon: Server, path: '/infrastructure' },
-    { id: 'docker', label: 'Docker', icon: Layers, path: '/docker', badge: 'CONTAINER', badgeColor: '#06b6d4' },
-    { id: 'kubernetes', label: 'Kubernetes', icon: Network, path: '/kubernetes', badge: 'K8S', badgeColor: '#a855f7' },
+    { id: 'docker', label: 'Docker', icon: Layers, path: '/docker' },
+    { id: 'kubernetes', label: 'Kubernetes', icon: Network, path: '/kubernetes' },
     { id: 'metrics', label: 'Metrics', icon: Activity, path: '/live-metrics' },
     {
       id: 'alerts',
@@ -48,10 +47,9 @@ export default function Sidebar({ collapsed, userProfile }) {
       badge: activeCount > 0 ? (activeCount > 99 ? '99+' : activeCount) : null,
       badgeColor: '#ef4444',
     },
-    { id: 'analytics', label: 'Analytics', icon: TrendingUp, path: '/analytics' },
     { id: 'reports', label: 'Reports', icon: FileText, path: '/reports' },
     { id: 'agents', label: 'Agents', icon: Bot, path: '/agents' },
-    { id: 'users', label: 'User Management', icon: Users, path: '/admin/users', badge: 'RBAC', badgeColor: '#38bdf8' },
+    { id: 'users', label: 'User Management', icon: Users, path: '/admin/users' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/admin/settings' },
   ], [activeCount]);
 
@@ -112,7 +110,7 @@ export default function Sidebar({ collapsed, userProfile }) {
               className={`nav-item-btn ${isActive ? 'active' : ''}`}
               onClick={() => navigate(item.path)}
               type="button"
-              title={item.label}
+              title={collapsed ? item.label : undefined}
             >
               <Icon size={17} className="nav-item-icon" />
               {!collapsed && <span className="nav-item-label">{item.label}</span>}
