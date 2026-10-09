@@ -1,5 +1,5 @@
 param(
-    [string]$ServerURL = "http://192.168.1.9:8080"
+    [string]$ServerURL = "http://192.168.1.86:8080"
 )
 
 # Requires administrator privileges to update C:\Program Files\InfraPilot
