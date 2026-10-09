@@ -3,7 +3,7 @@
 # Installs agent as a native Windows Service (InfraPilotAgent)
 # ==============================================================================
 param(
-    [string]$ServerURL = "http://192.168.1.86:8080",
+    [string]$ServerURL = "http://192.168.1.9:8080",
     [string]$EnrollToken = ""
 )
 
