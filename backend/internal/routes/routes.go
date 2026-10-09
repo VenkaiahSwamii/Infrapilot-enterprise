@@ -307,6 +307,13 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 				logsGroup.GET("/stats", logsHandler.GetLogStats)
 				logsGroup.GET("/patterns", logsHandler.GetLogPatterns)
 				logsGroup.GET("/:id/correlations", logsHandler.GetLogCorrelations)
+
+				// Pillar 2: Dynamic Extraction Rules Catalog & Schema Management
+				logsGroup.GET("/extraction-rules", logsHandler.GetExtractionRules)
+				logsGroup.POST("/extraction-rules", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator), logsHandler.CreateExtractionRule)
+				logsGroup.PUT("/extraction-rules/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator), logsHandler.UpdateExtractionRule)
+				logsGroup.DELETE("/extraction-rules/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin), logsHandler.DeleteExtractionRule)
+				logsGroup.PATCH("/extraction-rules/:id/toggle", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleDevOps, models.RoleOperator), logsHandler.ToggleExtractionRule)
 			}
 			protected.GET("/machines/:id/logs", logsHandler.GetMachineLogs)
 

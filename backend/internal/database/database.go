@@ -266,6 +266,7 @@ func Connect() {
 		&models.KubernetesEvent{},
 		&models.LinuxLog{},
 		&models.LogEntry{},
+		&models.ExtractionRule{},
 		&models.AuditLog{},
 		&models.Report{},
 		&models.DockerHost{},

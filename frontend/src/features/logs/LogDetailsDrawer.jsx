@@ -13,11 +13,12 @@ import {
   Activity,
   FileText,
   ExternalLink,
-  Code
+  Code,
+  Sparkles
 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
 
-export default function LogDetailsDrawer({ log, onClose }) {
+export default function LogDetailsDrawer({ log, onClose, onExtractField }) {
   const [showRawModal, setShowRawModal] = useState(false);
   const [correlations, setCorrelations] = useState(null);
   const [loadingCorrelations, setLoadingCorrelations] = useState(false);
@@ -150,7 +151,7 @@ export default function LogDetailsDrawer({ log, onClose }) {
           </div>
 
           {/* Action Bar */}
-          <div style={{ marginBottom: '24px', display: 'flex', gap: '10px' }}>
+          <div style={{ marginBottom: '24px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
             <button
               onClick={() => setShowRawModal(true)}
               style={{
@@ -170,6 +171,28 @@ export default function LogDetailsDrawer({ log, onClose }) {
               <Code size={14} />
               <span>View Raw Log</span>
             </button>
+
+            {onExtractField && (
+              <button
+                onClick={() => onExtractField(log.message || log.text || log.raw_log || '')}
+                style={{
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  border: '1px solid rgba(99, 102, 241, 0.4)',
+                  color: '#a5b4fc',
+                  padding: '8px 14px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <Sparkles size={14} color="#818cf8" />
+                <span>Extract Fields (Schema-on-Read)</span>
+              </button>
+            )}
           </div>
 
           {/* Structured Fields Section */}

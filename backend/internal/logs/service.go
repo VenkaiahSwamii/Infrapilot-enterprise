@@ -72,3 +72,25 @@ func (s *Service) GetLogPatterns(filter LogFilter) ([]LogPattern, error) {
 func (s *Service) GetLogCorrelations(logID uuid.UUID) (*LogCorrelations, error) {
 	return s.repo.GetLogCorrelations(logID)
 }
+
+// Pillar 2: Dynamic Extraction Rules
+func (s *Service) GetExtractionRules() ([]models.ExtractionRule, error) {
+	return s.repo.GetExtractionRules()
+}
+
+func (s *Service) CreateExtractionRule(rule *models.ExtractionRule) error {
+	return s.repo.CreateExtractionRule(rule)
+}
+
+func (s *Service) UpdateExtractionRule(rule *models.ExtractionRule) error {
+	return s.repo.UpdateExtractionRule(rule)
+}
+
+func (s *Service) DeleteExtractionRule(id uuid.UUID) error {
+	return s.repo.DeleteExtractionRule(id)
+}
+
+func (s *Service) ToggleExtractionRule(id uuid.UUID) (*models.ExtractionRule, error) {
+	return s.repo.ToggleExtractionRule(id)
+}
+
