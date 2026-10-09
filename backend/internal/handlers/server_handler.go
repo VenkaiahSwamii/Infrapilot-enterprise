@@ -372,6 +372,37 @@ func (h *ServerHandler) DeleteServer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Server permanently deleted and decommissioned successfully"})
 }
 
+func (h *ServerHandler) PurgeOfflineServers(c *gin.Context) {
+	usernameVal, _ := c.Get("username")
+	username := "admin"
+	if usernameVal != nil {
+		username = fmt.Sprintf("%v", usernameVal)
+	}
+
+	if database.DB == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "Database not available", "purged_count": 0})
+		return
+	}
+
+	var offlineServers []models.Server
+	if err := database.DB.Where("status = 'OFFLINE' OR online = ?", false).Find(&offlineServers).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	purgedCount := 0
+	for _, s := range offlineServers {
+		_ = utils.PurgeServerCascade(database.DB, s.ID, s.Hostname, s.IPAddress, username, "Purged during offline fleet cleanup")
+		purgedCount++
+	}
+
+	utils.LogAudit(username, uuid.Nil, fmt.Sprintf("Bulk purged %d stale offline servers", purgedCount), "Success")
+	c.JSON(http.StatusOK, gin.H{
+		"message":      fmt.Sprintf("Successfully cleaned %d offline servers", purgedCount),
+		"purged_count": purgedCount,
+	})
+}
+
 func (h *ServerHandler) ServerHeartbeat(c *gin.Context) {
 	idStr := c.Param("id")
 	if idStr == "" {

@@ -126,6 +126,10 @@ export default function FleetTerminal({ machine, machineName }) {
   const [activeDrilldown, setActiveDrilldown] = useState(null);
   const [showPresetMenu, setShowPresetMenu] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState(null);
+  const [selectedLog, setSelectedLog] = useState(null);
+
+  // Tab Navigation state
+  const [activeTab, setActiveTab] = useState('live');
 
   // Pillar 2: Schema-on-Read states
   const [isExtractorOpen, setIsExtractorOpen] = useState(false);

@@ -486,6 +486,7 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.POST("/servers", adminOnly, serverHandler.RegisterServer)
 			protected.PATCH("/servers/:id", adminOnly, serverHandler.UpdateServer)
 			protected.DELETE("/servers/:id", adminOnly, serverHandler.DeleteServer)
+			protected.POST("/servers/purge-offline", adminOnly, serverHandler.PurgeOfflineServers)
 			protected.POST("/servers/:id/remote-uninstall", adminOnly, remoteDeployHandler.ExecuteUninstall)
 			protected.POST("/servers/:id/block", adminOnly, serverHandler.BlockServer)
 			protected.POST("/servers/:id/unblock", adminOnly, serverHandler.UnblockServer)

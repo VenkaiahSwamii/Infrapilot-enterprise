@@ -6,6 +6,7 @@ import { useWebSocketConnection } from '../../websocket/hooks.js';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
 import { getProfile } from '../../api/auth.js';
 import { X, CheckCircle, AlertTriangle, AlertCircle, Info } from 'lucide-react';
+import ErrorBoundary from '../common/ErrorBoundary.jsx';
 
 const UserProfileContext = createContext(null);
 
@@ -155,7 +156,9 @@ export default function Layout() {
           <Topbar userProfile={userProfile} />
           
           <main className="layout-content">
-            <Outlet />
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
           </main>
         </div>
 

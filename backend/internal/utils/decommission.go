@@ -43,40 +43,61 @@ func PurgeServerCascade(db *gorm.DB, id uuid.UUID, hostname string, ip string, u
 		_ = db.Exec("DELETE FROM decommissioned_hosts").Error
 	}
 
-	// 2. Child tables indexed by machine_id (UUID)
+	// 2. Gather all matching server IDs
+	idSet := make(map[uuid.UUID]bool)
 	if id != uuid.Nil {
-		machineIdTables := []string{
-			"linux_metrics", "linux_dockers", "linux_kubernetes", "linux_processes",
-			"linux_services", "linux_logs", "logs", "linux_alerts", "linux_networks",
-			"linux_storages", "linux_servers", "metrics", "historical_metrics",
-			"audit_logs", "user_host_permissions", "terminal_commands", "terminal_sessions",
-			"remediation_jobs", "workflow_executions", "incidents",
-		}
+		idSet[id] = true
+	}
 
-		for _, tbl := range machineIdTables {
-			if db.Migrator().HasTable(tbl) {
-				_ = db.Exec("DELETE FROM "+tbl+" WHERE machine_id = ?", id).Error
+	if db.Migrator().HasTable("servers") {
+		var matched []uuid.UUID
+		if cleanedHost != "" && cleanedIP != "" && cleanedIP != "127.0.0.1" && cleanedIP != "localhost" && cleanedIP != "0.0.0.0" {
+			_ = db.Table("servers").Where("LOWER(hostname) = LOWER(?) OR ip_address = ?", cleanedHost, cleanedIP).Pluck("id", &matched).Error
+		} else if cleanedHost != "" {
+			_ = db.Table("servers").Where("LOWER(hostname) = LOWER(?)", cleanedHost).Pluck("id", &matched).Error
+		} else if cleanedIP != "" && cleanedIP != "127.0.0.1" && cleanedIP != "localhost" && cleanedIP != "0.0.0.0" {
+			_ = db.Table("servers").Where("ip_address = ?", cleanedIP).Pluck("id", &matched).Error
+		}
+		for _, mid := range matched {
+			if mid != uuid.Nil {
+				idSet[mid] = true
 			}
 		}
+	}
 
-		// 3. Child tables indexed by server_id (UUID)
-		serverIdTables := []string{
-			"docker_containers", "docker_images", "docker_volumes", "docker_networks",
-			"docker_events", "docker_hosts", "kubernetes_clusters", "ai_recommendations",
-			"ai_predictions", "ai_health_scores",
+	machineIdTables := []string{
+		"linux_metrics", "linux_dockers", "linux_kubernetes", "linux_processes",
+		"linux_services", "linux_logs", "logs", "linux_alerts", "linux_networks",
+		"linux_storages", "linux_servers", "metrics", "historical_metrics",
+		"audit_logs", "user_host_permissions", "terminal_commands", "terminal_sessions",
+		"remediation_jobs", "workflow_executions", "incidents",
+	}
+
+	serverIdTables := []string{
+		"docker_containers", "docker_images", "docker_volumes", "docker_networks",
+		"docker_events", "docker_hosts", "kubernetes_clusters", "ai_recommendations",
+		"ai_predictions", "ai_health_scores",
+	}
+
+	// 3. Delete from child tables for all collected IDs
+	for mid := range idSet {
+		for _, tbl := range machineIdTables {
+			if db.Migrator().HasTable(tbl) {
+				_ = db.Exec("DELETE FROM "+tbl+" WHERE machine_id = ?", mid).Error
+			}
 		}
 
 		for _, tbl := range serverIdTables {
 			if db.Migrator().HasTable(tbl) {
-				_ = db.Exec("DELETE FROM "+tbl+" WHERE server_id = ?", id).Error
+				_ = db.Exec("DELETE FROM "+tbl+" WHERE server_id = ?", mid).Error
 			}
 		}
 	}
 
 	// 4. Delete from central servers table
 	if db.Migrator().HasTable("servers") {
-		if id != uuid.Nil {
-			_ = db.Exec("DELETE FROM servers WHERE id = ?", id).Error
+		for mid := range idSet {
+			_ = db.Exec("DELETE FROM servers WHERE id = ?", mid).Error
 		}
 		if cleanedHost != "" {
 			_ = db.Exec("DELETE FROM servers WHERE LOWER(hostname) = LOWER(?)", cleanedHost).Error
@@ -88,8 +109,8 @@ func PurgeServerCascade(db *gorm.DB, id uuid.UUID, hostname string, ip string, u
 
 	// 5. Delete from legacy machines table if exists
 	if db.Migrator().HasTable("machines") {
-		if id != uuid.Nil {
-			_ = db.Exec("DELETE FROM machines WHERE id = ?", id).Error
+		for mid := range idSet {
+			_ = db.Exec("DELETE FROM machines WHERE id = ?", mid).Error
 		}
 		if cleanedHost != "" {
 			_ = db.Exec("DELETE FROM machines WHERE LOWER(hostname) = LOWER(?)", cleanedHost).Error
@@ -101,3 +122,4 @@ func PurgeServerCascade(db *gorm.DB, id uuid.UUID, hostname string, ip string, u
 
 	return nil
 }
+

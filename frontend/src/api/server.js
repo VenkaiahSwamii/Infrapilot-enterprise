@@ -55,3 +55,7 @@ export function getServerHistory(id, range = '1h') {
 export async function rotateServerKey(id) {
   return apiPost(`/servers/${id}/key-rotation`);
 }
+
+export async function purgeOfflineServers() {
+  return apiPost('/servers/purge-offline');
+}

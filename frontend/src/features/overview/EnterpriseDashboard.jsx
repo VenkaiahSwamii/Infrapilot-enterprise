@@ -127,7 +127,7 @@ export default function EnterpriseDashboard() {
   const navigate = useNavigate();
   const { activeCount } = useAlertStore();
   const { addToast } = useDashboardStore();
-  const { servers: globalServers, liveMetricsMap: globalLiveMetrics } = useServerStore();
+  const { servers: globalServers, liveMetricsMap: globalLiveMetrics, purgeOfflineServers, fetchServers } = useServerStore();
 
   // State pre-populated instantly from global store to avoid 1-second blank flash on mount
   const [machines, setMachines] = useState(() => (Array.isArray(globalServers) && globalServers.length > 0 ? globalServers : []));
@@ -258,6 +258,27 @@ export default function EnterpriseDashboard() {
       document.removeEventListener('mousedown', handleOutside);
     };
   }, []);
+
+  const handlePurgeOffline = async () => {
+    try {
+      if (purgeOfflineServers) {
+        await purgeOfflineServers();
+      }
+      await fetchData();
+      if (fetchServers) await fetchServers();
+      addToast({
+        title: 'Offline Nodes Cleaned',
+        message: 'Successfully purged stale offline machine records from fleet registry.',
+        type: 'success',
+      });
+    } catch (err) {
+      addToast({
+        title: 'Cleanup Error',
+        message: err.message || 'Failed to clean offline machines',
+        type: 'error',
+      });
+    }
+  };
 
   // Fetch real backend data
   const fetchData = useCallback(async () => {
@@ -937,6 +958,31 @@ export default function EnterpriseDashboard() {
                 >
                   Offline ({offlineCount})
                 </button>
+                {offlineCount > 0 && (
+                  <button
+                    type="button"
+                    className="chip-btn"
+                    onClick={handlePurgeOffline}
+                    style={{
+                      border: '1px solid rgba(239, 68, 68, 0.35)',
+                      background: 'rgba(239, 68, 68, 0.12)',
+                      color: '#f87171',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      transition: 'all 0.2s ease',
+                    }}
+                    title="Purge all stale offline host records"
+                  >
+                    <Trash2 size={12} color="#f87171" />
+                    <span>Clean Offline</span>
+                  </button>
+                )}
               </div>
 
               {/* View Switcher: Table vs Cards */}

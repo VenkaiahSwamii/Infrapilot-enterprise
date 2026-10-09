@@ -210,6 +210,38 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 		}
 	}
 
+	// 5. Auto-provision machine record if newly reporting
+	if machine == nil && (input.Hostname != "" || input.MachineID != uuid.Nil) {
+		mID := input.MachineID
+		if mID == uuid.Nil {
+			mID = uuid.New()
+		}
+		host := input.Hostname
+		if host == "" {
+			host = "node-" + mID.String()[:8]
+		}
+		newMachine := &models.Machine{
+			ID:           mID,
+			Name:         host,
+			Hostname:     host,
+			IPAddress:    input.IPAddress,
+			OS:           input.OS,
+			Status:       "ONLINE",
+			Online:       true,
+			HealthScore:  100,
+			LastSeen:     time.Now().UTC(),
+			CreatedAt:    time.Now().UTC(),
+			UpdatedAt:    time.Now().UTC(),
+			APIKey:       "ip_live_" + strings.ReplaceAll(uuid.New().String(), "-", ""),
+			Organization: "Default Organization",
+			ResourceType: input.OS,
+		}
+		if database.DB != nil {
+			_ = database.DB.Create(newMachine).Error
+		}
+		machine = newMachine
+	}
+
 	if machine == nil {
 		return nil, nil, errors.New("machine not found or deleted")
 	}

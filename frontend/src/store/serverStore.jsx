@@ -1,5 +1,5 @@
 import React, { useState, useEffect, createContext, useContext, useCallback, useRef } from 'react';
-import { listServers } from '../api/server.js';
+import { listServers, purgeOfflineServers } from '../api/server.js';
 import { getMachineId, isSameMachine } from '../utils/machineId.js';
 
 const ServerStoreContext = createContext(null);
@@ -234,6 +234,18 @@ export function ServerStoreProvider({ children }) {
     });
   }, []);
 
+  const handlePurgeOfflineServers = useCallback(async () => {
+    try {
+      setLoading(true);
+      await purgeOfflineServers();
+      await fetchServers();
+    } catch (err) {
+      console.error('Failed to purge offline servers:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchServers]);
+
   return (
     <ServerStoreContext.Provider
       value={{
@@ -246,6 +258,7 @@ export function ServerStoreProvider({ children }) {
         setSelectedServerId,
         selectedServer,
         fetchServers,
+        purgeOfflineServers: handlePurgeOfflineServers,
         updateServerMetrics,
       }}
     >
