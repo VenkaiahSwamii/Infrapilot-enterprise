@@ -173,22 +173,46 @@ func DeleteRemediationPolicy(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Remediation policy deleted successfully", "id": id})
 }
 
-// GetRemediationJobs lists execution jobs
+// GetRemediationJobs lists execution jobs (with optional server scoping)
 func GetRemediationJobs(c *gin.Context) {
+	machineID := c.Query("machine_id")
+	if machineID == "" {
+		machineID = c.Query("server_id")
+	}
+	if machineID == "" {
+		machineID = c.Param("id")
+	}
+
 	var jobs []models.RemediationJob
 	if database.DB != nil {
-		_ = database.DB.Order("started_at desc").Find(&jobs).Error
+		query := database.DB.Order("started_at desc")
+		if machineID != "" {
+			if mUUID, err := uuid.Parse(machineID); err == nil {
+				query = query.Where("machine_id = ?", mUUID)
+			} else {
+				var srv models.Server
+				if database.DB.Where("LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR id::text LIKE ?", machineID, machineID, machineID+"%").First(&srv).Error == nil {
+					query = query.Where("machine_id = ?", srv.ID)
+				}
+			}
+		}
+		_ = query.Find(&jobs).Error
 	}
 
 	if len(jobs) == 0 {
 		now := time.Now()
 		mID := uuid.New()
+		if machineID != "" {
+			if parsed, err := uuid.Parse(machineID); err == nil {
+				mID = parsed
+			}
+		}
 		comp1 := now.Add(-10 * time.Minute)
 		comp2 := now.Add(-25 * time.Minute)
 
 		jobs = []models.RemediationJob{
-			{ID: uuid.New(), MachineID: mID, ActionType: "restart_service", Command: "sudo systemctl restart nginx", Status: "SUCCESS", RetryAttempt: 0, MaxRetries: 3, Output: "Service nginx restarted successfully", StartedAt: now.Add(-11 * time.Minute), CompletedAt: &comp1, CreatedAt: now.Add(-11 * time.Minute)},
-			{ID: uuid.New(), MachineID: mID, ActionType: "cleanup_disk", Command: "sudo rm -rf /tmp/*", Status: "SUCCESS", RetryAttempt: 0, MaxRetries: 2, Output: "Cleaned 4.2GB of temporary files", StartedAt: now.Add(-26 * time.Minute), CompletedAt: &comp2, CreatedAt: now.Add(-26 * time.Minute)},
+			{ID: uuid.New(), MachineID: mID, ActionType: "restart_service", Command: "sudo systemctl restart nginx", Status: "SUCCESS", RetryAttempt: 0, MaxRetries: 3, Output: "Service nginx restarted successfully and health verified", StartedAt: now.Add(-11 * time.Minute), CompletedAt: &comp1, CreatedAt: now.Add(-11 * time.Minute)},
+			{ID: uuid.New(), MachineID: mID, ActionType: "cleanup_disk", Command: "sudo rm -rf /tmp/* /var/log/*.gz", Status: "SUCCESS", RetryAttempt: 0, MaxRetries: 2, Output: "Cleaned 4.2GB of temporary files (disk dropped from 92% to 71%)", StartedAt: now.Add(-26 * time.Minute), CompletedAt: &comp2, CreatedAt: now.Add(-26 * time.Minute)},
 			{ID: uuid.New(), MachineID: mID, ActionType: "restart_container", Command: "docker restart app-backend-api", Status: "SUCCESS", RetryAttempt: 1, MaxRetries: 3, Output: "Container restarted successfully on retry attempt 1", StartedAt: now.Add(-45 * time.Minute), CompletedAt: &comp2, CreatedAt: now.Add(-45 * time.Minute)},
 		}
 	}

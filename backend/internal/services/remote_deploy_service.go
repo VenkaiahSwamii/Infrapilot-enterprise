@@ -618,6 +618,7 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	}
 
 	if database.DB != nil {
+		_ = utils.UndecommissionHost(database.DB, machineID, hostname, target.Host)
 		var existingMachine models.Machine
 		if err := database.DB.Where("ip_address = ?", target.Host).First(&existingMachine).Error; err == nil {
 			existingMachine.Name = displayName

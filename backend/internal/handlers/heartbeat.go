@@ -8,7 +8,6 @@ import (
 
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
-	"infrapilot/backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -36,14 +35,6 @@ func Heartbeat(c *gin.Context) {
 		machineID, _ = uuid.Parse(machineIDStr)
 	}
 
-	if utils.IsHostDecommissioned(database.DB, machineID, req.Hostname, "") {
-		c.JSON(http.StatusGone, gin.H{
-			"error":  "Machine has been permanently deleted and decommissioned by administrator. Telemetry transmission halted.",
-			"status": "decommissioned",
-		})
-		return
-	}
-
 	var machine models.Machine
 	found := false
 
@@ -57,6 +48,11 @@ func Heartbeat(c *gin.Context) {
 		if serverVal, exists := c.Get("server"); exists {
 			if s, ok := serverVal.(*models.Server); ok {
 				machine = *s
+				found = true
+			}
+		}
+		if !found && strings.TrimSpace(req.Hostname) != "" {
+			if err := database.DB.Where("LOWER(hostname) = LOWER(?)", strings.TrimSpace(req.Hostname)).First(&machine).Error; err == nil {
 				found = true
 			}
 		}

@@ -379,15 +379,6 @@ func (h *ServerHandler) ServerHeartbeat(c *gin.Context) {
 		return
 	}
 
-	parsedID, _ := uuid.Parse(idStr)
-	if utils.IsHostDecommissioned(database.DB, parsedID, idStr, "") {
-		c.JSON(http.StatusGone, gin.H{
-			"error":  "Machine has been permanently deleted and decommissioned by administrator. Telemetry transmission halted.",
-			"status": "decommissioned",
-		})
-		return
-	}
-
 	server, err := h.serverService.GetServerByIDOrHostname(idStr)
 	if err != nil {
 		c.JSON(http.StatusGone, gin.H{"error": "Server not found or decommissioned"})
