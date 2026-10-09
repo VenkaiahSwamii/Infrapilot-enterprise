@@ -484,7 +484,7 @@ func (s *EmailService) SendDiagnosticTestEmail(to string, overrideHost string, o
 	result["resolved_ip"] = ips[0].String()
 
 	// 2. TCP Connection & TLS Handshake
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	var conn net.Conn
 	if port == 465 {
 		tlsDialer := &tls.Dialer{

@@ -22,10 +22,14 @@ import {
   HardDrive,
   Cpu,
   Layers,
-  ChevronRight
+  ChevronRight,
+  Sparkles,
+  TerminalSquare
 } from 'lucide-react';
 import { apiClient } from '../../../api/client.js';
 import { useDashboardStore } from '../../../store/dashboardStore.jsx';
+import { executeMiniSPL, parseSPLPipeline } from '../../../utils/miniSPL.js';
+import MiniSPLStatsWidget from '../../logs/MiniSPLStatsWidget.jsx';
 
 export default function LogsTab({ machine }) {
   const machineId = machine?.id || machine?.ID || machine?.Id;
@@ -37,6 +41,10 @@ export default function LogsTab({ machine }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+
+  // Mini-SPL Query Engine
+  const [splQuery, setSplQuery] = useState('');
+  const [activeDrilldown, setActiveDrilldown] = useState(null);
 
   // Live Stream Controls
   const [isLiveStreaming, setIsLiveStreaming] = useState(true);
@@ -114,9 +122,26 @@ export default function LogsTab({ machine }) {
     }
   }, [logs, autoScroll, viewMode]);
 
+  // Mini-SPL Query Pipeline Execution
+  const miniSPLResult = useMemo(() => {
+    if (!splQuery.trim()) {
+      return { logs, stats: null, pipeline: [] };
+    }
+    return executeMiniSPL(logs, splQuery);
+  }, [logs, splQuery]);
+
+  const splPipeline = useMemo(() => parseSPLPipeline(splQuery), [splQuery]);
+
   // Filtered & Processed Logs
   const processedLogs = useMemo(() => {
-    return logs.filter(item => {
+    const baseLogs = splQuery.trim() ? (miniSPLResult.logs || []) : logs;
+    return baseLogs.filter(item => {
+      // Active histogram bucket drilldown
+      if (activeDrilldown) {
+        const { field, value } = activeDrilldown;
+        const itemVal = item[field] ?? item.extracted?.[field];
+        if (String(itemVal) !== String(value)) return false;
+      }
       if (selectedLevel !== 'ALL' && !String(item.level).toUpperCase().includes(selectedLevel)) {
         return false;
       }
@@ -130,7 +155,7 @@ export default function LogsTab({ machine }) {
       const lvl = String(item.level || '').toLowerCase();
       return msg.includes(q) || src.includes(q) || lvl.includes(q);
     });
-  }, [logs, selectedLevel, selectedSource, searchQuery]);
+  }, [logs, splQuery, miniSPLResult, activeDrilldown, selectedLevel, selectedSource, searchQuery]);
 
   // Severity Distribution Breakdown
   const stats = useMemo(() => {
@@ -328,6 +353,162 @@ export default function LogsTab({ machine }) {
           </div>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* 1.5 MINI-SPL QUERY BAR & DIAGNOSTIC PRESETS */}
+      {/* ========================================================================= */}
+      <div style={{
+        backgroundColor: '#0a0f1d',
+        border: '1px solid rgba(6, 182, 212, 0.35)',
+        borderRadius: '12px',
+        padding: '12px 16px',
+        boxShadow: '0 4px 20px rgba(6, 182, 212, 0.08)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px'
+      }}>
+        {/* Main SPL Query Input Row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            backgroundColor: 'rgba(6, 182, 212, 0.15)',
+            border: '1px solid rgba(6, 182, 212, 0.4)',
+            borderRadius: '6px',
+            padding: '4px 8px',
+            color: '#06b6d4',
+            fontSize: '11px',
+            fontWeight: 800,
+            letterSpacing: '0.05em',
+            flexShrink: 0
+          }}>
+            <Sparkles size={13} />
+            <span>MINI-SPL</span>
+          </div>
+
+          <div style={{
+            flex: 1,
+            position: 'relative',
+            display: 'flex',
+            alignItems: 'center'
+          }}>
+            <input
+              type="text"
+              value={splQuery}
+              onChange={(e) => setSplQuery(e.target.value)}
+              placeholder='Mini-SPL pipeline: e.g. error | stats count by source   OR   where level="CRITICAL" | sort -timestamp'
+              style={{
+                width: '100%',
+                height: '34px',
+                backgroundColor: '#070a12',
+                border: '1px solid #1a253a',
+                borderRadius: '6px',
+                color: '#38bdf8',
+                padding: '0 28px 0 10px',
+                fontFamily: '"Fira Code", monospace',
+                fontSize: '12px',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+            />
+            {splQuery && (
+              <button
+                onClick={() => {
+                  setSplQuery('');
+                  setActiveDrilldown(null);
+                }}
+                style={{
+                  position: 'absolute',
+                  right: '8px',
+                  background: 'none',
+                  border: 'none',
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  padding: '2px'
+                }}
+                title="Clear query"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Pipeline Chips & Preset Diagnostic Pills */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          {/* Active Pipeline Chips */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Pipeline:</span>
+            {splPipeline.length > 0 ? (
+              splPipeline.map((stage, idx) => (
+                <span
+                  key={idx}
+                  style={{
+                    fontSize: '11px',
+                    fontFamily: 'monospace',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                    color: '#38bdf8',
+                    border: '1px solid rgba(56, 189, 248, 0.25)'
+                  }}
+                >
+                  | {stage.command || stage.raw}
+                </span>
+              ))
+            ) : (
+              <span style={{ fontSize: '11px', color: '#475569', fontStyle: 'italic' }}>Pass-through stream</span>
+            )}
+          </div>
+
+          {/* Preset Diagnostic Query Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Presets:</span>
+            {[
+              { label: 'Count by Level', q: '* | stats count by level' },
+              { label: 'Errors by Source', q: 'where level="ERROR" | stats count by source' },
+              { label: 'Critical Stream', q: 'where level="CRITICAL" | sort -timestamp' },
+              { label: 'Extract Codes', q: 'extract regex="status_code=(?<code>[0-9]+)" | stats count by code' }
+            ].map((preset, pIdx) => (
+              <button
+                key={pIdx}
+                onClick={() => {
+                  setSplQuery(preset.q);
+                  setActiveDrilldown(null);
+                }}
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                  color: splQuery === preset.q ? '#06b6d4' : '#94a3b8',
+                  border: splQuery === preset.q ? '1px solid rgba(6, 182, 212, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  transition: 'all 0.12s'
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Mini-SPL Live Interactive Aggregation Widget */}
+      {miniSPLResult?.stats && (
+        <MiniSPLStatsWidget
+          stats={miniSPLResult.stats}
+          activeDrilldown={activeDrilldown}
+          onSelectBucket={(bucket) => {
+            setActiveDrilldown({
+              field: miniSPLResult.stats.field,
+              value: bucket.key || bucket.value
+            });
+          }}
+          onClearFilter={() => setActiveDrilldown(null)}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* 2. FILTER, SEARCH & STREAMING TOOLBAR */}

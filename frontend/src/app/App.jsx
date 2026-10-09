@@ -99,7 +99,8 @@ export default function App() {
                 <Route path="metrics" element={<LiveMetricsPage />} />
 
                 {/* Operations & Analytics */}
-                <Route path="servers" element={<Navigate to="/" replace />} />
+                <Route path="servers" element={<InfrastructurePage />} />
+                <Route path="servers/:machineId" element={<MachineDetailPage />} />
                 <Route path="machines/:machineId" element={<MachineDetailPage />} />
                 <Route path="docker" element={<DockerPage />} />
                 <Route path="kubernetes" element={<KubernetesPage />} />

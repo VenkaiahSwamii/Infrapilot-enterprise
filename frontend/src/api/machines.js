@@ -50,3 +50,23 @@ export function getMachineSoftware(id) {
 export function getMachineHistory(id, range = '1h') {
   return apiGet(`/machines/${id}/history?range=${range}`);
 }
+
+export function getMachineServicesScoped(id) {
+  return apiGet(`/services/${id}`).catch(() => apiGet(`/machines/${id}/services`));
+}
+
+export function restartMachineService(id, serviceName) {
+  return apiPost('/services/restart', { machine_id: id, service: serviceName })
+    .catch(() => apiPost(`/machines/${id}/services/restart`, { service: serviceName }));
+}
+
+export function getMachineServiceLogs(id, serviceName) {
+  return apiGet(`/services/logs?machine_id=${encodeURIComponent(id)}&service=${encodeURIComponent(serviceName)}`);
+}
+
+export function getMachineRemediationActions(id) {
+  return apiGet(`/machines/${id}/actions`)
+    .catch(() => apiGet(`/remediation/jobs?machine_id=${encodeURIComponent(id)}`))
+    .catch(() => []);
+}
+
