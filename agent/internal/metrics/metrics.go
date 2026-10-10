@@ -52,6 +52,7 @@ type Metrics struct {
 	Services          []ServiceMetric          `json:"services"`
 	NetworkInterfaces []NetworkInterfaceMetric `json:"network_interfaces"`
 	OpenPorts         []string                 `json:"open_ports"`
+	InstalledPackages map[string]string        `json:"installed_packages,omitempty"`
 	SmartStatus       string                   `json:"smart_status"`
 	RAIDStatus        string                   `json:"raid_status"`
 	LVMStatus         string                   `json:"lvm_status"`

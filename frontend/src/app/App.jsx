@@ -33,6 +33,7 @@ import SyntheticTestDetailsPage from '../features/synthetic/SyntheticTestDetails
 // Analytics & Reports
 import AnalyticsSuite from '../features/analytics/AnalyticsSuite.jsx';
 import Reports from '../features/analytics/Reports.jsx';
+import SecuritySuitePage from '../features/security/SecuritySuitePage.jsx';
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem('token');
@@ -86,6 +87,7 @@ export default function App() {
               >
                 {/* Main Sidebar Pages */}
                 <Route index element={<EnterpriseDashboard />} />
+                <Route path="security" element={<SecuritySuitePage />} />
                 <Route path="terminal" element={<FleetTerminalPage />} />
                 <Route path="synthetic" element={<SyntheticMonitoringPage />} />
                 <Route path="synthetic/:id" element={<SyntheticTestDetailsPage />} />

@@ -267,6 +267,7 @@ func Connect() {
 		&models.LinuxLog{},
 		&models.LogEntry{},
 		&models.ExtractionRule{},
+		&models.APIKey{},
 		&models.AuditLog{},
 		&models.Report{},
 		&models.DockerHost{},
@@ -326,6 +327,7 @@ func Connect() {
 		&models.TerminalCommand{},
 		&models.RemoteDeploymentRecord{},
 		&models.InstalledSoftware{},
+		&models.MonitoredService{},
 	)
 
 	if err != nil {

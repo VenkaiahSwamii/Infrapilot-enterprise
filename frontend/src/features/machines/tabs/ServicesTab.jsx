@@ -14,9 +14,19 @@ import {
   Clock, 
   X, 
   Terminal,
-  Activity
+  Activity,
+  Plus,
+  Trash2,
+  Sparkles
 } from 'lucide-react';
-import { getMachineServicesScoped, restartMachineService, getMachineServiceLogs } from '../../../api/machines.js';
+import { 
+  getMachineServicesScoped, 
+  restartMachineService, 
+  getMachineServiceLogs,
+  getMonitoredServices,
+  addMonitoredService,
+  removeMonitoredService
+} from '../../../api/machines.js';
 import { useDashboardStore } from '../../../store/dashboardStore.jsx';
 import { getMachineId } from '../../../utils/machineId.js';
 
@@ -37,6 +47,63 @@ export default function ServicesTab({ machine }) {
   const [viewingLogsService, setViewingLogsService] = useState(null); // service name
   const [serviceLogs, setServiceLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
+
+  // Dynamic Monitored Services States
+  const [monitoredCustom, setMonitoredCustom] = useState([]);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newServiceName, setNewServiceName] = useState('');
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [newAlertLevel, setNewAlertLevel] = useState('CRITICAL');
+  const [isSubmittingService, setIsSubmittingService] = useState(false);
+
+  const fetchMonitoredCustom = async () => {
+    if (!machineId) return;
+    try {
+      const list = await getMonitoredServices(machineId);
+      if (Array.isArray(list)) {
+        setMonitoredCustom(list);
+      }
+    } catch (err) {
+      console.error('Failed to fetch custom monitored services:', err);
+    }
+  };
+
+  const handleAddService = async (e) => {
+    if (e) e.preventDefault();
+    if (!newServiceName.trim()) {
+      addToast('error', 'Validation Error', 'Service name is required.');
+      return;
+    }
+    setIsSubmittingService(true);
+    try {
+      await addMonitoredService(machineId, {
+        service_name: newServiceName.trim(),
+        display_name: newDisplayName.trim() || newServiceName.trim(),
+        alert_level: newAlertLevel
+      });
+      addToast('success', 'Service Monitored', `"${newServiceName.trim()}" is now being actively monitored by agent.`);
+      setNewServiceName('');
+      setNewDisplayName('');
+      setIsAddModalOpen(false);
+      await fetchMonitoredCustom();
+      await fetchServices(true);
+    } catch (err) {
+      addToast('error', 'Failed to Add Service', err?.response?.data?.error || err.message);
+    } finally {
+      setIsSubmittingService(false);
+    }
+  };
+
+  const handleRemoveService = async (svcName) => {
+    try {
+      await removeMonitoredService(machineId, svcName);
+      addToast('success', 'Monitoring Removed', `"${svcName}" was removed from monitoring.`);
+      await fetchMonitoredCustom();
+      await fetchServices(true);
+    } catch (err) {
+      addToast('error', 'Failed to Remove', err?.response?.data?.error || err.message);
+    }
+  };
 
   const fetchServices = async (isBackground = false) => {
     if (!machineId) return;
@@ -63,6 +130,7 @@ export default function ServicesTab({ machine }) {
 
   useEffect(() => {
     fetchServices();
+    fetchMonitoredCustom();
   }, [machineId]);
 
   // Filtered Services List
@@ -325,26 +393,51 @@ export default function ServicesTab({ machine }) {
           ))}
         </div>
 
-        {/* Refresh */}
-        <button
-          onClick={() => fetchServices(true)}
-          disabled={refreshing}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '5px 12px',
-            backgroundColor: '#080c14',
-            color: '#cbd5e1',
-            border: '1px solid #1f2e44',
-            borderRadius: '6px',
-            cursor: refreshing ? 'not-allowed' : 'pointer',
-            fontSize: '12px',
-            fontWeight: 500
-          }}
-        >
-          <RefreshCw size={12} className={refreshing ? 'spin' : ''} /> Sync
-        </button>
+        {/* Actions: Add Service & Sync */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              backgroundColor: '#06b6d4',
+              color: '#080c14',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 700,
+              boxShadow: '0 2px 8px rgba(6, 182, 212, 0.3)'
+            }}
+          >
+            <Plus size={13} strokeWidth={3} /> Add Monitored Service
+          </button>
+
+          <button
+            onClick={() => {
+              fetchServices(true);
+              fetchMonitoredCustom();
+            }}
+            disabled={refreshing}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '6px 12px',
+              backgroundColor: '#080c14',
+              color: '#cbd5e1',
+              border: '1px solid #1f2e44',
+              borderRadius: '6px',
+              cursor: refreshing ? 'not-allowed' : 'pointer',
+              fontSize: '12px',
+              fontWeight: 500
+            }}
+          >
+            <RefreshCw size={12} className={refreshing ? 'spin' : ''} /> Sync
+          </button>
+        </div>
       </div>
 
       {/* 3. Services Data Table */}
@@ -378,11 +471,34 @@ export default function ServicesTab({ machine }) {
                 const restarts = Number(svc.restarts || svc.restart_count || svc.RestartCount || 0);
                 const badge = getStatusBadge(status);
 
+                const customMatch = monitoredCustom.find(m => 
+                  m.service_name.toLowerCase().replace(/\.service$/, '') === name.toLowerCase().replace(/\.service$/, '')
+                );
+
                 return (
                   <tr key={name} style={{ borderBottom: '1px solid rgba(31, 46, 68, 0.4)', color: '#cbd5e1' }}>
                     {/* Name */}
                     <td style={{ padding: '12px 16px' }}>
-                      <div style={{ fontWeight: 600, color: '#f1f5f9', fontFamily: 'monospace' }}>{name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 600, color: '#f1f5f9', fontFamily: 'monospace' }}>{name}</span>
+                        {customMatch && (
+                          <span style={{
+                            fontSize: '9px',
+                            fontWeight: 700,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                            color: '#06b6d4',
+                            border: '1px solid rgba(6, 182, 212, 0.3)',
+                            textTransform: 'uppercase'
+                          }}>
+                            MONITORED
+                          </span>
+                        )}
+                      </div>
+                      {customMatch?.display_name && customMatch.display_name !== name && (
+                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>{customMatch.display_name}</div>
+                      )}
                     </td>
 
                     {/* Status Badge */}
@@ -423,7 +539,7 @@ export default function ServicesTab({ machine }) {
 
                     {/* Actions */}
                     <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: '8px' }}>
+                      <div style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
                         <button
                           onClick={() => handleOpenLogs(svc)}
                           style={{
@@ -462,6 +578,26 @@ export default function ServicesTab({ machine }) {
                         >
                           <RotateCcw size={11} /> Restart
                         </button>
+
+                        {customMatch && (
+                          <button
+                            onClick={() => handleRemoveService(customMatch.service_name)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: '5px',
+                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                              border: '1px solid rgba(239, 68, 68, 0.25)',
+                              borderRadius: '6px',
+                              color: '#ef4444',
+                              cursor: 'pointer'
+                            }}
+                            title="Remove from monitoring watch-list"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -678,6 +814,224 @@ export default function ServicesTab({ machine }) {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. MODAL: ADD DYNAMIC MONITORED SERVICE */}
+      {isAddModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '20px'
+          }}
+          onClick={() => !isSubmittingService && setIsAddModalOpen(false)}
+        >
+          <div
+            style={{
+              backgroundColor: '#0d1220',
+              border: '1px solid #1f2e44',
+              borderRadius: '14px',
+              padding: '24px',
+              maxWidth: '560px',
+              width: '100%',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.7)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Activity size={20} color="#06b6d4" />
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#f1f5f9', margin: 0 }}>
+                  Add Monitored Service
+                </h3>
+              </div>
+              <button
+                onClick={() => !isSubmittingService && setIsAddModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddService} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Info Alert */}
+              <div style={{
+                backgroundColor: 'rgba(6, 182, 212, 0.08)',
+                border: '1px solid rgba(6, 182, 212, 0.25)',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                fontSize: '12px',
+                color: '#94a3b8',
+                lineHeight: 1.5
+              }}>
+                <span style={{ color: '#06b6d4', fontWeight: 700 }}>Zero Daemon Restart: </span>
+                The agent on <strong style={{ color: '#f1f5f9' }}>{hostname}</strong> will automatically reload this service in memory on its next 5s poll.
+              </div>
+
+              {/* Presets */}
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '6px' }}>
+                  Quick Presets
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {[
+                    { label: 'Nginx', val: 'nginx.service' },
+                    { label: 'PostgreSQL', val: 'postgresql.service' },
+                    { label: 'Docker', val: 'docker.service' },
+                    { label: 'Redis', val: 'redis-server.service' },
+                    { label: 'MySQL', val: 'mysql.service' },
+                    { label: 'SSH', val: 'ssh.service' },
+                    { label: 'Apache', val: 'apache2.service' },
+                    { label: 'Spooler (Win)', val: 'Spooler' },
+                    { label: 'WinDefend', val: 'WinDefend' }
+                  ].map((p) => (
+                    <button
+                      key={p.val}
+                      type="button"
+                      onClick={() => {
+                        setNewServiceName(p.val);
+                        if (!newDisplayName) setNewDisplayName(p.label);
+                      }}
+                      style={{
+                        padding: '4px 8px',
+                        backgroundColor: newServiceName === p.val ? 'rgba(6, 182, 212, 0.2)' : '#080c14',
+                        color: newServiceName === p.val ? '#06b6d4' : '#cbd5e1',
+                        border: newServiceName === p.val ? '1px solid #06b6d4' : '1px solid #1f2e44',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Service Name Input */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
+                  Service Unit Name <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. nginx.service, redis-server, docker.service"
+                  value={newServiceName}
+                  onChange={(e) => setNewServiceName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#080c14',
+                    border: '1px solid #1f2e44',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    fontFamily: 'monospace',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Display Name Input */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
+                  Display Label / Description (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Production Web Gateway"
+                  value={newDisplayName}
+                  onChange={(e) => setNewDisplayName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#080c14',
+                    border: '1px solid #1f2e44',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Alert Level */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
+                  Alert Criticality
+                </label>
+                <select
+                  value={newAlertLevel}
+                  onChange={(e) => setNewAlertLevel(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#080c14',
+                    border: '1px solid #1f2e44',
+                    borderRadius: '6px',
+                    color: '#f1f5f9',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="CRITICAL">CRITICAL (Trigger P1 Incident on crash)</option>
+                  <option value="WARNING">WARNING (Trigger Warning alert)</option>
+                  <option value="INFO">INFO (Monitor & Telemetry only)</option>
+                </select>
+              </div>
+
+              {/* Modal Actions */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+                <button
+                  type="button"
+                  disabled={isSubmittingService}
+                  onClick={() => setIsAddModalOpen(false)}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#1f2e44',
+                    color: '#94a3b8',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: isSubmittingService ? 'not-allowed' : 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 600
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingService || !newServiceName.trim()}
+                  style={{
+                    padding: '8px 18px',
+                    backgroundColor: '#06b6d4',
+                    color: '#080c14',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: isSubmittingService || !newServiceName.trim() ? 'not-allowed' : 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 8px rgba(6, 182, 212, 0.3)'
+                  }}
+                >
+                  {isSubmittingService ? <RefreshCw size={14} className="spin" /> : <Plus size={14} />}
+                  {isSubmittingService ? 'Enqueuing...' : 'Save & Monitor'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

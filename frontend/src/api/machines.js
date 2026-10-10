@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './client.js';
+import { apiGet, apiPost, apiDelete, apiPatch } from './client.js';
 
 export function listMachines() {
   return apiGet('/machines').then((payload) => {
@@ -84,5 +84,21 @@ export function getMachineRemediationActions(id) {
   return apiGet(`/machines/${id}/actions`)
     .catch(() => apiGet(`/remediation/jobs?machine_id=${encodeURIComponent(id)}`))
     .catch(() => []);
+}
+
+export function getMonitoredServices(serverId) {
+  return apiGet(`/servers/${serverId}/services/monitored`);
+}
+
+export function addMonitoredService(serverId, payload) {
+  return apiPost(`/servers/${serverId}/services/monitored`, payload);
+}
+
+export function removeMonitoredService(serverId, serviceName) {
+  return apiDelete(`/servers/${serverId}/services/monitored/${encodeURIComponent(serviceName)}`);
+}
+
+export function toggleMonitoredService(serverId, serviceName) {
+  return apiPatch(`/servers/${serverId}/services/monitored/${encodeURIComponent(serviceName)}/toggle`);
 }
 

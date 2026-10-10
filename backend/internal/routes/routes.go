@@ -76,10 +76,13 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 	tracingService := tracing.NewService(tracingRepo)
 	apmService := apm.NewService(apmRepo)
 
+	monitoredServiceSvc := services.NewMonitoredServiceService(database.DB)
+	monitoredServiceHandler := handlers.NewMonitoredServiceHandler(monitoredServiceSvc)
+
 	// Initialize handlers, injecting the shared WebSocket hub
 	authHandler := handlers.NewAuthHandler(authService)
 	machineHandler := handlers.NewMachineHandler(machineService)
-	serverHandler := handlers.NewServerHandler(serverService)
+	serverHandler := handlers.NewServerHandler(serverService, monitoredServiceSvc)
 	dashboardHandler := handlers.NewDashboardHandler(dashboardService)
 	metricHandler := handlers.NewMetricHandler(metricService, hub, eventBus)
 	deployHandler := handlers.NewDeployHandler(services.NewDeployService(repository.NewDeployRepository(), eventBus), hub)
@@ -88,6 +91,8 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 	aiopsHandler := handlers.NewAIOpsHandler()
 	hardeningHandler := handlers.NewHardeningHandler()
 	complianceHandler := handlers.NewComplianceHandler()
+	apiKeyHandler := handlers.NewAPIKeyHandler()
+	securitySuiteHandler := handlers.NewSecuritySuiteHandler()
 	dockerHandler := handlers.NewDockerHandler()
 	orgPkgHandler := organization.NewHandler(orgPkgService)
 	analyticsHandler := analytics.NewHandler(analyticsService)
@@ -150,6 +155,12 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 		api.POST("/heartbeat", handlers.Heartbeat)
 		api.POST("/agent/heartbeat", handlers.Heartbeat)
 		api.POST("/servers/:id/heartbeat", serverHandler.ServerHeartbeat)
+
+		// Dynamic UI Monitored Services Management
+		api.GET("/servers/:id/services/monitored", monitoredServiceHandler.GetMonitoredServices)
+		api.POST("/servers/:id/services/monitored", monitoredServiceHandler.AddMonitoredService)
+		api.DELETE("/servers/:id/services/monitored/:serviceName", monitoredServiceHandler.RemoveMonitoredService)
+		api.PATCH("/servers/:id/services/monitored/:serviceName/toggle", monitoredServiceHandler.ToggleMonitoredService)
 
 		// Phase 3.2: Secure Metrics & Logs API (API Key verified inside handlers or middleware)
 		api.POST("/metrics", metricHandler.ReceiveMetrics)
@@ -371,12 +382,29 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 				complianceGroup.GET("/dashboard", complianceHandler.GetSecurityDashboard)
 				complianceGroup.GET("/frameworks", complianceHandler.GetFrameworks)
 				complianceGroup.GET("/audit-logs", complianceHandler.GetAuditLogs)
+				complianceGroup.GET("/audit-logs/verify", complianceHandler.VerifyAuditChain)
 				complianceGroup.POST("/mfa/setup", complianceHandler.SetupMFA)
 				complianceGroup.POST("/mfa/verify", complianceHandler.VerifyMFA)
 				complianceGroup.GET("/policies", complianceHandler.GetPolicies)
 				complianceGroup.GET("/certificates", complianceHandler.GetCertificates)
 				complianceGroup.GET("/secrets", complianceHandler.GetSecrets)
 				complianceGroup.POST("/reports/export", complianceHandler.ExportComplianceReport)
+			}
+
+			// Enterprise Scoped API Keys Management
+			apiKeyGroup := protected.Group("/security/api-keys")
+			{
+				apiKeyGroup.GET("", apiKeyHandler.ListAPIKeys)
+				apiKeyGroup.POST("", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin), apiKeyHandler.CreateAPIKey)
+				apiKeyGroup.DELETE("/:id", middleware.RequireRoles(models.RoleSuperAdmin, models.RoleAdmin), apiKeyHandler.RevokeAPIKey)
+			}
+
+			// Enterprise Security Suite (Posture, Port Radar, Vulnerabilities & CVEs)
+			securityGroup := protected.Group("/security")
+			{
+				securityGroup.GET("/posture", securitySuiteHandler.GetFleetPosture)
+				securityGroup.GET("/ports", securitySuiteHandler.GetListeningPorts)
+				securityGroup.GET("/vulnerabilities", securitySuiteHandler.GetVulnerabilities)
 			}
 
 			// Sprint 10.7: Enterprise Docker Observability

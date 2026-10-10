@@ -1,10 +1,6 @@
 package compliance
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"time"
 
 	"infrapilot/backend/internal/database"
@@ -13,8 +9,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-var auditHMACSecret = []byte("InfraPilot-Immutable-Audit-Secret-Key-2026")
 
 type AuditEngine struct {
 	logger *logger.Logger
@@ -26,16 +20,19 @@ func NewAuditEngine() *AuditEngine {
 	}
 }
 
-// LogImmutableAudit signs and saves an immutable audit entry
+// LogImmutableAudit signs, hash-chains, and saves an immutable audit entry
 func (a *AuditEngine) LogImmutableAudit(orgID, userID, username, action, resourceType, resourceID, clientIP, details string) (*models.ImmutableAuditRecord, error) {
-	now := time.Now()
+	if database.DB != nil {
+		rec, err := AppendChainedAuditRecord(database.DB, orgID, userID, username, action, resourceType, resourceID, clientIP, details)
+		if err == nil && rec != nil {
+			a.logger.Info("Chained immutable audit log recorded", "action", action, "seq", rec.SequenceNum, "hash", rec.CurrentHash[:12]+"...")
+			return rec, nil
+		}
+	}
 
-	// Compute SHA-256 HMAC Signature for cryptographic integrity
-	dataToSign := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s", orgID, userID, username, action, resourceType, resourceID, clientIP, details, now.Format(time.RFC3339))
-	mac := hmac.New(sha256.New, auditHMACSecret)
-	mac.Write([]byte(dataToSign))
-	signature := hex.EncodeToString(mac.Sum(nil))
-
+	// Fallback in-memory generator if DB is nil
+	now := time.Now().UTC()
+	currentHash := CalculateRecordHash(GenesisHash, 1, orgID, userID, action, resourceType, resourceID, clientIP, details, now)
 	rec := &models.ImmutableAuditRecord{
 		ID:             uuid.New(),
 		OrganizationID: orgID,
@@ -45,17 +42,13 @@ func (a *AuditEngine) LogImmutableAudit(orgID, userID, username, action, resourc
 		ResourceType:   resourceType,
 		ResourceID:     resourceID,
 		SourceIP:       clientIP,
-		HMACSignature:  signature,
+		SequenceNum:    1,
+		PrevHash:       GenesisHash,
+		CurrentHash:    currentHash,
 		TamperDetected: false,
 		DetailsJSON:    details,
 		CreatedAt:      now,
 	}
-
-	if database.DB != nil {
-		database.DB.Create(rec)
-	}
-
-	a.logger.Info("Immutable audit log recorded", "action", action, "user", username, "signature", signature[:12]+"...")
 	return rec, nil
 }
 

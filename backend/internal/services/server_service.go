@@ -109,7 +109,7 @@ func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*mode
 
 	server, err := s.serverRepo.FindExistingServer(input.ID, input.Hostname, input.IPAddress, input.MACAddress, input.OS)
 	if err == nil && server != nil {
-		isBlocked := server.IsBlocked || strings.ToUpper(server.Status) == "BLOCKED" || strings.ToUpper(server.Status) == "STOPPED"
+		isBlocked := server.IsBlocked || strings.ToUpper(server.Status) == "BLOCKED"
 		// Update existing server record
 		applyServerRegistration(server, input)
 		if isBlocked {
@@ -128,7 +128,7 @@ func (s *ServerService) RegisterOrUpdateServer(input RegisterServerInput) (*mode
 		}
 
 		if isBlocked {
-			return server, errors.New("machine is stopped or blocked by administrator")
+			return server, errors.New("machine is blocked by administrator")
 		}
 
 		s.broadcastStatusUpdate(server)

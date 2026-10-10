@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"infrapilot/agent/internal/metrics"
@@ -49,6 +50,7 @@ func getProcessCPU() float64 {
 func GetMetrics() (*metrics.Metrics, error) {
 	dockerInstalled, dockerVersion, dockerContainers, dockerImages, dockerVolumes, dockerNetworks, dockerEvents := collectDockerData()
 	k8sInstalled, k8sClusterJSON, k8sNodes, k8sPods, k8sDeployments, k8sStatefulSets, k8sDaemonSets, k8sServices, k8sNamespaces, k8sStorage, k8sEvents := collectKubernetesData()
+	installedPackages := CollectInstalledPackages()
 
 	var pods []metrics.KubernetesPodMetric
 	if k8sPods != "" {
@@ -197,6 +199,7 @@ func GetMetrics() (*metrics.Metrics, error) {
 		Services:            collectServices(),
 		NetworkInterfaces:   interfaces,
 		OpenPorts:           []string{},
+		InstalledPackages:   installedPackages,
 		SmartStatus:         "unknown",
 		RAIDStatus:          "unknown",
 		LVMStatus:           "unknown",
@@ -345,13 +348,48 @@ func collectNetworkInterfaces() []metrics.NetworkInterfaceMetric {
 var (
 	serviceRestartCounts = make(map[string]int)
 	lastServiceStatuses  = make(map[string]string)
+	dynamicServicesMu    sync.RWMutex
+	dynamicServices      []string
 )
+
+// UpdateDynamicMonitoredServices updates the dynamic list of monitored services received from backend heartbeat
+func UpdateDynamicMonitoredServices(services []string) {
+	if len(services) == 0 {
+		return
+	}
+	dynamicServicesMu.Lock()
+	defer dynamicServicesMu.Unlock()
+	dynamicServices = services
+}
+
+// GetMonitoredServicesList returns the active monitored services
+func GetMonitoredServicesList() []string {
+	dynamicServicesMu.RLock()
+	defer dynamicServicesMu.RUnlock()
+	if len(dynamicServices) > 0 {
+		cp := make([]string, len(dynamicServices))
+		copy(cp, dynamicServices)
+		return cp
+	}
+	return nil
+}
 
 func collectServices() []metrics.ServiceMetric {
 	if runtime.GOOS == "linux" {
 		servicesToCheck := []string{"ssh", "cron", "systemd-journald", "nginx", "postgresql", "docker", "redis", "infrapilot-agent"}
+		custom := GetMonitoredServicesList()
+		if len(custom) > 0 {
+			servicesToCheck = custom
+		}
+
 		result := make([]metrics.ServiceMetric, 0, len(servicesToCheck))
-		for _, name := range servicesToCheck {
+		for _, rawName := range servicesToCheck {
+			name := strings.TrimSpace(rawName)
+			name = strings.TrimSuffix(name, ".service")
+			if name == "" {
+				continue
+			}
+
 			cmd := exec.Command("systemctl", "is-active", name)
 			out, err := cmd.Output()
 			st := strings.TrimSpace(string(out))
@@ -423,6 +461,15 @@ func collectServices() []metrics.ServiceMetric {
 	targetWinServices := map[string]bool{
 		"spooler": true, "windefend": true, "eventlog": true, "wuauserv": true,
 		"w32time": true, "dhcp": true, "dnscache": true, "infrapilot-agent": true,
+	}
+
+	custom := GetMonitoredServicesList()
+	if len(custom) > 0 {
+		targetWinServices = make(map[string]bool)
+		for _, cs := range custom {
+			targetWinServices[strings.ToLower(strings.TrimSpace(cs))] = true
+		}
+		targetWinServices["infrapilot-agent"] = true
 	}
 
 	result := make([]metrics.ServiceMetric, 0, len(winServices))

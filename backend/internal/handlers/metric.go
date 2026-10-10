@@ -77,6 +77,7 @@ type MetricsRequest struct {
 	Services            []services.ServiceInput          `json:"services"`
 	NetworkInterfaces   []services.NetworkInterfaceInput `json:"network_interfaces"`
 	OpenPorts           []string                         `json:"open_ports"`
+	InstalledPackages   map[string]string                `json:"installed_packages,omitempty"`
 	SmartStatus         string                           `json:"smart_status"`
 	RAIDStatus          string                           `json:"raid_status"`
 	LVMStatus           string                           `json:"lvm_status"`
@@ -349,6 +350,33 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		input.DockerNetworks,
 		input.DockerEvents,
 	)
+
+	// Persist live installed package inventory for dynamic CVE auditing
+	if len(req.InstalledPackages) > 0 && database.DB != nil {
+		now := time.Now().UTC()
+		for pkgName, pkgVer := range req.InstalledPackages {
+			if pkgName == "" || pkgVer == "" {
+				continue
+			}
+			var sw models.InstalledSoftware
+			err := database.DB.Where("machine_id = ? AND LOWER(name) = LOWER(?)", persistedMachine.ID, pkgName).First(&sw).Error
+			if err != nil {
+				database.DB.Create(&models.InstalledSoftware{
+					ID:          uuid.New(),
+					MachineID:   persistedMachine.ID,
+					Name:        pkgName,
+					Version:     pkgVer,
+					InstalledAt: now,
+					LastSeenAt:  now,
+				})
+			} else {
+				database.DB.Model(&sw).Updates(map[string]interface{}{
+					"version":      pkgVer,
+					"last_seen_at": now,
+				})
+			}
+		}
+	}
 
 	// Sprint 7.11: Automatically calculate and update Machine Health Score
 	healthScore := services.CalculateHealthScore(

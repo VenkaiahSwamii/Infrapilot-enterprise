@@ -6,6 +6,7 @@ import (
 
 	"infrapilot/backend/internal/auth"
 	"infrapilot/backend/internal/compliance"
+	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/policy"
 	"infrapilot/backend/internal/security"
 
@@ -74,6 +75,17 @@ func (h *ComplianceHandler) GetAuditLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"audit_logs": logs})
+}
+
+// VerifyAuditChain runs full cryptographic traversal of the SHA-256 hash chain
+func (h *ComplianceHandler) VerifyAuditChain(c *gin.Context) {
+	orgID := c.GetString("organizationId")
+	res, err := compliance.VerifyAuditChain(database.DB, orgID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify audit chain", "details": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, res)
 }
 
 // SetupMFA generates TOTP secret & QR code URI for current user

@@ -95,6 +95,20 @@ type Config struct {
 
 	// SMTP Configuration
 	SMTP SMTPConfig `yaml:"smtp" toml:"smtp"`
+
+	// Agent Defaults Configuration
+	Agent AgentConfig `yaml:"agent" toml:"agent"`
+}
+
+// AgentServicesConfig holds platform default service lists
+type AgentServicesConfig struct {
+	Linux   []string `yaml:"linux" toml:"linux"`
+	Windows []string `yaml:"windows" toml:"windows"`
+}
+
+// AgentConfig holds agent-specific settings loaded by backend
+type AgentConfig struct {
+	Services AgentServicesConfig `yaml:"services" toml:"services"`
 }
 
 // SMTPConfig controls dynamic email and SMTP delivery parameters
@@ -276,8 +290,20 @@ func Load() {
 					ConsecutiveBreachesRequired int    `toml:"consecutive_breaches_required"`
 					ConsecutiveNormalRequired   int    `toml:"consecutive_normal_required"`
 				} `toml:"alerts"`
+				Agent struct {
+					Services struct {
+						Linux   []string `toml:"linux"`
+						Windows []string `toml:"windows"`
+					} `toml:"services"`
+				} `toml:"agent"`
 			}
 			if err := toml.Unmarshal(data, &tomlCfg); err == nil {
+				if len(tomlCfg.Agent.Services.Linux) > 0 {
+					globalConfig.Agent.Services.Linux = tomlCfg.Agent.Services.Linux
+				}
+				if len(tomlCfg.Agent.Services.Windows) > 0 {
+					globalConfig.Agent.Services.Windows = tomlCfg.Agent.Services.Windows
+				}
 				if tomlCfg.Server.BackendURL != "" {
 					globalConfig.BackendURL = tomlCfg.Server.BackendURL
 				}

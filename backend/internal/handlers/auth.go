@@ -9,6 +9,7 @@ import (
 
 	"infrapilot/backend/internal/cache"
 	"infrapilot/backend/internal/database"
+	"infrapilot/backend/internal/middleware"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/services"
 	"infrapilot/backend/internal/utils"
@@ -73,6 +74,23 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	clientIP := c.ClientIP()
+	if clientIP == "" {
+		clientIP = c.Request.RemoteAddr
+	}
+	protector := middleware.GetGlobalBruteForceProtector()
+
+	if locked, remaining := protector.IsLocked(clientIP, req.Email); locked {
+		utils.LogAudit(req.Email, uuid.Nil, "Login", "Failure: Rate Limited (Anti-Brute-Force)")
+		c.Header("Retry-After", fmt.Sprintf("%d", remaining))
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error":           "too_many_failed_attempts",
+			"message":         fmt.Sprintf("Too many failed login attempts. Locked for %d seconds.", remaining),
+			"retry_after_sec": remaining,
+		})
+		return
+	}
+
 	if cache.IsAccountLocked(req.Email) {
 		utils.LogAudit(req.Email, uuid.Nil, "Login", "Failure: Account Locked")
 		c.JSON(http.StatusTooManyRequests, gin.H{
@@ -84,7 +102,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	token, refreshToken, user, err := h.authService.Login(req.Email, req.Password)
 	if err != nil {
 		count, _ := cache.RecordFailedLogin(req.Email)
+		isLocked, remSecs := protector.RecordFailure(clientIP, req.Email)
 		utils.LogAudit(req.Email, uuid.Nil, "Login", "Failure")
+
+		if isLocked {
+			c.Header("Retry-After", fmt.Sprintf("%d", remSecs))
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error":           "too_many_failed_attempts",
+				"message":         fmt.Sprintf("Maximum failed attempts exceeded. Locked for %d seconds.", remSecs),
+				"retry_after_sec": remSecs,
+			})
+			return
+		}
+
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":           err.Error(),
 			"failed_attempts": count,
@@ -92,6 +122,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	protector.RecordSuccess(clientIP, req.Email)
 	cache.ResetFailedLogins(req.Email)
 	utils.LogAudit(user.Username, uuid.Nil, "Login", "Success")
 

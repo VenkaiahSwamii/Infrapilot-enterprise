@@ -69,3 +69,66 @@ func PostWithRetry(url string, body []byte, contentType string) error {
 	}
 	return fmt.Errorf("server unreachable")
 }
+
+// PostWithRetryAndResponse performs POST with retries and returns the response body bytes upon success
+func PostWithRetryAndResponse(url string, body []byte, contentType string) ([]byte, error) {
+	if HTTPClient == nil {
+		_ = InitHTTPClient()
+		if HTTPClient == nil {
+			HTTPClient = &http.Client{Timeout: 10 * time.Second}
+		}
+	}
+
+	backoff := []time.Duration{
+		2 * time.Second,
+		5 * time.Second,
+		10 * time.Second,
+	}
+
+	var lastErr error
+	for i := 0; i < len(backoff); i++ {
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", contentType)
+
+		apiKey := config.Get().APIKey
+		if apiKey != "" {
+			req.Header.Set("X-API-Key", apiKey)
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+		machineID := config.Get().MachineID
+		if machineID != "" {
+			req.Header.Set("X-Machine-ID", machineID)
+		}
+
+		resp, err := HTTPClient.Do(req)
+		if err == nil {
+			buf := new(bytes.Buffer)
+			_, _ = buf.ReadFrom(resp.Body)
+			resp.Body.Close()
+
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				return buf.Bytes(), nil
+			}
+			if resp.StatusCode == http.StatusGone {
+				return nil, fmt.Errorf("host decommissioned: HTTP 410 (machine was permanently deleted by administrator)")
+			}
+			if resp.StatusCode == http.StatusForbidden {
+				return nil, fmt.Errorf("host blocked: HTTP 403 (machine is blocked or stopped)")
+			}
+			lastErr = fmt.Errorf("HTTP status %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+
+		log.Printf("[Agent Client] POST %s retry (%d/%d): %v", url, i+1, len(backoff), lastErr)
+		time.Sleep(backoff[i])
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("server unreachable")
+}

@@ -31,6 +31,7 @@ export default function Sidebar({ collapsed, userProfile }) {
 
   const navItems = useMemo(() => [
     { id: 'overview', label: 'Overview', icon: Home, path: '/' },
+    { id: 'security', label: 'Security Suite', icon: ShieldCheck, path: '/security' },
     { id: 'terminal', label: 'Fleet Terminal', icon: Terminal, path: '/terminal' },
     { id: 'sre', label: 'SRE Disk Space', icon: HardDrive, path: '/sre-disk' },
     { id: 'sre', label: 'Crash & Service Health', icon: Zap, path: '/sre-crash' },

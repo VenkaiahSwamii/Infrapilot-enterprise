@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"infrapilot/agent/internal/client"
+	"infrapilot/agent/internal/collector"
 	"infrapilot/agent/internal/state"
 )
 
@@ -14,6 +15,11 @@ type Request struct {
 	Timestamp string `json:"timestamp"`
 	Status    string `json:"status"`
 	Version   string `json:"version"`
+}
+
+type Response struct {
+	Status            string   `json:"status"`
+	MonitoredServices []string `json:"monitored_services"`
 }
 
 func Send(backendURL, machineID, apiKey string) error {
@@ -24,7 +30,7 @@ func Send(backendURL, machineID, apiKey string) error {
 	}
 	data, _ := json.Marshal(req)
 
-	err := client.PostWithRetry(
+	respBytes, err := client.PostWithRetryAndResponse(
 		backendURL+"/api/v1/servers/"+machineID+"/heartbeat",
 		data,
 		"application/json",
@@ -38,6 +44,14 @@ func Send(backendURL, machineID, apiKey string) error {
 
 	state.Connected = true
 	log.Println("Heartbeat sent")
+
+	if len(respBytes) > 0 {
+		var resp Response
+		if jsonErr := json.Unmarshal(respBytes, &resp); jsonErr == nil && len(resp.MonitoredServices) > 0 {
+			collector.UpdateDynamicMonitoredServices(resp.MonitoredServices)
+		}
+	}
+
 	return nil
 }
 

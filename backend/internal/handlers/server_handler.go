@@ -20,10 +20,17 @@ import (
 
 type ServerHandler struct {
 	serverService *services.ServerService
+	monitoredSvc  *services.MonitoredServiceService
 }
 
-func NewServerHandler(serverService *services.ServerService) *ServerHandler {
-	return &ServerHandler{serverService: serverService}
+func NewServerHandler(serverService *services.ServerService, optionalMonitored ...*services.MonitoredServiceService) *ServerHandler {
+	var monitoredSvc *services.MonitoredServiceService
+	if len(optionalMonitored) > 0 && optionalMonitored[0] != nil {
+		monitoredSvc = optionalMonitored[0]
+	} else {
+		monitoredSvc = services.NewMonitoredServiceService(database.DB)
+	}
+	return &ServerHandler{serverService: serverService, monitoredSvc: monitoredSvc}
 }
 
 type ServerRegisterRequest struct {
@@ -201,7 +208,7 @@ func (h *ServerHandler) RegisterServer(c *gin.Context) {
 	}
 	server, err := h.serverService.RegisterOrUpdateServer(input)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register server"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to register server: %v", err)})
 		return
 	}
 
@@ -421,7 +428,15 @@ func (h *ServerHandler) ServerHeartbeat(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "success"})
+	var monitoredServices []string
+	if h.monitoredSvc != nil {
+		monitoredServices = h.monitoredSvc.GetActiveServiceNamesForServer(server.ID, server.OS)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":             "success",
+		"monitored_services": monitoredServices,
+	})
 }
 
 func (h *ServerHandler) RotateServerKey(c *gin.Context) {

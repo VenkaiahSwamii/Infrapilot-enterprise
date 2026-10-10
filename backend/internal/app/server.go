@@ -203,6 +203,8 @@ func RunAPI() error {
 					// Dynamically template backend URL so piped one-liners execute immediately with target server
 					ipRegex := regexp.MustCompile(`https?://(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|localhost|127\.0\.0\.1):8080`)
 					contentStr = ipRegex.ReplaceAllString(contentStr, serverParam)
+					contentStr = strings.ReplaceAll(contentStr, "\r\n", "\n")
+					contentStr = strings.ReplaceAll(contentStr, "\r", "\n")
 					c.Header("Content-Type", "text/plain; charset=utf-8")
 					c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
 					c.String(http.StatusOK, contentStr)

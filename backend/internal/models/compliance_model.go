@@ -42,7 +42,7 @@ func (MFASettingRecord) TableName() string {
 	return "user_mfa_settings"
 }
 
-// ImmutableAuditRecord records cryptographically signed audit trail logs
+// ImmutableAuditRecord records cryptographically signed audit trail logs with SHA-256 hash chaining
 type ImmutableAuditRecord struct {
 	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID string    `gorm:"type:varchar(100);index" json:"organization_id"`
@@ -52,7 +52,10 @@ type ImmutableAuditRecord struct {
 	ResourceType   string    `gorm:"type:varchar(100)" json:"resource_type"`
 	ResourceID     string    `gorm:"type:varchar(255)" json:"resource_id"`
 	SourceIP       string    `gorm:"type:varchar(50)" json:"source_ip"`
-	HMACSignature  string    `gorm:"type:varchar(255);not null" json:"hmac_signature"`
+	SequenceNum    int64     `gorm:"index" json:"sequence_num"`
+	PrevHash       string    `gorm:"type:varchar(64);not null" json:"prev_hash"`
+	CurrentHash    string    `gorm:"type:varchar(64);not null;index" json:"current_hash"`
+	HMACSignature  string    `gorm:"type:varchar(255)" json:"hmac_signature"`
 	TamperDetected bool      `gorm:"default:false" json:"tamper_detected"`
 	DetailsJSON    string    `gorm:"type:text" json:"details_json"`
 	CreatedAt      time.Time `gorm:"index" json:"created_at"`

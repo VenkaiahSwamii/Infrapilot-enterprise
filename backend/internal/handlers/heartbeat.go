@@ -8,6 +8,7 @@ import (
 
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
+	"infrapilot/backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -76,7 +77,7 @@ func Heartbeat(c *gin.Context) {
 
 	if database.DB != nil && machine.ID != uuid.Nil {
 		var count int64
-		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?) AND (is_blocked = true OR LOWER(status) = 'blocked' OR LOWER(status) = 'stopped')", machine.ID, machine.Hostname, machine.IPAddress).Scan(&count).Error
+		_ = database.DB.Raw("SELECT COUNT(*) FROM servers WHERE (id = ? OR LOWER(hostname) = LOWER(?) OR ip_address = ?) AND (is_blocked = true OR LOWER(status) = 'blocked')", machine.ID, machine.Hostname, machine.IPAddress).Scan(&count).Error
 		if count > 0 {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":  "Machine is stopped or blocked by administrator.",
@@ -95,9 +96,14 @@ func Heartbeat(c *gin.Context) {
 		database.DB.Save(&machine)
 	}
 
+	monitoredSvc := services.NewMonitoredServiceService(database.DB)
+	monitoredServices := monitoredSvc.GetActiveServiceNamesForServer(machine.ID, machine.OS)
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":    "Heartbeat received",
-		"machine_id": machine.ID.String(),
+		"message":            "Heartbeat received",
+		"status":             "success",
+		"machine_id":         machine.ID.String(),
+		"monitored_services": monitoredServices,
 	})
 
 	log.Printf("HEARTBEAT RECEIVED machine_id=%s hostname=%s ip=%s last_seen=%s status=ONLINE",
