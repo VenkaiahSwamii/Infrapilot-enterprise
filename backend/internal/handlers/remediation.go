@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"infrapilot/backend/internal/database"
@@ -339,6 +340,91 @@ func ExecuteDiskCleanupHandler(c *gin.Context) {
 			if err := database.DB.Where("id::text LIKE ? OR LOWER(hostname) = LOWER(?)", req.MachineID+"%", req.MachineID).First(&m).Error; err == nil {
 				mUUID = m.ID
 			}
+		}
+	}
+
+	// SRE Action Policy check: suppress real deletion if policy mode is NOTIFY_EMAIL
+	if database.DB != nil && !req.DryRun {
+		var srePolicy models.SREActionPolicy
+		targetMount := strings.ToLower(strings.TrimSpace(req.MountPoint))
+
+		// Map target mount to specific component alias
+		specificComp := ""
+		if targetMount == "/" || targetMount == "c:" || targetMount == "c" || targetMount == "\\" {
+			specificComp = "root_disk"
+		} else if strings.Contains(targetMount, "var") {
+			specificComp = "var_log_disk"
+		}
+
+		// Priority 1: Check specific component or exact mount point
+		found := false
+		if specificComp != "" {
+			if database.DB.Where("(LOWER(component) = LOWER(?) OR LOWER(component) = LOWER(?)) AND enabled = true", specificComp, targetMount).First(&srePolicy).Error == nil {
+				found = true
+			}
+		} else if targetMount != "" {
+			if database.DB.Where("LOWER(component) = LOWER(?) AND enabled = true", targetMount).First(&srePolicy).Error == nil {
+				found = true
+			}
+		}
+
+		// Priority 2: Fallback to general storage / disk category policy
+		if !found {
+			if database.DB.Where("(LOWER(component) = 'storage' OR LOWER(component) = 'disk' OR (LOWER(category) = 'storage' AND (component = '' OR component IS NULL))) AND enabled = true").First(&srePolicy).Error == nil {
+				found = true
+			}
+		}
+
+		if found && strings.EqualFold(srePolicy.Mode, "NOTIFY_EMAIL") {
+			recipient := srePolicy.RecipientEmail
+			if recipient == "" || recipient == "infrapilotadmin@gmail.com" {
+				smtpCfg := services.GetResolvedSMTPConfig()
+				recipient = smtpCfg.DefaultRecipient
+			}
+
+			hostName := "Host Machine"
+			if mUUID != uuid.Nil {
+				var s models.Server
+				if database.DB.First(&s, "id = ?", mUUID).Error == nil {
+					hostName = s.Hostname
+				}
+			}
+
+			alertComponent := specificComp
+			if alertComponent == "" {
+				if targetMount != "" {
+					alertComponent = targetMount
+				} else {
+					alertComponent = "root_disk"
+				}
+			}
+
+			alert := models.LinuxAlert{
+				ID:        uuid.New(),
+				MachineID: mUUID,
+				Category:  "Storage",
+				Component: alertComponent,
+				Severity:  "WARNING",
+				Title:     fmt.Sprintf("Disk saturation alert on %s (%s)", hostName, req.MountPoint),
+				Message:   fmt.Sprintf("Disk cleanup suppressed by Admin Policy (Mode: NOTIFY_EMAIL). Notification dispatched to %s.", recipient),
+				Status:    "OPEN",
+				CreatedAt: time.Now(),
+			}
+			_ = database.DB.Create(&alert).Error
+
+			emailSvc := services.NewEmailService()
+			_ = emailSvc.SendPolicyAlertEmail(&srePolicy, alert, hostName)
+
+			c.JSON(http.StatusOK, gin.H{
+				"message":       fmt.Sprintf("Disk cleanup suppressed by SRE Policy (Mode: NOTIFY_EMAIL). Email notification sent to %s.", recipient),
+				"status":        "bypassed_notify_email",
+				"remediated":    false,
+				"files_deleted": 0,
+				"bytes_deleted": 0,
+				"freed_mb":      0,
+				"success":       true,
+			})
+			return
 		}
 	}
 

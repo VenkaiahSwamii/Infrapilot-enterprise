@@ -25,7 +25,7 @@ func StartStatusMonitorWithHub(hub *websocket.Hub) {
 			}
 
 			cfg := config.Get()
-			offlineThreshold := 30 * time.Second
+			offlineThreshold := 60 * time.Second
 			if cfg != nil && cfg.OfflineThresholdSec > 0 {
 				offlineThreshold = time.Duration(cfg.OfflineThresholdSec) * time.Second
 			}

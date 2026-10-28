@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   ShieldCheck,
   Zap,
@@ -107,71 +107,93 @@ export default function SREOperationsPage() {
   // SRE Disk Space Remediation State
   const [diskDryRun, setDiskDryRun] = useState(false);
   const [isCleaningDisk, setIsCleaningDisk] = useState(false);
-  const [diskRemediationLogs, setDiskRemediationLogs] = useState([
-    {
-      id: 'rem-disk-01',
-      timestamp: '8m ago',
-      machine: 'prod-web-01 (192.168.1.12)',
-      mountPoint: '/tmp',
-      trigger: 'Reactive threshold breached (91.8% > 90.0%)',
-      filesPurged: 42,
-      freedMB: 2850.0,
-      status: 'VERIFIED_PASSED (74.2%)',
-    },
-    {
-      id: 'rem-disk-02',
-      timestamp: '1h 14m ago',
-      machine: 'prod-cache-01 (192.168.1.15)',
-      mountPoint: '/var/tmp',
-      trigger: 'Predictive exhaustion burn rate (Full in 2.2h at 48 MB/min)',
-      filesPurged: 19,
-      freedMB: 1420.0,
-      status: 'VERIFIED_PASSED (68.0%)',
-    },
-  ]);
+  const [diskRemediationLogs, setDiskRemediationLogs] = useState([]);
+  const [flappingServices, setFlappingServices] = useState([]);
+  const [correlatedIncidents, setCorrelatedIncidents] = useState([]);
 
-  // Monitored Services Data
-  const [flappingServices, setFlappingServices] = useState([
-    { id: 1, name: 'postgresql.service', machine: 'prod-db-01', ip: '192.168.1.10', restarts: 4, window: '60s', status: 'FLAP_SUSPENDED', circuitBreaker: 'TRIPPED', lastIncident: 'OOM Kill' },
-    { id: 2, name: 'mysqld.service', machine: 'prod-db-02', ip: '192.168.1.11', restarts: 3, window: '45s', status: 'FLAP_SUSPENDED', circuitBreaker: 'TRIPPED', lastIncident: 'Lock Timeout' },
-    { id: 3, name: 'nginx.service', machine: 'prod-web-01', ip: '192.168.1.12', restarts: 1, window: '120s', status: 'NORMAL', circuitBreaker: 'ARMED', lastIncident: 'Disk Fill (Auto-cleared)' },
-    { id: 4, name: 'ssh.service', machine: 'all-nodes', ip: '0.0.0.0/0', restarts: 0, window: 'N/A', status: 'WHITELISTS_ACCEPTED', circuitBreaker: 'EXEMPT', lastIncident: 'None' },
-    { id: 5, name: 'redis-server.service', machine: 'prod-cache-01', ip: '192.168.1.15', restarts: 0, window: '60s', status: 'NORMAL', circuitBreaker: 'ARMED', lastIncident: 'None' },
-  ]);
+  useEffect(() => {
+    const fetchOperationsData = async () => {
+      try {
+        const [svcRes, machRes, jobsRes, alertsRes] = await Promise.all([
+          apiClient.get('/services').catch(() => null),
+          apiClient.get('/machines').catch(() => null),
+          apiClient.get('/remediation-jobs').catch(() => null),
+          apiClient.get('/alerts').catch(() => null),
+        ]);
 
-  // Correlated Incidents Data
-  const [correlatedIncidents] = useState([
-    {
-      id: 'inc-101',
-      title: 'Disk Exhaustion (/tmp 98%) caused Nginx Crash & High CPU',
-      server: 'prod-web-01 (192.168.1.12)',
-      severity: 'CRITICAL',
-      rootCause: 'Disk Full in /tmp -> Temp log allocation failed -> Process crashed',
-      actionTaken: 'Cleared /tmp & /var/tmp non-disruptively + logrotate executed',
-      timestamp: '12m ago',
-      status: 'AUTOCLEARED',
-    },
-    {
-      id: 'inc-102',
-      title: 'Memory Leak in Node worker caused PostgreSQL OOM Kills',
-      server: 'prod-db-01 (192.168.1.10)',
-      severity: 'HIGH',
-      rootCause: 'Memory usage 94% -> OOM score adjusted -> Daemon restart suspended',
-      actionTaken: 'Flap protection active - Alert dispatched to On-Call SRE via Webhook',
-      timestamp: '45m ago',
-      status: 'ACTION_REQUIRED',
-    },
-    {
-      id: 'inc-103',
-      title: 'P95 Network Probe Latency Spike (>120ms on 8.8.8.8)',
-      server: 'prod-gateway-01 (192.168.1.1)',
-      severity: 'WARNING',
-      rootCause: 'Upstream gateway congestion -> Socket buffer queue backed up',
-      actionTaken: 'Non-disruptive TCP socket buffer flush & DNS cache reset',
-      timestamp: '2h ago',
-      status: 'RESOLVED',
-    },
-  ]);
+        const rawMachines = Array.isArray(machRes?.data) ? machRes.data : machRes?.data?.machines || [];
+        const primaryMach = rawMachines[0] || {};
+        const machName = primaryMach.hostname || primaryMach.name || 'node-01';
+        const machIp = primaryMach.ip_address || primaryMach.IPAddress || (typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1');
+
+        // 1. Map live services
+        const rawSvcs = Array.isArray(svcRes?.data) ? svcRes.data : svcRes?.data?.services || [];
+        if (rawSvcs.length > 0) {
+          const mappedSvcs = rawSvcs.map((s, idx) => ({
+            id: idx + 1,
+            name: s.name || `service-${idx}`,
+            machine: machName,
+            ip: machIp,
+            restarts: typeof s.restart_count === 'number' ? s.restart_count : (s.restarts || 0),
+            window: '60s',
+            status: (s.restart_count > 3 || s.restarts > 3) ? 'FLAP_SUSPENDED' : 'NORMAL',
+            circuitBreaker: (s.restart_count > 3 || s.restarts > 3) ? 'TRIPPED' : 'ARMED',
+            lastIncident: (s.restart_count > 0 || s.restarts > 0) ? 'Restart Observed' : 'None',
+          }));
+          setFlappingServices(mappedSvcs);
+        }
+
+        // 2. Map live disk remediation jobs
+        if (jobsRes && Array.isArray(jobsRes.data)) {
+          const diskJobs = jobsRes.data.filter((j) =>
+            String(j.action_type || '').toLowerCase() === 'cleanup_disk' ||
+            String(j.command || '').toLowerCase().includes('cleanup') ||
+            String(j.output || '').toLowerCase().includes('purged')
+          );
+          const mappedJobs = diskJobs.map((j, idx) => {
+            const out = String(j.output || '');
+            let freedMB = 0;
+            const mbMatch = out.match(/reclaimed ([\d.]+) GB/i);
+            if (mbMatch) freedMB = parseFloat(mbMatch[1]) * 1024;
+            let purged = 0;
+            const pMatch = out.match(/purged (\d+) cache files/i);
+            if (pMatch) purged = parseInt(pMatch[1], 10);
+
+            return {
+              id: j.id || `rem-${idx}`,
+              timestamp: j.created_at ? new Date(j.created_at).toLocaleTimeString() : 'Recently',
+              machine: machName,
+              mountPoint: out.includes('C:') ? 'C:' : '/',
+              trigger: out || 'Storage threshold policy action',
+              filesPurged: purged,
+              freedMB: freedMB,
+              status: j.status || 'VERIFIED_PASSED',
+            };
+          });
+          setDiskRemediationLogs(mappedJobs);
+        }
+
+        // 3. Map live correlated alerts
+        const rawAlerts = Array.isArray(alertsRes?.data) ? alertsRes.data : alertsRes?.data?.alerts || [];
+        if (rawAlerts.length > 0) {
+          const mappedAlerts = rawAlerts.map((a, idx) => ({
+            id: a.id || `inc-${idx}`,
+            title: a.title || a.message || 'Telemetry Anomaly Detected',
+            server: `${machName} (${machIp})`,
+            severity: String(a.severity || 'WARNING').toUpperCase(),
+            rootCause: a.description || a.message || 'Metric threshold exceeded',
+            actionTaken: a.remediation_action || 'Automated policy check evaluated',
+            timestamp: a.created_at ? new Date(a.created_at).toLocaleTimeString() : 'Recently',
+            status: a.status === 'resolved' ? 'RESOLVED' : 'ACTION_REQUIRED',
+          }));
+          setCorrelatedIncidents(mappedAlerts);
+        }
+      } catch (err) {
+        console.warn('Failed to load SRE operations telemetry:', err);
+      }
+    };
+    fetchOperationsData();
+  }, []);
 
   // Filtered Services List
   const filteredServices = useMemo(() => {
@@ -563,36 +585,44 @@ export default function SREOperationsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredServices.map((svc) => (
-                    <tr key={svc.id}>
-                      <td>
-                        <strong className="code-text service-name">{svc.name}</strong>
-                      </td>
-                      <td>
-                        <div className="node-ip-cell">
-                          <span>{svc.machine}</span>
-                          <small className="code-text ip-txt">{svc.ip}</small>
-                        </div>
-                      </td>
-                      <td>
-                        <span className={`restart-badge ${svc.restarts >= policyConfig.maxRestarts ? 'danger' : ''}`}>
-                          {svc.restarts} / {policyConfig.maxRestarts} max
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`status-badge-tag ${svc.status.toLowerCase()}`}>{svc.status}</span>
-                      </td>
-                      <td>
-                        <span className={`breaker-badge-tag ${svc.circuitBreaker.toLowerCase()}`}>{svc.circuitBreaker}</span>
-                      </td>
-                      <td className="last-inc-txt">{svc.lastIncident}</td>
-                      <td>
-                        <button className="action-rearm-btn" onClick={handleResetFlapStatus}>
-                          Re-Arm Service
-                        </button>
+                  {filteredServices.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" style={{ textAlign: 'center', padding: '36px', color: '#64748b' }}>
+                        No monitored services reported yet. Start infrapilot-agent on target nodes to begin tracking flap protection.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredServices.map((svc) => (
+                      <tr key={svc.id}>
+                        <td>
+                          <strong className="code-text service-name">{svc.name}</strong>
+                        </td>
+                        <td>
+                          <div className="node-ip-cell">
+                            <span>{svc.machine}</span>
+                            <small className="code-text ip-txt">{svc.ip}</small>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`restart-badge ${svc.restarts >= policyConfig.maxRestarts ? 'danger' : ''}`}>
+                            {svc.restarts} / {policyConfig.maxRestarts} max
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`status-badge-tag ${svc.status.toLowerCase()}`}>{svc.status}</span>
+                        </td>
+                        <td>
+                          <span className={`breaker-badge-tag ${svc.circuitBreaker.toLowerCase()}`}>{svc.circuitBreaker}</span>
+                        </td>
+                        <td className="last-inc-txt">{svc.lastIncident}</td>
+                        <td>
+                          <button className="action-rearm-btn" onClick={handleResetFlapStatus}>
+                            Re-Arm Service
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -717,21 +747,29 @@ export default function SREOperationsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {diskRemediationLogs.map((log) => (
-                    <tr key={log.id}>
-                      <td style={{ color: '#64748b' }}>{log.timestamp}</td>
-                      <td><strong className="code-text service-name">{log.machine}</strong></td>
-                      <td><span className="code-text" style={{ color: '#38bdf8' }}>{log.mountPoint}</span></td>
-                      <td style={{ color: '#cbd5e1' }}>{log.trigger}</td>
-                      <td><strong style={{ color: log.filesPurged > 0 ? '#4ade80' : '#94a3b8' }}>{log.filesPurged}</strong></td>
-                      <td><strong style={{ color: '#4ade80' }}>{(log.freedMB / 1024).toFixed(2)} GB</strong></td>
-                      <td>
-                        <span className="status-badge-tag normal" style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)' }}>
-                          {log.status}
-                        </span>
+                  {diskRemediationLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" style={{ textAlign: 'center', padding: '36px', color: '#64748b' }}>
+                        No disk remediation events recorded yet. Remediation logs will appear after auto-cleanup actions execute.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    diskRemediationLogs.map((log) => (
+                      <tr key={log.id}>
+                        <td style={{ color: '#64748b' }}>{log.timestamp}</td>
+                        <td><strong className="code-text service-name">{log.machine}</strong></td>
+                        <td><span className="code-text" style={{ color: '#38bdf8' }}>{log.mountPoint}</span></td>
+                        <td style={{ color: '#cbd5e1' }}>{log.trigger}</td>
+                        <td><strong style={{ color: log.filesPurged > 0 ? '#4ade80' : '#94a3b8' }}>{log.filesPurged}</strong></td>
+                        <td><strong style={{ color: '#4ade80' }}>{(log.freedMB / 1024).toFixed(2)} GB</strong></td>
+                        <td>
+                          <span className="status-badge-tag normal" style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)' }}>
+                            {log.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -755,7 +793,14 @@ export default function SREOperationsPage() {
           </div>
 
           <div className="incidents-stack">
-            {correlatedIncidents.map((inc) => (
+            {correlatedIncidents.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '48px', color: '#64748b', background: '#0d1220', borderRadius: '12px', border: '1px solid #1f2e44' }}>
+                <CheckCircle2 size={36} color="#22c55e" style={{ margin: '0 auto 12px auto' }} />
+                <h4 style={{ color: '#f1f5f9', margin: '0 0 6px 0', fontSize: '15px' }}>No Correlated Incidents Detected</h4>
+                <p style={{ margin: 0, fontSize: '13px' }}>Cross-component telemetry is healthy. All monitored services and system metrics are operating within thresholds.</p>
+              </div>
+            ) : (
+              correlatedIncidents.map((inc) => (
               <div key={inc.id} className="enterprise-incident-card">
                 <div className="inc-header-row">
                   <span className={`sev-badge ${inc.severity.toLowerCase()}`}>{inc.severity}</span>
@@ -782,7 +827,7 @@ export default function SREOperationsPage() {
                   </div>
                 </div>
               </div>
-            ))}
+            )))}
           </div>
         </div>
       )}

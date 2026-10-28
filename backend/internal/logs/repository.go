@@ -9,6 +9,7 @@ import (
 	"infrapilot/backend/internal/models"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type LogFilter struct {
@@ -151,6 +152,97 @@ func parseTimeRange(tr string) (time.Time, time.Time) {
 	}
 }
 
+// buildLogQuery dynamically applies all filter criteria with proper trimming, case-insensitivity, and tokenized multi-word search
+func buildLogQuery(db *gorm.DB, filter LogFilter, excludeLevel bool) *gorm.DB {
+	// 1. Machine ID / Hostname
+	mID := strings.TrimSpace(filter.MachineID)
+	if mID != "" && !strings.EqualFold(mID, "ALL") {
+		if mUUID, err := uuid.Parse(mID); err == nil {
+			db = db.Where("machine_id = ? OR LOWER(hostname) = LOWER(?)", mUUID, mID)
+		} else {
+			db = db.Where("LOWER(hostname) = LOWER(?) OR machine_id::text LIKE ?", strings.ToLower(mID), mID+"%")
+		}
+	}
+
+	// 2. Hostname
+	if h := strings.TrimSpace(filter.Hostname); h != "" && !strings.EqualFold(h, "ALL") {
+		db = db.Where("LOWER(hostname) = ?", strings.ToLower(h))
+	}
+
+	// 3. Platform
+	if p := strings.TrimSpace(filter.Platform); p != "" && !strings.EqualFold(p, "ALL") {
+		db = db.Where("LOWER(platform) = ?", strings.ToLower(p))
+	}
+
+	// 4. OS
+	if os := strings.TrimSpace(filter.OS); os != "" && !strings.EqualFold(os, "ALL") {
+		db = db.Where("LOWER(os) LIKE ?", "%"+strings.ToLower(os)+"%")
+	}
+
+	// 5. Level (only if not computing level distributions)
+	if !excludeLevel {
+		if lvl := strings.TrimSpace(filter.Level); lvl != "" && !strings.EqualFold(lvl, "ALL") {
+			db = db.Where("UPPER(level) = ?", strings.ToUpper(lvl))
+		}
+	}
+
+	// 6. Source
+	if src := strings.TrimSpace(filter.Source); src != "" && !strings.EqualFold(src, "ALL") {
+		db = db.Where("LOWER(source) = ?", strings.ToLower(src))
+	}
+
+	// 7. Service
+	if svc := strings.TrimSpace(filter.Service); svc != "" && !strings.EqualFold(svc, "ALL") {
+		db = db.Where("LOWER(service) = ?", strings.ToLower(svc))
+	}
+
+	// 8. ContainerName
+	if c := strings.TrimSpace(filter.ContainerName); c != "" && !strings.EqualFold(c, "ALL") {
+		db = db.Where("LOWER(container_name) = ?", strings.ToLower(c))
+	}
+
+	// 9. PodName
+	if pod := strings.TrimSpace(filter.PodName); pod != "" && !strings.EqualFold(pod, "ALL") {
+		db = db.Where("LOWER(pod_name) = ?", strings.ToLower(pod))
+	}
+
+	// 10. Namespace
+	if ns := strings.TrimSpace(filter.Namespace); ns != "" && !strings.EqualFold(ns, "ALL") {
+		db = db.Where("LOWER(namespace) = ?", strings.ToLower(ns))
+	}
+
+	// 11. ClusterName
+	if cl := strings.TrimSpace(filter.ClusterName); cl != "" && !strings.EqualFold(cl, "ALL") {
+		db = db.Where("LOWER(cluster_name) = ?", strings.ToLower(cl))
+	}
+
+	// 12. Time Range (Prioritize explicit timestamps if provided)
+	if filter.StartTime != nil && !filter.StartTime.IsZero() {
+		db = db.Where("timestamp >= ?", *filter.StartTime)
+		if filter.EndTime != nil && !filter.EndTime.IsZero() {
+			db = db.Where("timestamp <= ?", *filter.EndTime)
+		}
+	} else if tr := strings.TrimSpace(filter.TimeRange); tr != "" && !strings.EqualFold(tr, "ALL") {
+		start, end := parseTimeRange(tr)
+		if !start.IsZero() {
+			db = db.Where("timestamp BETWEEN ? AND ?", start, end)
+		}
+	}
+
+	// 13. Tokenized Multi-Word Search (AND-matching across all terms)
+	if q := strings.TrimSpace(filter.Query); q != "" {
+		words := strings.Fields(q)
+		for _, w := range words {
+			cleanWord := strings.ReplaceAll(w, "%", "\\%")
+			cleanWord = strings.ReplaceAll(cleanWord, "_", "\\_")
+			term := "%" + strings.ToLower(cleanWord) + "%"
+			db = db.Where("(LOWER(message) LIKE ? OR LOWER(hostname) LIKE ? OR LOWER(service) LIKE ? OR LOWER(source) LIKE ? OR LOWER(container_name) LIKE ? OR LOWER(pod_name) LIKE ?)", term, term, term, term, term, term)
+		}
+	}
+
+	return db
+}
+
 func (r *postgresRepository) GetLogs(filter LogFilter) ([]models.Log, int64, error) {
 	if database.DB == nil {
 		mock := generateMockLogs(uuid.Nil)
@@ -161,55 +253,7 @@ func (r *postgresRepository) GetLogs(filter LogFilter) ([]models.Log, int64, err
 	var logs []models.Log
 	var total int64
 
-	db := database.DB.Model(&models.Log{})
-
-	if filter.MachineID != "" && filter.MachineID != "ALL" {
-		if mUUID, err := uuid.Parse(filter.MachineID); err == nil {
-			db = db.Where("machine_id = ? OR LOWER(hostname) = LOWER(?)", mUUID, filter.MachineID)
-		} else {
-			db = db.Where("LOWER(hostname) = LOWER(?) OR machine_id::text LIKE ?", strings.ToLower(filter.MachineID), filter.MachineID+"%")
-		}
-	}
-	if filter.Hostname != "" && filter.Hostname != "ALL" {
-		db = db.Where("LOWER(hostname) = ?", strings.ToLower(filter.Hostname))
-	}
-	if filter.Platform != "" && filter.Platform != "ALL" {
-		db = db.Where("LOWER(platform) = ?", strings.ToLower(filter.Platform))
-	}
-	if filter.Level != "" && filter.Level != "ALL" {
-		db = db.Where("UPPER(level) = ?", strings.ToUpper(filter.Level))
-	}
-	if filter.Source != "" && filter.Source != "ALL" {
-		db = db.Where("LOWER(source) = ?", strings.ToLower(filter.Source))
-	}
-	if filter.Service != "" && filter.Service != "ALL" {
-		db = db.Where("LOWER(service) = ?", strings.ToLower(filter.Service))
-	}
-	if filter.ContainerName != "" && filter.ContainerName != "ALL" {
-		db = db.Where("LOWER(container_name) = ?", strings.ToLower(filter.ContainerName))
-	}
-	if filter.PodName != "" && filter.PodName != "ALL" {
-		db = db.Where("LOWER(pod_name) = ?", strings.ToLower(filter.PodName))
-	}
-
-	if filter.TimeRange != "" && filter.TimeRange != "ALL" {
-		start, end := parseTimeRange(filter.TimeRange)
-		if !start.IsZero() {
-			db = db.Where("timestamp BETWEEN ? AND ?", start, end)
-		}
-	} else {
-		if filter.StartTime != nil && !filter.StartTime.IsZero() {
-			db = db.Where("timestamp >= ?", *filter.StartTime)
-		}
-		if filter.EndTime != nil && !filter.EndTime.IsZero() {
-			db = db.Where("timestamp <= ?", *filter.EndTime)
-		}
-	}
-
-	if filter.Query != "" {
-		q := "%" + strings.ToLower(filter.Query) + "%"
-		db = db.Where("LOWER(message) LIKE ? OR LOWER(hostname) LIKE ? OR LOWER(service) LIKE ? OR LOWER(source) LIKE ?", q, q, q, q)
-	}
+	db := buildLogQuery(database.DB.Model(&models.Log{}), filter, false)
 
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -219,14 +263,17 @@ func (r *postgresRepository) GetLogs(filter LogFilter) ([]models.Log, int64, err
 	if limit <= 0 {
 		limit = 100
 	}
-	if err := db.Order("timestamp desc").Offset(filter.Offset).Limit(limit).Find(&logs).Error; err != nil {
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	// Deterministic pagination with secondary tie-breaker
+	if err := db.Order("timestamp desc, id desc").Offset(filter.Offset).Limit(limit).Find(&logs).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if total == 0 && len(logs) == 0 {
-		mock := generateMockLogs(uuid.Nil)
-		filtered := filterMockLogs(mock, filter.Level, filter.Source, filter.Query)
-		return filtered, int64(len(filtered)), nil
+	if logs == nil {
+		logs = make([]models.Log, 0)
 	}
 
 	return logs, total, nil
@@ -254,39 +301,54 @@ func (r *postgresRepository) GetLogStats(filter LogFilter) (*LogStats, error) {
 		stats.Total = int64(len(mock))
 		for _, l := range mock {
 			switch strings.ToUpper(l.Level) {
-			case "INFO":
+			case "INFO", "NOTICE":
 				stats.Info++
 			case "WARN", "WARNING":
 				stats.Warning++
 			case "ERROR":
 				stats.Error++
-			case "CRITICAL", "FATAL":
+			case "CRITICAL":
 				stats.Critical++
+			case "FATAL":
+				stats.Fatal++
 			}
 		}
 		return stats, nil
 	}
 
-	db := database.DB.Model(&models.Log{})
-	if filter.MachineID != "" && filter.MachineID != "ALL" {
-		if mUUID, err := uuid.Parse(filter.MachineID); err == nil {
-			db = db.Where("machine_id = ?", mUUID)
-		}
-	}
-	if filter.TimeRange != "" && filter.TimeRange != "ALL" {
-		start, end := parseTimeRange(filter.TimeRange)
-		if !start.IsZero() {
-			db = db.Where("timestamp BETWEEN ? AND ?", start, end)
-		}
+	// Base query with all filters applied except Level
+	baseDB := buildLogQuery(database.DB.Model(&models.Log{}), filter, true)
+
+	// 1. Total Count
+	if err := baseDB.Session(&gorm.Session{}).Count(&stats.Total).Error; err != nil {
+		return nil, err
 	}
 
-	db.Count(&stats.Total)
-
-	db.Where("UPPER(level) IN ('INFO', 'NOTICE')").Count(&stats.Info)
-	db.Where("UPPER(level) IN ('WARN', 'WARNING')").Count(&stats.Warning)
-	db.Where("UPPER(level) = 'ERROR'").Count(&stats.Error)
-	db.Where("UPPER(level) = 'CRITICAL'").Count(&stats.Critical)
-	db.Where("UPPER(level) = 'FATAL'").Count(&stats.Fatal)
+	// 2. Aggregated Level Counts via GROUP BY (100% accurate, no sequential GORM pollution)
+	type LevelCount struct {
+		Level string `gorm:"column:level"`
+		Count int64  `gorm:"column:count"`
+	}
+	var levelCounts []LevelCount
+	if err := baseDB.Session(&gorm.Session{}).
+		Select("UPPER(level) as level, count(*) as count").
+		Group("UPPER(level)").
+		Scan(&levelCounts).Error; err == nil {
+		for _, lc := range levelCounts {
+			switch strings.ToUpper(strings.TrimSpace(lc.Level)) {
+			case "INFO", "NOTICE":
+				stats.Info += lc.Count
+			case "WARN", "WARNING":
+				stats.Warning += lc.Count
+			case "ERROR":
+				stats.Error += lc.Count
+			case "CRITICAL":
+				stats.Critical += lc.Count
+			case "FATAL":
+				stats.Fatal += lc.Count
+			}
+		}
+	}
 
 	return stats, nil
 }

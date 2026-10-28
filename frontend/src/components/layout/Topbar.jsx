@@ -1,17 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Search,
   Bell,
-  Moon,
-  Sun,
-  Calendar,
-  ChevronDown,
   User,
   LogOut,
-  Settings,
-  ChevronLeft,
-  ChevronRight,
   CheckCircle,
   AlertTriangle,
   ExternalLink,
@@ -20,35 +12,40 @@ import {
   Sparkles,
   Check,
   RotateCcw,
+  Mail,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
 import { useAlertStore } from '../../store/alertStore.jsx';
 
 export default function Topbar({ userProfile }) {
   const navigate = useNavigate();
-  const [theme, setTheme] = useState(() => localStorage.getItem('infrapilot_theme') || 'dark');
+  const location = useLocation();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showAlertsMenu, setShowAlertsMenu] = useState(false);
   const [alertTab, setAlertTab] = useState('all'); // 'all' | 'critical' | 'warning'
+
+  const pageMeta = useMemo(() => {
+    const p = (location?.pathname || '/').toLowerCase();
+    if (p.startsWith('/security')) return { title: 'Security Suite', subtitle: 'Host Security Audit & Compliance' };
+    if (p.startsWith('/terminal')) return { title: 'Fleet Terminal', subtitle: 'Distributed Log & Remote Command Execution' };
+    if (p.startsWith('/sre-disk')) return { title: 'SRE Disk Space', subtitle: 'Predictive Disk Management & Auto-Remediation' };
+    if (p.startsWith('/sre-crash')) return { title: 'Crash & Service Health', subtitle: 'Daemon Watchdog & High-Availability Service Monitoring' };
+    if (p.startsWith('/sre-latency') || p.startsWith('/latency') || p.startsWith('/network')) return { title: 'Latency & Gateway', subtitle: 'Network Health & SRE Diagnostic Probes' };
+    if (p.startsWith('/docker')) return { title: 'Docker Containers', subtitle: 'Fleet Container Runtime & Container Metrics' };
+    if (p.startsWith('/kubernetes') || p.startsWith('/k8s')) return { title: 'Kubernetes', subtitle: 'Pods, Namespaces & Cluster Orchestration' };
+    if (p.startsWith('/live-metrics') || p.startsWith('/metrics')) return { title: 'Metrics', subtitle: 'Live System Telemetry & Performance Streams' };
+    if (p.startsWith('/alerts')) return { title: 'Alerts', subtitle: 'Incident Management & Rule Triggers' };
+    if (p.startsWith('/reports') || p.startsWith('/analytics')) return { title: 'Reports & Analytics', subtitle: 'Infrastructure Reliability & Uptime Reports' };
+    if (p.startsWith('/agents')) return { title: 'Agents', subtitle: 'Connected Node Agents & Installation' };
+    if (p.startsWith('/notifications')) return { title: 'Notifications & Email', subtitle: 'Email Delivery & Webhook Channels' };
+    if (p.startsWith('/users') || p.startsWith('/user-management') || p.startsWith('/admin/users')) return { title: 'User Management', subtitle: 'Role-Based Access Control & User Directory' };
+    if (p.startsWith('/settings')) return { title: 'System Settings', subtitle: 'Enterprise Dashboard & Alert Settings' };
+    if (p.startsWith('/servers') || p.startsWith('/machines')) return { title: 'Node Telemetry', subtitle: 'Detailed Machine Health & System Metrics' };
+    return { title: 'Overview', subtitle: 'Enterprise Infrastructure Dashboard' };
+  }, [location?.pathname]);
   const [cleaningUp, setCleaningUp] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState('5s');
 
-  const toggleTheme = () => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(nextTheme);
-    localStorage.setItem('infrapilot_theme', nextTheme);
-    document.documentElement.setAttribute('data-theme', nextTheme);
-  };
-
-  // Date & Calendar State
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState('now');
-  const [currentDate, setCurrentDate] = useState(() => new Date());
-  const [calendarMonth, setCalendarMonth] = useState(() => new Date());
-  const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [displayRangeText, setDisplayRangeText] = useState('');
-
-  const calendarRef = useRef(null);
   const alertsRef = useRef(null);
   const {
     alerts,
@@ -62,62 +59,9 @@ export default function Topbar({ userProfile }) {
   } = useAlertStore();
   const { addToast } = useDashboardStore();
 
-  // Format real-time date string
-  useEffect(() => {
-    const updateDateText = () => {
-      const now = new Date();
-      setCurrentDate(now);
-
-      if (selectedPreset === 'now') {
-        const monthDayYear = now.toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        });
-        const timeStr = now.toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true,
-        });
-        setDisplayRangeText(`${monthDayYear} ${timeStr} - Now`);
-      } else if (selectedPreset === 'today') {
-        const monthDayYear = now.toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        });
-        setDisplayRangeText(`${monthDayYear} 00:00 AM - Now`);
-      } else if (selectedPreset === '7d') {
-        const past7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const pastStr = past7.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        const nowStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        setDisplayRangeText(`${pastStr} - ${nowStr}`);
-      } else if (selectedPreset === '30d') {
-        const past30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        const pastStr = past30.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        const nowStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        setDisplayRangeText(`${pastStr} - ${nowStr}`);
-      } else if (selectedPreset === 'custom') {
-        const selStr = selectedDate.toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        });
-        setDisplayRangeText(`${selStr} - Present`);
-      }
-    };
-
-    updateDateText();
-    const interval = setInterval(updateDateText, 30000);
-    return () => clearInterval(interval);
-  }, [selectedPreset, selectedDate]);
-
   // Close popovers on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (calendarRef.current && !calendarRef.current.contains(event.target)) {
-        setShowCalendar(false);
-      }
       if (alertsRef.current && !alertsRef.current.contains(event.target)) {
         setShowAlertsMenu(false);
       }
@@ -133,181 +77,20 @@ export default function Topbar({ userProfile }) {
     navigate('/login');
   };
 
-  // Calendar Calculation
-  const year = calendarMonth.getFullYear();
-  const month = calendarMonth.getMonth();
-  const firstDayOfMonth = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  const handlePrevMonth = () => {
-    setCalendarMonth(new Date(year, month - 1, 1));
-  };
-  const handleNextMonth = () => {
-    setCalendarMonth(new Date(year, month + 1, 1));
-  };
-
-  const handleSelectDay = (dayNum) => {
-    const clickedDate = new Date(year, month, dayNum);
-    setSelectedDate(clickedDate);
-    setSelectedPreset('custom');
-  };
-
-  const handleApplyPreset = (presetKey) => {
-    setSelectedPreset(presetKey);
-    setShowCalendar(false);
-    addToast('info', 'Date Range Updated', `Timefilter applied.`);
-  };
-
   return (
     <header className="topbar">
       {/* Title & Subtitle */}
       <div className="topbar-left">
-        <h1 className="page-title">Overview</h1>
-        <span className="page-subtitle">Enterprise Infrastructure Dashboard</span>
-      </div>
-
-      {/* Center Search Bar */}
-      <div className="topbar-search">
-        <Search size={15} color="#64748b" />
-        <input type="text" placeholder="Search machines, metrics, logs..." />
-        <span className="search-kbd">Ctrl /</span>
+        <h1 className="page-title">{pageMeta.title}</h1>
+        <span className="page-subtitle">{pageMeta.subtitle}</span>
       </div>
 
       {/* Right Controls */}
       <div className="topbar-right">
-        {/* Live Pill */}
-        <div className="live-pill">
-          <span className="pulse-dot" />
-          <span>Live</span>
-          <span className="info-i">i</span>
-        </div>
-
-        {/* Refresh Interval Selector */}
-        <div className="select-pill">
-          <select value={refreshInterval} onChange={(e) => setRefreshInterval(e.target.value)}>
-            <option value="5s">5s</option>
-            <option value="10s">10s</option>
-            <option value="30s">30s</option>
-            <option value="1m">1m</option>
-          </select>
-          <ChevronDown size={12} color="#94a3b8" />
-        </div>
-
-        {/* Date Range Picker */}
-        <div className="calendar-container-wrapper" ref={calendarRef}>
-          <button
-            className={`date-picker-btn ${showCalendar ? 'active' : ''}`}
-            onClick={() => setShowCalendar(!showCalendar)}
-            type="button"
-          >
-            <span>{displayRangeText || 'May 24, 2025 10:30 AM - Now'}</span>
-            <Calendar size={14} color="#06b6d4" style={{ marginLeft: 8 }} />
-          </button>
-
-          {/* Calendar Popover */}
-          {showCalendar && (
-            <div className="calendar-popover">
-              <div className="calendar-sidebar">
-                <span className="sidebar-heading">TIME RANGES</span>
-                <button
-                  className={`preset-btn ${selectedPreset === 'now' ? 'active' : ''}`}
-                  onClick={() => handleApplyPreset('now')}
-                  type="button"
-                >
-                  Live (Real-Time)
-                </button>
-                <button
-                  className={`preset-btn ${selectedPreset === 'today' ? 'active' : ''}`}
-                  onClick={() => handleApplyPreset('today')}
-                  type="button"
-                >
-                  Today
-                </button>
-                <button
-                  className={`preset-btn ${selectedPreset === '7d' ? 'active' : ''}`}
-                  onClick={() => handleApplyPreset('7d')}
-                  type="button"
-                >
-                  Last 7 Days
-                </button>
-                <button
-                  className={`preset-btn ${selectedPreset === '30d' ? 'active' : ''}`}
-                  onClick={() => handleApplyPreset('30d')}
-                  type="button"
-                >
-                  Last 30 Days
-                </button>
-              </div>
-
-              <div className="calendar-main-view">
-                <div className="calendar-header-controls">
-                  <button className="cal-nav-btn" onClick={handlePrevMonth} type="button">
-                    <ChevronLeft size={16} />
-                  </button>
-                  <strong className="month-year-title">
-                    {calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                  </strong>
-                  <button className="cal-nav-btn" onClick={handleNextMonth} type="button">
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-
-                <div className="days-header-row">
-                  <span>Su</span>
-                  <span>Mo</span>
-                  <span>Tu</span>
-                  <span>We</span>
-                  <span>Th</span>
-                  <span>Fr</span>
-                  <span>Sa</span>
-                </div>
-
-                <div className="days-grid">
-                  {Array.from({ length: firstDayOfMonth }).map((_, idx) => (
-                    <span key={`empty-${idx}`} className="day-empty" />
-                  ))}
-
-                  {Array.from({ length: daysInMonth }).map((_, idx) => {
-                    const dayNum = idx + 1;
-                    const isToday =
-                      dayNum === currentDate.getDate() &&
-                      month === currentDate.getMonth() &&
-                      year === currentDate.getFullYear();
-
-                    const isSelected =
-                      selectedPreset === 'custom' &&
-                      dayNum === selectedDate.getDate() &&
-                      month === selectedDate.getMonth() &&
-                      year === selectedDate.getFullYear();
-
-                    return (
-                      <button
-                        key={`day-${dayNum}`}
-                        className={`day-cell ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}`}
-                        onClick={() => handleSelectDay(dayNum)}
-                        type="button"
-                      >
-                        {dayNum}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="calendar-footer-bar">
-                  <button className="btn-cancel" onClick={() => setShowCalendar(false)} type="button">
-                    Cancel
-                  </button>
-                  <button
-                    className="btn-apply"
-                    onClick={() => handleApplyPreset(selectedPreset)}
-                    type="button"
-                  >
-                    Apply Range
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+        {/* Live WebSocket Telemetry Beacon */}
+        <div className="live-pill" title="Real-time WebSocket telemetry stream active">
+          <span className="beacon-dot" />
+          <span className="live-pill-text">WebSocket: Live</span>
         </div>
 
         {/* Notification Bell with Badge & Enterprise Flyout */}
@@ -505,19 +288,6 @@ export default function Topbar({ userProfile }) {
           )}
         </div>
 
-        {/* Dark Mode Moon Toggle */}
-        <button
-          className="header-icon-btn"
-          onClick={toggleTheme}
-          title="Toggle Theme"
-          type="button"
-        >
-          {theme === 'light' ? (
-            <Sun size={17} color="#f59e0b" />
-          ) : (
-            <Moon size={17} color="#cbd5e1" />
-          )}
-        </button>
 
         {/* User Profile Info */}
         <div className="profile-container">
@@ -537,23 +307,34 @@ export default function Topbar({ userProfile }) {
                 className="menu-item"
                 onClick={() => {
                   setShowDropdown(false);
+                  navigate('/notifications');
+                }}
+                type="button"
+              >
+                <Mail size={14} style={{ marginRight: 8 }} />
+                Notifications & Email
+              </button>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  setShowDropdown(false);
+                  navigate('/settings');
+                }}
+                type="button"
+              >
+                <SettingsIcon size={14} style={{ marginRight: 8 }} />
+                System Settings
+              </button>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  setShowDropdown(false);
                   navigate('/admin/users');
                 }}
                 type="button"
               >
                 <User size={14} style={{ marginRight: 8 }} />
                 User Management (RBAC)
-              </button>
-              <button
-                className="menu-item"
-                onClick={() => {
-                  setShowDropdown(false);
-                  navigate('/admin/settings');
-                }}
-                type="button"
-              >
-                <Settings size={14} style={{ marginRight: 8 }} />
-                Account Settings
               </button>
               <div className="menu-divider" />
               <button className="menu-item logout" onClick={handleLogout} type="button">
@@ -568,12 +349,14 @@ export default function Topbar({ userProfile }) {
       <style>{`
         .topbar {
           height: 60px;
-          background-color: #0b0f19;
-          border-bottom: 1px solid #161e2e;
+          background: rgba(8, 12, 20, 0.82);
+          backdrop-filter: blur(18px);
+          -webkit-backdrop-filter: blur(18px);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.07);
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 20px;
+          padding: 0 24px;
           gap: 16px;
           z-index: 90;
           user-select: none;
@@ -583,276 +366,43 @@ export default function Topbar({ userProfile }) {
           flex-direction: column;
         }
         .page-title {
-          font-size: 17px;
+          font-size: 16.5px;
           font-weight: 700;
-          color: #ffffff;
+          color: #f8fafc;
           margin: 0;
           line-height: 1.2;
+          letter-spacing: -0.015em;
         }
         .page-subtitle {
-          font-size: 11.5px;
+          font-size: 11px;
           color: #64748b;
+          font-weight: 500;
         }
-        .topbar-search {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          background-color: #121824;
-          border: 1px solid #161e2e;
-          border-radius: 8px;
-          padding: 6px 12px;
-          width: 320px;
-        }
-        .topbar-search input {
-          background: transparent;
-          border: none;
-          outline: none;
-          color: #f8fafc;
-          font-size: 12.5px;
-          width: 100%;
-        }
-        .topbar-search input::placeholder {
-          color: #64748b;
-        }
-        .search-kbd {
-          font-size: 10px;
-          color: #64748b;
-          background-color: #0b0f19;
-          border: 1px solid #161e2e;
-          border-radius: 4px;
-          padding: 2px 5px;
-          white-space: nowrap;
-        }
+
         .topbar-right {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 12px;
         }
         .live-pill {
           display: flex;
           align-items: center;
-          gap: 6px;
-          background-color: rgba(34, 197, 94, 0.1);
-          border: 1px solid rgba(34, 197, 94, 0.25);
-          color: #22c55e;
-          padding: 4px 9px;
-          border-radius: 6px;
-          font-size: 11.5px;
-          font-weight: 600;
-        }
-        .pulse-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background-color: #22c55e;
-          box-shadow: 0 0 6px #22c55e;
-        }
-        .info-i {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 13px;
-          height: 13px;
-          border-radius: 50%;
-          border: 1px solid #22c55e;
-          font-size: 9px;
-          line-height: 1;
-        }
-        .select-pill {
-          display: flex;
-          align-items: center;
-          background-color: #121824;
-          border: 1px solid #161e2e;
-          border-radius: 6px;
-          padding: 4px 8px;
-        }
-        .select-pill select {
-          background: transparent;
-          border: none;
-          color: #cbd5e1;
-          font-size: 12px;
-          outline: none;
-          cursor: pointer;
-          appearance: none;
-          padding-right: 4px;
-        }
-
-        .calendar-container-wrapper {
-          position: relative;
-        }
-        .date-picker-btn {
-          display: flex;
-          align-items: center;
-          background-color: #121824;
-          border: 1px solid #161e2e;
-          border-radius: 6px;
-          padding: 5px 10px;
-          font-size: 12px;
-          color: #cbd5e1;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-        .date-picker-btn:hover, .date-picker-btn.active {
-          border-color: #06b6d4;
-          background-color: #162132;
-        }
-
-        .calendar-popover {
-          position: absolute;
-          top: calc(100% + 8px);
-          right: 0;
-          display: flex;
-          background-color: #0d1220;
-          border: 1px solid #1f2e44;
-          border-radius: 12px;
-          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
-          z-index: 200;
-          overflow: hidden;
-          width: 480px;
-        }
-
-        .calendar-sidebar {
-          width: 140px;
-          background-color: #080c14;
-          border-right: 1px solid #1f2e44;
-          padding: 12px;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-        .sidebar-heading {
-          font-size: 10px;
-          font-weight: 800;
-          color: #64748b;
-          letter-spacing: 0.05em;
-          margin-bottom: 4px;
-        }
-        .preset-btn {
-          background: transparent;
-          border: none;
-          color: #94a3b8;
-          font-size: 12px;
-          padding: 6px 10px;
-          border-radius: 6px;
-          text-align: left;
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-        .preset-btn:hover {
-          background-color: #121824;
-          color: #ffffff;
-        }
-        .preset-btn.active {
-          background-color: #1d4ed8;
-          color: #ffffff;
-          font-weight: 600;
-        }
-
-        .calendar-main-view {
-          flex: 1;
-          padding: 14px;
-          display: flex;
-          flex-direction: column;
-        }
-        .calendar-header-controls {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 12px;
-        }
-        .month-year-title {
-          font-size: 13.5px;
-          color: #ffffff;
-          font-weight: 700;
-        }
-        .cal-nav-btn {
-          background: #121824;
-          border: 1px solid #1f2e44;
-          color: #cbd5e1;
-          border-radius: 6px;
-          padding: 4px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .cal-nav-btn:hover {
-          color: #ffffff;
-          background-color: #1f2e44;
-        }
-
-        .days-header-row {
-          display: grid;
-          grid-template-columns: repeat(7, 1fr);
-          text-align: center;
-          font-size: 11px;
-          color: #64748b;
-          font-weight: 700;
-          margin-bottom: 6px;
-        }
-        .days-grid {
-          display: grid;
-          grid-template-columns: repeat(7, 1fr);
-          gap: 2px;
-        }
-        .day-empty {
-          height: 30px;
-        }
-        .day-cell {
-          height: 30px;
-          background: transparent;
-          border: none;
-          color: #cbd5e1;
-          font-size: 11.5px;
-          border-radius: 6px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .day-cell:hover {
-          background-color: #1f2e44;
-          color: #ffffff;
-        }
-        .day-cell.today {
-          border: 1px solid #06b6d4;
-          color: #06b6d4;
-          font-weight: 700;
-        }
-        .day-cell.selected {
-          background-color: #3b82f6;
-          color: #ffffff;
-          font-weight: 700;
-        }
-
-        .calendar-footer-bar {
-          display: flex;
-          justify-content: flex-end;
           gap: 8px;
-          margin-top: 12px;
-          padding-top: 10px;
-          border-top: 1px solid #1f2e44;
-        }
-        .btn-cancel {
-          background: transparent;
-          border: 1px solid #1f2e44;
-          color: #94a3b8;
-          font-size: 11.5px;
-          padding: 4px 10px;
-          border-radius: 6px;
-          cursor: pointer;
-        }
-        .btn-apply {
-          background-color: #3b82f6;
-          border: none;
-          color: #ffffff;
+          background: rgba(16, 185, 129, 0.10);
+          border: 1px solid rgba(16, 185, 129, 0.28);
+          color: #10b981;
+          padding: 5px 11px;
+          border-radius: 20px;
           font-size: 11.5px;
           font-weight: 600;
-          padding: 4px 12px;
-          border-radius: 6px;
-          cursor: pointer;
+          letter-spacing: 0.02em;
+          box-shadow: 0 0 12px rgba(16, 185, 129, 0.12);
         }
+        .live-pill-text {
+          color: #34d399;
+          font-size: 11px;
+        }
+
 
         .alerts-bell-container {
           position: relative;

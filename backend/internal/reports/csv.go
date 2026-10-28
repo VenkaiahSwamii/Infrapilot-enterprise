@@ -22,7 +22,7 @@ func (c *CSVGenerator) Generate(report *Report, data map[string]interface{}) (st
 		return "", err
 	}
 
-	filename := string(report.Type) + "_" + report.ID.String() + ".csv"
+	filename := fmt.Sprintf("%s_%s.csv", report.Type, report.ID.String())
 	filePath := filepath.Join(c.BaseDir, filename)
 
 	file, err := os.Create(filePath)
@@ -39,6 +39,9 @@ func (c *CSVGenerator) Generate(report *Report, data map[string]interface{}) (st
 	writer.Write([]string{"Generated: " + report.GeneratedAt.Format(time.RFC1123)})
 	writer.Write([]string{"Type: " + string(report.Type)})
 	writer.Write([]string{"Format: " + strings.ToUpper(report.Format)})
+	if report.Scope != "" {
+		writer.Write([]string{"Scope: " + report.Scope})
+	}
 	writer.Write([]string{})
 
 	// Write tables
@@ -55,15 +58,19 @@ func (c *CSVGenerator) Generate(report *Report, data map[string]interface{}) (st
 				}
 			}
 
-			for _, row := range table.Rows {
-				record := make([]string, len(table.Headers))
-				for i, val := range row {
-					if i < len(table.Headers) {
-						record[i] = fmt.Sprintf("%v", val)
+			if len(table.Rows) == 0 && len(table.Headers) > 0 {
+				writer.Write([]string{"No records found matching criteria"})
+			} else {
+				for _, row := range table.Rows {
+					record := make([]string, len(table.Headers))
+					for i := 0; i < len(table.Headers); i++ {
+						if i < len(row) && row[i] != nil {
+							record[i] = fmt.Sprintf("%v", row[i])
+						}
 					}
-				}
-				if err := writer.Write(record); err != nil {
-					return "", err
+					if err := writer.Write(record); err != nil {
+						return "", err
+					}
 				}
 			}
 			writer.Write([]string{})

@@ -1,30 +1,75 @@
 # ===================================================================
-# InfraPilot Enterprise Agent Configuration (TOML)
+# InfraPilot Enterprise - Global & Fleet Configuration (TOML)
 # ===================================================================
 
-server_address = "192.168.1.13:50051"
-backend_url = "http://192.168.1.13:8080"
+# 1. Telemetry Ingester & REST Server Configuration
+[server]
+http_port = 8080
+grpc_port = 50051
+backend_url = "http://192.168.1.86:8080"
+connection_timeout = 10
+retry_attempts = 3
+retry_delay = 5
+allowed_origins = ["http://192.168.1.24:5173", "http://192.168.1.24:3000", "http://192.168.1.24:8080", "http://192.168.1.86:5173", "http://192.168.1.86:3000", "http://192.168.1.86:8080", "http://192.168.1.15:5173", "http://192.168.1.15:3000", "http://192.168.1.15:8080", "http://localhost:5173", "http://localhost:3000"]
+
+[server.tls]
+enabled = true
+ca_cert = "certs/ca.crt"
+server_cert = "certs/server.crt"
+server_key = "certs/server.key"
+
+[server.database]
+driver = "postgres"
+host = "192.168.1.136"
+port = 5432
+user = "postgres"
+password = "postgres"
+dbname = "infrapilot"
+sslmode = "disable"
+
+[server.smtp]
+enabled = true
+host = "smtp.gmail.com"
+port = 587
+user = "infrapilotadmin@gmail.com"
+password = "ajrlswurhrurjddk"
+from = "InfraPilot Enterprise <infrapilotadmin@gmail.com>"
+default_recipient = "infrapilotadmin@gmail.com"
+
+[server.retention]
+raw_metrics_days = 7
+hourly_rollups_days = 90
+audit_events_days = 365
+
+[server.archival]
+enabled = true
+api_endpoint = "https://ijlkg6lgp3m6lb7ekfhbz2phwe0izzqh.lambda-url.ap-south-1.on.aws/"
+event_retention_minutes = 10
+raw_retention_minutes = 60
+export_events = true
+export_raw_metrics = true
+export_aggregated_metrics = true
+
+# 2. Edge Agent (infrapilot-agent) Configuration
+[agent]
+server_address = "192.168.1.86:50051"
+backend_url = "http://192.168.1.86:8080"
 machine_id = ""
 api_key = ""
 enrollment_token = ""
 interval = 5
-machine_name = ""
+machine_name = "InfraPilot-Enterprise-Node"
+tags = ["production", "web-server"]
 
-# -------------------------------------------------------------------
-# Security & TLS Configuration
-# -------------------------------------------------------------------
-[tls]
+[agent.tls]
 tls_enabled = true
 mtls_enabled = true
 ca_cert = "certs/ca.crt"
 agent_cert = "certs/agent.crt"
 agent_key = "certs/agent.key"
 
-# -------------------------------------------------------------------
-# SRE Disk Space & Remediation Engine
-# -------------------------------------------------------------------
-[disk]
-# "auto" automatically detects "C:" on Windows and "/" on Linux / Ubuntu
+[agent.disk]
+# "auto" automatically selects "C:" on Windows and "/" on Linux / Ubuntu
 target_mount_point = "auto"
 reactive_threshold_percent = 90.0
 predictive_hours = 4.0
@@ -35,21 +80,39 @@ deny_list = [
     "data"
 ]
 
-# -------------------------------------------------------------------
-# SRE Crash Monitor & Service Health
-# -------------------------------------------------------------------
-[services]
+[agent.services]
+linux = [
+    "ssh.service",
+    "cron.service",
+    "systemd-journald.service",
+    "nginx.service",
+    "postgresql.service"
+]
+windows = [
+    "Spooler",
+    "WinDefend",
+    "EventLog",
+    "wuauserv",
+    "W32Time"
+]
 accept_list = [
     "ssh.service",
     "cron.service",
-    "systemd-journald.service"
+    "systemd-journald.service",
+    "nginx.service",
+    "postgresql.service",
+    "Spooler",
+    "WinDefend",
+    "EventLog",
+    "wuauserv",
+    "W32Time"
 ]
 
-# -------------------------------------------------------------------
-# SRE Latency Degradation & Gateway Monitor
-# -------------------------------------------------------------------
-[latency]
-target_gateway = "8.8.8.8"
+[agent.latency]
+target_gateway = "192.168.1.1"
+default_gateway = "192.168.1.1"
+policy_mode = "NOTIFY_EMAIL"
+alert_threshold_ms = 200.0
 baseline_p95_ms = 40.0
 threshold_multiplier = 3.0
 alert_window_minutes = 5
@@ -59,10 +122,30 @@ accept_list = [
     "postgresql.service"
 ]
 
-# -------------------------------------------------------------------
-# Agent Logging Configuration
-# -------------------------------------------------------------------
-[logging]
+[network_monitoring]
+policy_mode = "NOTIFY_EMAIL"
+default_gateway = "192.168.1.1"
+alert_threshold_ms = 200.0
+
+[[network_monitoring.websites]]
+name = "Frontend Web Portal"
+url = "http://192.168.1.86:3000"
+port = 3000
+threshold_ms = 200.0
+
+[[network_monitoring.websites]]
+name = "Core API Gateway"
+url = "http://192.168.1.86:5000"
+port = 5000
+threshold_ms = 250.0
+
+[[network_monitoring.websites]]
+name = "InfraPilot Central Server"
+url = "http://192.168.1.86:8080/api/v1/healthz"
+port = 8080
+threshold_ms = 150.0
+
+[agent.logging]
 log_level = "info"
 log_format = "text"
 log_path = "logs/reports.log"
@@ -70,13 +153,20 @@ daily_rotation = true
 max_age_days = 7
 max_size_mb = 1000
 
-# -------------------------------------------------------------------
-# Active Telemetry Collectors
-# -------------------------------------------------------------------
-[collectors]
+[agent.collectors]
 system = true
 processes = true
 docker = true
 kubernetes = true
 logs = true
 security = true
+
+
+# 4. Enterprise Alerting & Notification Policies
+[alerts]
+email_enabled = true
+admin_email = "infrapilotadmin@gmail.com"  # Destination for alert emails (can be changed to any address)
+cooldown_minutes = 15
+send_resolved_emails = false
+consecutive_breaches_required = 2
+consecutive_normal_required = 2

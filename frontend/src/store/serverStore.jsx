@@ -126,7 +126,7 @@ export function ServerStoreProvider({ children }) {
     const normalizedId = getMachineId(rawMetrics);
     if (!normalizedId) return;
 
-    const timestamp = rawMetrics.created_at || rawMetrics.timestamp || new Date().toISOString();
+    const timestamp = rawMetrics.created_at || rawMetrics.timestamp || rawMetrics.time || rawMetrics.last_seen || new Date().toISOString();
     const timestampMs = new Date(timestamp).getTime() || Date.now();
 
     if (lastUpdatedRef.current[normalizedId] && timestampMs < lastUpdatedRef.current[normalizedId]) {
@@ -153,6 +153,9 @@ export function ServerStoreProvider({ children }) {
       disk_total: rawMetrics.disk_total ? Number(rawMetrics.disk_total) : undefined,
       disk_used: rawMetrics.disk_used ? Number(rawMetrics.disk_used) : undefined,
       cpu_cores: rawMetrics.cpu_cores ? Number(rawMetrics.cpu_cores) : undefined,
+      agent_cpu_usage: rawMetrics.agent_cpu_usage != null ? Number(rawMetrics.agent_cpu_usage) : (rawMetrics.agent_cpu_percent != null ? Number(rawMetrics.agent_cpu_percent) : undefined),
+      agent_memory_usage: rawMetrics.agent_memory_usage != null ? Number(rawMetrics.agent_memory_usage) : (rawMetrics.agent_memory_mb != null ? Number(rawMetrics.agent_memory_mb) : undefined),
+      agent_memory_mb: rawMetrics.agent_memory_mb != null ? Number(rawMetrics.agent_memory_mb) : undefined,
       created_at: timestamp,
       formatted_time: formattedTime,
     };
@@ -201,6 +204,9 @@ export function ServerStoreProvider({ children }) {
               memory_total: normalizedMetric.memory_total || s.memory_total,
               disk_total: normalizedMetric.disk_total || s.disk_total,
               cpu_cores: normalizedMetric.cpu_cores || s.cpu_cores,
+              agent_cpu_usage: normalizedMetric.agent_cpu_usage,
+              agent_memory_mb: normalizedMetric.agent_memory_mb,
+              agent_memory_usage: normalizedMetric.agent_memory_usage,
               last_seen: timestamp,
               formatted_last_seen: formattedTime,
               status: 'ONLINE',
@@ -226,6 +232,9 @@ export function ServerStoreProvider({ children }) {
         memory_total: normalizedMetric.memory_total,
         disk_total: normalizedMetric.disk_total,
         cpu_cores: normalizedMetric.cpu_cores,
+        agent_cpu_usage: normalizedMetric.agent_cpu_usage,
+        agent_memory_mb: normalizedMetric.agent_memory_mb,
+        agent_memory_usage: normalizedMetric.agent_memory_usage,
         last_seen: timestamp,
         formatted_last_seen: formattedTime,
       };

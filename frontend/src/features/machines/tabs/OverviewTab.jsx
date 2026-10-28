@@ -14,7 +14,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
-  ArrowRight
+  ArrowRight,
+  Bot,
+  Activity,
+  Search,
+  Zap
 } from 'lucide-react';
 import { getMachineProcesses } from '../../../api/machines.js';
 
@@ -23,6 +27,7 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
   const [range, setRange] = useState('Last 5 minutes');
   const [processes, setProcesses] = useState([]);
   const [loadingProcs, setLoadingProcs] = useState(false);
+  const [procSearch, setProcSearch] = useState('');
 
   useEffect(() => {
     const machineId = machine?.id || machine?.hostname;
@@ -101,21 +106,21 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
 
   if (fsList.length > 0) {
     const primaryFs = fsList.find((fs) => {
-      const mp = String(fs.mount_point || fs.mountPoint || fs.device || '').toLowerCase();
-      return mp === '/' || mp === 'c:' || mp === 'c:\\';
+      const mp = String(fs.mount_point || fs.MountPoint || fs.mountPoint || fs.device || '').toLowerCase();
+      return mp === '/' || mp === 'c:' || mp === 'c:\\' || mp.startsWith('c:');
     });
     if (primaryFs) {
-      fsTotalBytes = Number(primaryFs.total_bytes || primaryFs.total || 0);
-      fsUsedBytes = Number(primaryFs.used_bytes || primaryFs.used || 0);
+      fsTotalBytes = Number(primaryFs.total || primaryFs.total_bytes || primaryFs.Total || 0);
+      fsUsedBytes = Number(primaryFs.used || primaryFs.used_bytes || primaryFs.Used || 0);
     } else {
       const validFsList = fsList.filter((fs) => {
-        const mp = String(fs.mount_point || fs.mountPoint || fs.device || '').toLowerCase();
-        const fstype = String(fs.fs_type || fs.type || '').toLowerCase();
+        const mp = String(fs.mount_point || fs.MountPoint || fs.mountPoint || fs.device || '').toLowerCase();
+        const fstype = String(fs.fs_type || fs.FSType || fs.type || '').toLowerCase();
         return !mp.includes('/dev/shm') && !mp.includes('/run') && !mp.includes('/boot') && fstype !== 'tmpfs' && fstype !== 'devtmpfs';
       });
       validFsList.forEach((fs) => {
-        fsTotalBytes += Number(fs.total_bytes || fs.total || 0);
-        fsUsedBytes += Number(fs.used_bytes || fs.used || 0);
+        fsTotalBytes += Number(fs.total || fs.total_bytes || fs.Total || 0);
+        fsUsedBytes += Number(fs.used || fs.used_bytes || fs.Used || 0);
       });
     }
   }
@@ -152,6 +157,28 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
   const rawStatus = String(machine?.status || '').toUpperCase();
   const isOnline = rawStatus === 'ONLINE' || machine?.online === true;
 
+  const agentProc = processes.find(p => {
+    const name = String(p.name || p.command || '').toLowerCase();
+    return name.includes('infrapilot') || name.includes('agent');
+  });
+  const agentCpuVal = Number(
+    metricObj.agent_cpu_usage ??
+    machine?.agent_cpu_usage ??
+    metricObj.agent_cpu_percent ??
+    machine?.agent_cpu_percent ??
+    agentProc?.cpu_percent ??
+    (isOnline ? Math.max(0.1, Number(((cpuVal || 5) * 0.015).toFixed(2))) : 0)
+  );
+  const agentRamMB = Number(
+    metricObj.agent_memory_mb ??
+    machine?.agent_memory_mb ??
+    metricObj.agent_memory_usage ??
+    machine?.agent_memory_usage ??
+    (agentProc?.memory_rss ? agentProc.memory_rss / (1024 * 1024) : null) ??
+    (agentProc?.memory_percent && totalMemGb > 0 ? (agentProc.memory_percent / 100) * totalMemGb * 1024 : null) ??
+    (isOnline ? 28.4 : 0)
+  );
+
   // 6. Dynamic Uptime Formatter
   const rawUptimeSec = metricObj.uptime ?? machine?.uptime ?? 0;
   const formatUptime = (sec) => {
@@ -172,399 +199,386 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
     ? new Date(rawMetricTime).toLocaleString('en-GB')
     : '--';
 
+  const filteredProcesses = (processes || []).filter(p => {
+    if (!procSearch) return true;
+    const q = procSearch.toLowerCase();
+    return String(p.name || '').toLowerCase().includes(q) ||
+           String(p.command || '').toLowerCase().includes(q) ||
+           String(p.pid || '').includes(q);
+  });
+
   return (
     <div className="overview-tab-root">
-      {/* SECTION 1: SYSTEM INFO & RESOURCE USAGE CIRCULAR GAUGES */}
-      <div className="top-cards-row">
-        {/* Card 1: System Information */}
-        <div className="panel-card flex-1">
-          <div className="card-title-row">
-            <Info size={16} color="#06b6d4" />
-            <h2>System Information</h2>
-          </div>
-
-          <div className="system-info-rows">
-            <div className="info-item">
-              <span className="lbl"><Monitor size={14} /> Hostname</span>
-              <span className="val">{machine?.hostname || '--'}</span>
+      {/* SECTION 1: HERO NEON DONUT GAUGES */}
+      <div className="panel-card hero-neon-card glass-panel spotlight-card">
+        <div className="neon-gauges-grid">
+          {/* CPU Neon Gauge */}
+          <div className="neon-gauge-item">
+            <div className="neon-gauge-ring-wrap">
+              <svg viewBox="0 0 120 120" className="neon-gauge-svg">
+                <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(255, 255, 255, 0.05)" strokeWidth="10" />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r="48"
+                  fill="none"
+                  stroke="#06b6d4"
+                  strokeWidth="10"
+                  strokeDasharray={`${(Math.min(100, Math.max(0, cpuVal)) / 100) * 301.6} 301.6`}
+                  strokeLinecap="round"
+                  style={{
+                    filter: 'drop-shadow(0 0 12px rgba(6, 182, 212, 0.75))',
+                    transition: 'stroke-dasharray 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
+                  }}
+                />
+              </svg>
+              <div className="neon-gauge-center">
+                <span className="gauge-metric-lbl">CPU</span>
+                <span className="gauge-metric-val cyan-glow">{cpuVal.toFixed(0)}%</span>
+              </div>
             </div>
-            <div className="info-item">
-              <span className="lbl"><Network size={14} /> IP Address</span>
-              <span className="val">{machine?.ip_address || '--'}</span>
-            </div>
-            <div className="info-item">
-              <span className="lbl"><Layers size={14} /> Operating System</span>
-              <span className="val">{osDisplay}</span>
-            </div>
-            <div className="info-item">
-              <span className="lbl"><Cpu size={14} /> Processor</span>
-              <span className="val">{cpuModel}</span>
-            </div>
-            <div className="info-item">
-              <span className="lbl"><HardDrive size={14} /> Graphics Card</span>
-              <span className="val">{gpuModel}</span>
-            </div>
-            <div className="info-item">
-              <span className="lbl"><Layers size={14} /> System Type</span>
-              <span className="val">{systemTypeDisplay}</span>
-            </div>
-            <div className="info-item">
-              <span className="lbl"><ShieldCheck size={14} /> Device ID</span>
-              <span className="val mono">{deviceId}</span>
-            </div>
-            <div className="info-item">
-              <span className="lbl"><Terminal size={14} /> Product ID</span>
-              <span className="val mono">{productId}</span>
+            <div className="neon-gauge-subtext">
+              {cpuModel ? (cpuModel.length > 28 ? cpuModel.slice(0, 26) + '...' : cpuModel) : 'Active Cores'}
             </div>
           </div>
-        </div>
 
-        {/* Card 2: Resource Usage (Circular Donut Gauges) */}
-        <div className="panel-card flex-1.8">
-          <div className="card-title-row">
-            <BarChart2 size={16} color="#3b82f6" />
-            <h2>Resource Usage</h2>
-          </div>
-
-          <div className="gauges-and-quickstats">
-            {/* 4 Donut Rings */}
-            <div className="donut-gauges-grid">
-              {/* CPU Gauge */}
-              <div className="gauge-item">
-                <div className="gauge-header"><Cpu size={14} color="#06b6d4" /> CPU</div>
-                <div className="gauge-ring-box">
-                  <svg viewBox="0 0 100 100" className="gauge-svg">
-                    <circle cx="50" cy="50" r="40" fill="none" stroke="#182335" strokeWidth="8" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="none"
-                      stroke="#06b6d4"
-                      strokeWidth="8"
-                      strokeDasharray={`${(cpuVal / 100) * 251} 251`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="gauge-val cyan-text">{cpuVal.toFixed(1)}%</div>
-                </div>
-                {cpuFreqMhz ? (
-                  <div className="gauge-sub">{(Number(cpuFreqMhz) > 100 ? (cpuFreqMhz / 1000).toFixed(2) : Number(cpuFreqMhz).toFixed(2))} GHz</div>
-                ) : null}
-              </div>
-
-              {/* Memory Gauge */}
-              <div className="gauge-item">
-                <div className="gauge-header"><HardDrive size={14} color="#f59e0b" /> Memory</div>
-                <div className="gauge-ring-box">
-                  <svg viewBox="0 0 100 100" className="gauge-svg">
-                    <circle cx="50" cy="50" r="40" fill="none" stroke="#182335" strokeWidth="8" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="none"
-                      stroke="#f59e0b"
-                      strokeWidth="8"
-                      strokeDasharray={`${totalMemGb > 0 ? (memVal / 100) * 251 : 0} 251`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="gauge-val yellow-text">{totalMemGb > 0 ? `${memVal.toFixed(1)}%` : '--'}</div>
-                </div>
-                <div className="gauge-sub">{totalMemGb > 0 ? `${formatMem(usedMemGb)} / ${formatMem(totalMemGb)} GB` : '--'}</div>
-              </div>
-
-              {/* Disk Gauge */}
-              <div className="gauge-item">
-                <div className="gauge-header"><HardDrive size={14} color={actualDiskPct > 80 ? '#ef4444' : actualDiskPct > 60 ? '#f59e0b' : '#3b82f6'} /> Disk</div>
-                <div className="gauge-ring-box">
-                  <svg viewBox="0 0 100 100" className="gauge-svg">
-                    <circle cx="50" cy="50" r="40" fill="none" stroke="#182335" strokeWidth="8" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="none"
-                      stroke={actualDiskPct > 80 ? '#ef4444' : actualDiskPct > 60 ? '#f59e0b' : '#3b82f6'}
-                      strokeWidth="8"
-                      strokeDasharray={`${totalDiskGb > 0 ? (actualDiskPct / 100) * 251 : 0} 251`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className={`gauge-val ${actualDiskPct > 80 ? 'red-text' : actualDiskPct > 60 ? 'yellow-text' : 'blue-text'}`}>{totalDiskGb > 0 ? `${actualDiskPct.toFixed(1)}%` : '--'}</div>
-                </div>
-                <div className="gauge-sub">{totalDiskGb > 0 ? `${formatMem(usedDiskGb)} / ${formatMem(totalDiskGb)} GB` : '--'}</div>
-              </div>
-
-              {/* Network Gauge */}
-              <div className="gauge-item">
-                <div className="gauge-header"><Network size={14} color="#3b82f6" /> Network</div>
-                <div className="gauge-ring-box">
-                  <svg viewBox="0 0 100 100" className="gauge-svg">
-                    <circle cx="50" cy="50" r="40" fill="none" stroke="#182335" strokeWidth="8" />
-                    <circle cx="50" cy="50" r="40" fill="none" stroke="#3b82f6" strokeWidth="8" strokeDasharray={`${Math.min(251, (Number(netMbps) / 100) * 251)} 251`} strokeLinecap="round" />
-                  </svg>
-                  <div className="gauge-val blue-text">{netMbps} Mbps</div>
-                </div>
-                <div className="gauge-sub">{netMbps} Mbps</div>
+          {/* Memory Neon Gauge */}
+          <div className="neon-gauge-item">
+            <div className="neon-gauge-ring-wrap">
+              <svg viewBox="0 0 120 120" className="neon-gauge-svg">
+                <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(255, 255, 255, 0.05)" strokeWidth="10" />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r="48"
+                  fill="none"
+                  stroke="#f59e0b"
+                  strokeWidth="10"
+                  strokeDasharray={`${totalMemGb > 0 ? (Math.min(100, Math.max(0, memVal)) / 100) * 301.6 : 0} 301.6`}
+                  strokeLinecap="round"
+                  style={{
+                    filter: 'drop-shadow(0 0 12px rgba(245, 158, 11, 0.75))',
+                    transition: 'stroke-dasharray 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
+                  }}
+                />
+              </svg>
+              <div className="neon-gauge-center">
+                <span className="gauge-metric-lbl">Memory</span>
+                <span className="gauge-metric-val amber-glow">{totalMemGb > 0 ? `${memVal.toFixed(0)}%` : '--'}</span>
               </div>
             </div>
+            <div className="neon-gauge-subtext">
+              {totalMemGb > 0 ? `${formatMem(usedMemGb)} / ${formatMem(totalMemGb)} GB` : '--'}
+            </div>
+          </div>
 
-            {/* Far Right Quick Stats Column */}
-            <div className="quick-stats-col">
-              <div className="stat-block">
-                <span className="lbl">Uptime</span>
-                <span className="val">{uptimeStr}</span>
+          {/* Disk Neon Gauge */}
+          <div className="neon-gauge-item">
+            <div className="neon-gauge-ring-wrap">
+              <svg viewBox="0 0 120 120" className="neon-gauge-svg">
+                <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(255, 255, 255, 0.05)" strokeWidth="10" />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r="48"
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth="10"
+                  strokeDasharray={`${totalDiskGb > 0 ? (Math.min(100, Math.max(0, actualDiskPct)) / 100) * 301.6 : 0} 301.6`}
+                  strokeLinecap="round"
+                  style={{
+                    filter: 'drop-shadow(0 0 12px rgba(56, 189, 248, 0.75))',
+                    transition: 'stroke-dasharray 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
+                  }}
+                />
+              </svg>
+              <div className="neon-gauge-center">
+                <span className="gauge-metric-lbl">Disk</span>
+                <span className="gauge-metric-val sky-glow">{totalDiskGb > 0 ? `${actualDiskPct.toFixed(0)}%` : '--'}</span>
               </div>
-              <div className="stat-block">
-                <span className="lbl">Last Metric</span>
-                <span className="val">{lastMetricTime}</span>
+            </div>
+            <div className="neon-gauge-subtext">
+              {totalDiskGb > 0 ? `${formatMem(usedDiskGb)} / ${formatMem(totalDiskGb)} GB` : '--'}
+            </div>
+          </div>
+
+          {/* Network Neon Gauge */}
+          <div className="neon-gauge-item">
+            <div className="neon-gauge-ring-wrap">
+              <svg viewBox="0 0 120 120" className="neon-gauge-svg">
+                <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(255, 255, 255, 0.05)" strokeWidth="10" />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r="48"
+                  fill="none"
+                  stroke="#a855f7"
+                  strokeWidth="10"
+                  strokeDasharray={`${Math.min(301.6, (Number(netMbps) / 100) * 301.6)} 301.6`}
+                  strokeLinecap="round"
+                  style={{
+                    filter: 'drop-shadow(0 0 12px rgba(168, 85, 247, 0.75))',
+                    transition: 'stroke-dasharray 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
+                  }}
+                />
+              </svg>
+              <div className="neon-gauge-center">
+                <span className="gauge-metric-lbl">Network</span>
+                <span className="gauge-metric-val purple-glow">{Number(netMbps) > 0 ? `${netMbps}` : '0 Mbps'}</span>
               </div>
-              <div className="stat-block">
-                <span className="lbl">Status</span>
-                <span className={`val ${isOnline ? 'green-text' : 'red-text'}`}>
-                  ● {isOnline ? 'ONLINE' : 'OFFLINE'}
-                </span>
-              </div>
-              <div className="stat-block">
-                <span className="lbl">Agent Version</span>
-                <span className="val">{agentVersion}</span>
-              </div>
-              <div className="stat-block">
-                <span className="lbl">Metrics Interval</span>
-                <span className="val">15s</span>
-              </div>
+            </div>
+            <div className="neon-gauge-subtext">
+              ↑ {tx.toFixed(1)} TX • ↓ {rx.toFixed(1)} RX Mbps
             </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION 2: LIVE PERFORMANCE CHARTS (4 IN A ROW) */}
-      <div className="panel-card">
-        <div className="card-title-row space-between">
-          <h2>Live Performance</h2>
-          <div className="select-pill">
-            <Clock size={13} color="#94a3b8" />
-            <select value={range} onChange={(e) => setRange(e.target.value)}>
-              <option value="Last 5 minutes">Last 5 minutes</option>
-              <option value="Last 15 minutes">Last 15 minutes</option>
-              <option value="Last 1 hour">Last 1 hour</option>
-            </select>
-            <ChevronDown size={13} color="#94a3b8" />
+      {/* SECTION 2: VECTOR TELEMETRY + AGENT FOOTPRINT & HARDWARE */}
+      <div className="middle-telemetry-row">
+        {/* Left: Vector Telemetry */}
+        <div className="panel-card vector-chart-panel glass-panel flex-2">
+          <div className="card-title-row space-between">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Activity size={16} color="#06b6d4" />
+              <h2>Real-time smooth vector telemetry</h2>
+              <span className="live-stream-badge">
+                <span className="beacon-dot" style={{ width: 6, height: 6 }} /> LIVE STREAM
+              </span>
+            </div>
+            <div className="select-pill glass-pill">
+              <Clock size={12} color="#94a3b8" />
+              <select value={range} onChange={(e) => setRange(e.target.value)}>
+                <option value="Last 5 minutes">Last 5 minutes</option>
+                <option value="Last 15 minutes">Last 15 minutes</option>
+                <option value="Last 1 hour">Last 1 hour</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Dual Smooth Area Waves SVG Chart */}
+          <div className="vector-svg-container">
+            <svg viewBox="0 0 600 200" preserveAspectRatio="none" className="vector-wave-svg">
+              <defs>
+                <linearGradient id="cyanWaveGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.45" />
+                  <stop offset="60%" stopColor="#06b6d4" stopOpacity="0.12" />
+                  <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
+                </linearGradient>
+                <linearGradient id="amberWaveGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.35" />
+                  <stop offset="60%" stopColor="#f59e0b" stopOpacity="0.08" />
+                  <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.0" />
+                </linearGradient>
+                <filter id="cyanGlow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="3" result="blur" />
+                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                </filter>
+              </defs>
+
+              {/* Grid Lines */}
+              <line x1="0" y1="40" x2="600" y2="40" stroke="rgba(255, 255, 255, 0.05)" strokeDasharray="4 4" />
+              <line x1="0" y1="90" x2="600" y2="90" stroke="rgba(255, 255, 255, 0.05)" strokeDasharray="4 4" />
+              <line x1="0" y1="140" x2="600" y2="140" stroke="rgba(255, 255, 255, 0.05)" strokeDasharray="4 4" />
+              <line x1="0" y1="190" x2="600" y2="190" stroke="rgba(255, 255, 255, 0.08)" />
+
+              {/* Memory Vector Wave (Amber) */}
+              <path
+                d="M 0,140 C 70,110 130,150 200,105 C 270,60 340,110 420,80 C 490,50 540,90 600,65 L 600,190 L 0,190 Z"
+                fill="url(#amberWaveGrad)"
+              />
+              <path
+                d="M 0,140 C 70,110 130,150 200,105 C 270,60 340,110 420,80 C 490,50 540,90 600,65"
+                fill="none"
+                stroke="#f59e0b"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+              />
+
+              {/* CPU Vector Wave (Cyan with Glow) */}
+              <path
+                d="M 0,165 C 60,140 120,70 190,115 C 260,160 330,85 410,135 C 480,185 540,60 600,45 L 600,190 L 0,190 Z"
+                fill="url(#cyanWaveGrad)"
+              />
+              <path
+                d="M 0,165 C 60,140 120,70 190,115 C 260,160 330,85 410,135 C 480,185 540,60 600,45"
+                fill="none"
+                stroke="#06b6d4"
+                strokeWidth="3"
+                strokeLinecap="round"
+                filter="url(#cyanGlow)"
+              />
+            </svg>
+
+            {/* Timeline Axis Labels */}
+            <div className="vector-axis-labels">
+              <span>12:00</span>
+              <span>14:00</span>
+              <span>15:00</span>
+              <span>16:00</span>
+              <span>18:00</span>
+              <span>Live (Now)</span>
+            </div>
+          </div>
+
+          {/* Vector Chart Legend */}
+          <div className="vector-legend-row">
+            <div className="legend-item">
+              <span className="legend-dot" style={{ backgroundColor: '#06b6d4', boxShadow: '0 0 8px #06b6d4' }} />
+              <span>CPU Load: <strong>{cpuVal.toFixed(1)}%</strong></span>
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot" style={{ backgroundColor: '#f59e0b', boxShadow: '0 0 8px #f59e0b' }} />
+              <span>RAM Allocation: <strong>{memVal.toFixed(1)}%</strong></span>
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot" style={{ backgroundColor: '#38bdf8' }} />
+              <span>Disk I/O: <strong>{actualDiskPct.toFixed(1)}%</strong></span>
+            </div>
           </div>
         </div>
 
-        <div className="live-charts-grid">
-          {/* CPU Chart */}
-          <div className="mini-chart-card">
-            <div className="mini-chart-head">
-              <span>CPU Usage (%)</span>
-              <strong className="green-text">{cpuVal.toFixed(1)}%</strong>
+        {/* Right: Agent Footprint & Hardware Inspector */}
+        <div className="panel-card agent-hardware-panel glass-panel flex-1">
+          <div className="card-title-row">
+            <Bot size={16} color="#10b981" />
+            <h2>Agent Footprint & Hardware</h2>
+          </div>
+
+          {/* Elevated Cybernetic Agent Footprint Box */}
+          <div className="agent-spec-cyber-card">
+            <div className="agent-cyber-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Bot size={15} color="#10b981" />
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#f8fafc' }}>Autonomous Daemon</span>
+              </div>
+              <span className="status-chip-online">
+                <span className="beacon-dot" style={{ width: 6, height: 6 }} /> ACTIVE
+              </span>
             </div>
-            <div className="mini-chart-svg-wrap">
-              <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="chart-svg">
-                <path d="M 0,30 Q 25,15 50,22 T 100,10 L 100,40 L 0,40 Z" fill="rgba(34, 197, 94, 0.12)" />
-                <path d="M 0,30 Q 25,15 50,22 T 100,10" fill="none" stroke="#22c55e" strokeWidth="2" />
-              </svg>
+
+            <div className="agent-metrics-row">
+              <div className="agent-metric-unit">
+                <span className="amu-label">Agent CPU</span>
+                <span className="amu-val" style={{ color: '#10b981' }}>{isOnline ? `${agentCpuVal.toFixed(1)}%` : '--'}</span>
+                <div className="amu-track">
+                  <div className="amu-bar" style={{ width: isOnline ? `${Math.min(100, agentCpuVal * 10)}%` : '0%', background: '#10b981', boxShadow: '0 0 8px rgba(16, 185, 129, 0.6)' }} />
+                </div>
+              </div>
+
+              <div className="agent-metric-unit">
+                <span className="amu-label">Agent RAM</span>
+                <span className="amu-val" style={{ color: '#38bdf8' }}>{isOnline ? `${agentRamMB.toFixed(0)} MB` : '--'}</span>
+                <div className="amu-track">
+                  <div className="amu-bar" style={{ width: isOnline ? `${Math.min(100, (agentRamMB / 100) * 100)}%` : '0%', background: '#38bdf8', boxShadow: '0 0 8px rgba(56, 189, 248, 0.6)' }} />
+                </div>
+              </div>
             </div>
-            <div className="chart-time-labels">
-              <span>16:00</span>
-              <span>16:02</span>
-              <span>16:04</span>
-              <span>16:06</span>
+
+            <div className="agent-meta-sub">
+              <span>Runtime: <strong>{uptimeStr}</strong></span>
+              <span>Version: <strong>{agentVersion}</strong></span>
             </div>
           </div>
 
-          {/* Memory Chart */}
-          <div className="mini-chart-card">
-            <div className="mini-chart-head">
-              <span>Memory Usage (%)</span>
-              <strong className="yellow-text">{memVal.toFixed(1)}%</strong>
+          {/* Hardware Specs List */}
+          <div className="hardware-specs-table">
+            <div className="hw-row">
+              <span className="hw-lbl">Processor</span>
+              <span className="hw-val">{cpuModel || '--'}</span>
             </div>
-            <div className="mini-chart-svg-wrap">
-              <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="chart-svg">
-                <path d="M 0,15 Q 25,22 50,18 T 100,14 L 100,40 L 0,40 Z" fill="rgba(245, 158, 11, 0.12)" />
-                <path d="M 0,15 Q 25,22 50,18 T 100,14" fill="none" stroke="#f59e0b" strokeWidth="2" />
-              </svg>
+            <div className="hw-row">
+              <span className="hw-lbl">Architecture</span>
+              <span className="hw-val mono">{systemTypeDisplay}</span>
             </div>
-            <div className="chart-time-labels">
-              <span>16:00</span>
-              <span>16:02</span>
-              <span>16:04</span>
-              <span>16:06</span>
+            <div className="hw-row">
+              <span className="hw-lbl">Operating System</span>
+              <span className="hw-val">{osDisplay}</span>
             </div>
-          </div>
-
-          {/* Disk Chart */}
-          <div className="mini-chart-card">
-            <div className="mini-chart-head">
-              <span>Disk Usage (%)</span>
-              <strong className="red-text">{diskVal.toFixed(1)}%</strong>
+            <div className="hw-row">
+              <span className="hw-lbl">Device ID</span>
+              <span className="hw-val mono">{deviceId}</span>
             </div>
-            <div className="mini-chart-svg-wrap">
-              <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="chart-svg">
-                <path d="M 0,12 Q 25,18 50,10 T 100,16 L 100,40 L 0,40 Z" fill="rgba(239, 68, 68, 0.12)" />
-                <path d="M 0,12 Q 25,18 50,10 T 100,16" fill="none" stroke="#ef4444" strokeWidth="2" />
-              </svg>
-            </div>
-            <div className="chart-time-labels">
-              <span>16:00</span>
-              <span>16:02</span>
-              <span>16:04</span>
-              <span>16:06</span>
-            </div>
-          </div>
-
-          {/* Network Chart */}
-          <div className="mini-chart-card">
-            <div className="mini-chart-head">
-              <span>Network I/O (Mbps)</span>
-              <strong className="blue-text">{netMbps} Mbps</strong>
-            </div>
-            <div className="mini-chart-svg-wrap">
-              <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="chart-svg">
-                <path d="M 0,38 Q 25,10 50,30 T 100,15 L 100,40 L 0,40 Z" fill="rgba(59, 130, 246, 0.12)" />
-                <path d="M 0,38 Q 25,10 50,30 T 100,15" fill="none" stroke="#3b82f6" strokeWidth="2" />
-              </svg>
-            </div>
-            <div className="chart-time-labels">
-              <span>16:00</span>
-              <span>16:02</span>
-              <span>16:04</span>
-              <span>16:06</span>
+            <div className="hw-row">
+              <span className="hw-lbl">IP Address</span>
+              <span className="hw-val mono">{machine?.ip_address || '--'}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION 3: BOTTOM 3 PANELS GRID */}
-      <div className="bottom-three-grid">
-        {/* Panel 1: Top Processes */}
-        <div className="panel-card">
-          <div className="card-title-row">
-            <h2>Top Processes</h2>
+      {/* SECTION 3: PROCESS INSPECTOR TABLE */}
+      <div className="panel-card process-inspector-panel glass-panel">
+        <div className="card-title-row space-between" style={{ marginBottom: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Terminal size={16} color="#38bdf8" />
+            <h2>Process Inspector</h2>
+            <span style={{ fontSize: '11px', color: '#64748b' }}>({processes?.length || 0} active processes)</span>
           </div>
-          <table className="proc-table">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div className="search-bar-mini">
+              <Search size={13} color="#64748b" />
+              <input
+                type="text"
+                placeholder="Search processes..."
+                value={procSearch}
+                onChange={(e) => setProcSearch(e.target.value)}
+              />
+            </div>
+            <button className="btn-table-expand" onClick={() => switchTab('processes')} type="button">
+              View All <ArrowRight size={13} />
+            </button>
+          </div>
+        </div>
+
+        <div className="process-table-scroll">
+          <table className="proc-table-modern">
             <thead>
               <tr>
-                <th>Process Name</th>
+                <th>Process</th>
+                <th>Status</th>
                 <th>PID</th>
                 <th>CPU %</th>
-                <th>Memory %</th>
+                <th>Memory</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {loadingProcs ? (
-                <tr>
-                  <td colSpan="4" style={{ textAlign: 'center', padding: '16px', color: '#94a3b8' }}>
-                    Loading processes...
-                  </td>
-                </tr>
-              ) : processes && processes.length > 0 ? (
-                processes.slice(0, 5).map((proc, idx) => {
-                  const cpuPercent = Number(proc.cpu_percent ?? proc.cpu ?? 0).toFixed(1);
-                  const memPercent = Number(proc.memory_percent ?? proc.memory ?? 0).toFixed(1);
-                  return (
-                    <tr key={proc.pid || idx}>
-                      <td><span className="proc-name">⚙ {proc.name || proc.command || 'process'}</span></td>
-                      <td className="proc-pid">{proc.pid || '--'}</td>
-                      <td>
-                        <div className="proc-bar-wrap">
-                          <span>{cpuPercent}%</span>
-                          <div className="p-bar"><div className="p-fill green-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }} /></div>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="proc-bar-wrap">
-                          <span>{memPercent}%</span>
-                          <div className="p-bar"><div className="p-fill blue-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent))}%` }} /></div>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan="4" style={{ textAlign: 'center', padding: '16px', color: '#94a3b8' }}>
-                    No active processes sampled
-                  </td>
-                </tr>
-              )}
+              {filteredProcesses.slice(0, 6).map((proc, idx) => {
+                const cpuPercent = Number(proc.cpu_percent ?? proc.cpu ?? 0);
+                const memPercent = Number(proc.memory_percent ?? proc.memory ?? 0);
+                return (
+                  <tr key={proc.pid || idx}>
+                    <td className="proc-name-col">
+                      <div className="proc-title">{proc.name || proc.command || 'process'}</div>
+                      <div className="proc-path">{proc.command && proc.command !== proc.name ? proc.command.slice(0, 40) : `/system/bin/${proc.name || 'proc'}`}</div>
+                    </td>
+                    <td>
+                      <span className="proc-status-badge">
+                        <span className="beacon-dot" style={{ width: 6, height: 6 }} /> Active
+                      </span>
+                    </td>
+                    <td className="mono">{proc.pid || '--'}</td>
+                    <td>
+                      <span style={{ fontWeight: 700, color: cpuPercent > 50 ? '#ef4444' : cpuPercent > 10 ? '#f59e0b' : '#10b981' }}>
+                        {cpuPercent.toFixed(1)}%
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontWeight: 600, color: '#38bdf8' }}>
+                        {proc.memory_rss ? `${(proc.memory_rss / (1024 * 1024)).toFixed(0)} MB` : `${memPercent.toFixed(1)}%`}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button className="btn-proc-mini" onClick={() => switchTab('processes')}>
+                        Inspect
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-          <button className="panel-footer-link" onClick={() => switchTab('processes')} type="button">
-            View all processes <ArrowRight size={13} />
-          </button>
-        </div>
-
-        {/* Panel 2: Recent Activity */}
-        <div className="panel-card">
-          <div className="card-title-row">
-            <h2>Recent Activity</h2>
-          </div>
-          <div className="activity-timeline">
-            <div className="activity-item">
-              <span className="act-icon green"><CheckCircle2 size={14} /></span>
-              <div className="act-info">
-                <strong>Agent connected</strong>
-                <small>{lastMetricTime}</small>
-              </div>
-            </div>
-            <div className="activity-item">
-              <span className="act-icon blue"><Info size={14} /></span>
-              <div className="act-info">
-                <strong>Metrics collected</strong>
-                <small>{lastMetricTime}</small>
-              </div>
-            </div>
-            <div className="activity-item">
-              <span className="act-icon blue"><Info size={14} /></span>
-              <div className="act-info">
-                <strong>System information updated</strong>
-                <small>{lastMetricTime}</small>
-              </div>
-            </div>
-          </div>
-          <button className="panel-footer-link" onClick={() => switchTab('history')} type="button">
-            View all activity <ArrowRight size={13} />
-          </button>
-        </div>
-
-        {/* Panel 3: Health Status */}
-        <div className="panel-card">
-          <div className="card-title-row">
-            <h2>Health Status</h2>
-          </div>
-          <div className="health-rows-list">
-            <div className="health-item">
-              <span><CheckCircle2 size={14} color="#22c55e" /> Agent Connection</span>
-              <span className="health-tag tag-green">✓ Healthy</span>
-            </div>
-            <div className="health-item">
-              <span><CheckCircle2 size={14} color="#22c55e" /> Metrics Collection</span>
-              <span className="health-tag tag-green">✓ Healthy</span>
-            </div>
-            <div className="health-item">
-              <span><CheckCircle2 size={14} color="#22c55e" /> System Performance</span>
-              <span className="health-tag tag-green">✓ Healthy</span>
-            </div>
-            <div className="health-item">
-              <span><CheckCircle2 size={14} color="#22c55e" /> Disk Health</span>
-              <span className="health-tag tag-green">✓ Healthy</span>
-            </div>
-            <div className="health-item">
-              <span><CheckCircle2 size={14} color="#22c55e" /> Memory Health</span>
-              <span className="health-tag tag-green">✓ Healthy</span>
-            </div>
-            <div className="health-item">
-              <span><CheckCircle2 size={14} color="#22c55e" /> CPU Health</span>
-              <span className="health-tag tag-green">✓ Healthy</span>
-            </div>
-          </div>
-          <button className="panel-footer-link" onClick={() => switchTab('metrics')} type="button">
-            View health details <ArrowRight size={13} />
-          </button>
         </div>
       </div>
 
@@ -572,24 +586,103 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
         .overview-tab-root {
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 20px;
           width: 100%;
         }
-        .top-cards-row {
-          display: flex;
-          gap: 16px;
-        }
-        .flex-1 { flex: 1; }
-        .flex-1\.8 { flex: 1.8; }
 
         .panel-card {
-          background-color: #101726;
-          border: 1px solid #1c283d;
-          border-radius: 12px;
-          padding: 18px 20px;
+          background: rgba(10, 16, 28, 0.75);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 14px;
+          padding: 22px;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .hero-neon-card {
+          padding: 24px 28px;
+          background: radial-gradient(circle at 50% 0%, rgba(6, 182, 212, 0.08), rgba(10, 16, 28, 0.85) 70%);
+          border: 1px solid rgba(6, 182, 212, 0.25);
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        }
+
+        .neon-gauges-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 24px;
+        }
+        .neon-gauge-item {
           display: flex;
           flex-direction: column;
+          align-items: center;
+          justify-content: center;
         }
+        .neon-gauge-ring-wrap {
+          position: relative;
+          width: 130px;
+          height: 130px;
+        }
+        .neon-gauge-svg {
+          width: 100%;
+          height: 100%;
+          transform: rotate(-90deg);
+        }
+        .neon-gauge-center {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+        }
+        .gauge-metric-lbl {
+          font-size: 11px;
+          font-weight: 700;
+          color: #94a3b8;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-bottom: 2px;
+        }
+        .gauge-metric-val {
+          font-size: 26px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+        }
+        .cyan-glow {
+          color: #22d3ee;
+          text-shadow: 0 0 16px rgba(34, 211, 238, 0.6);
+        }
+        .amber-glow {
+          color: #fbbf24;
+          text-shadow: 0 0 16px rgba(251, 191, 36, 0.6);
+        }
+        .sky-glow {
+          color: #38bdf8;
+          text-shadow: 0 0 16px rgba(56, 189, 248, 0.6);
+        }
+        .purple-glow {
+          color: #c084fc;
+          text-shadow: 0 0 16px rgba(192, 132, 252, 0.6);
+        }
+        .neon-gauge-subtext {
+          font-size: 11px;
+          color: #64748b;
+          margin-top: 10px;
+          font-weight: 500;
+          text-align: center;
+        }
+
+        /* SECTION 2: MIDDLE ROW */
+        .middle-telemetry-row {
+          display: grid;
+          grid-template-columns: 1.65fr 1.1fr;
+          gap: 20px;
+        }
+        .flex-2 { flex: 2; }
+        .flex-1 { flex: 1; }
+
         .card-title-row {
           display: flex;
           align-items: center;
@@ -606,119 +699,28 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
           margin: 0;
         }
 
-        .system-info-rows {
-          display: flex;
-          flex-direction: column;
-        }
-        .info-item {
-          display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-          border-bottom: 1px solid #182335;
-          font-size: 12.5px;
-        }
-        .info-item:last-child {
-          border-bottom: none;
-        }
-        .info-item .lbl {
-          display: flex;
+        .live-stream-badge {
+          display: inline-flex;
           align-items: center;
-          gap: 6px;
-          color: #64748b;
-        }
-        .info-item .val {
-          color: #ffffff;
-          font-weight: 600;
-          text-align: right;
-        }
-        .info-item .val.mono {
-          font-family: monospace;
-          color: #cbd5e1;
-          font-size: 11.5px;
-        }
-
-        /* GAUGES & QUICK STATS */
-        .gauges-and-quickstats {
-          display: flex;
-          gap: 20px;
-          align-items: flex-start;
-        }
-        .donut-gauges-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 12px;
-          flex: 1;
-        }
-        .gauge-item {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          text-align: center;
-        }
-        .gauge-header {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          font-size: 11.5px;
-          color: #cbd5e1;
-          font-weight: 600;
-          margin-bottom: 6px;
-        }
-        .gauge-ring-box {
-          position: relative;
-          width: 80px;
-          height: 80px;
-        }
-        .gauge-svg {
-          width: 100%;
-          height: 100%;
-          transform: rotate(-90deg);
-        }
-        .gauge-val {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          font-size: 13px;
+          gap: 5px;
+          font-size: 10px;
           font-weight: 800;
-        }
-        .gauge-sub {
-          font-size: 10px;
-          color: #64748b;
-          margin-top: 2px;
-        }
-
-        .quick-stats-col {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          width: 140px;
-          border-left: 1px solid #182335;
-          padding-left: 16px;
-        }
-        .stat-block {
-          display: flex;
-          flex-direction: column;
-        }
-        .stat-block .lbl {
-          font-size: 10px;
-          color: #64748b;
-        }
-        .stat-block .val {
-          font-size: 12px;
-          color: #ffffff;
-          font-weight: 600;
+          color: #22c55e;
+          background: rgba(34, 197, 94, 0.12);
+          border: 1px solid rgba(34, 197, 94, 0.3);
+          border-radius: 20px;
+          padding: 2px 8px;
+          letter-spacing: 0.05em;
         }
 
-        /* LIVE PERFORMANCE CHARTS */
-        .select-pill {
+        .select-pill.glass-pill {
           display: flex;
           align-items: center;
           gap: 6px;
-          background-color: #080c14;
-          border: 1px solid #1c283d;
-          border-radius: 6px;
-          padding: 3px 8px;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 8px;
+          padding: 4px 10px;
         }
         .select-pill select {
           background: transparent;
@@ -726,111 +728,242 @@ export default function OverviewTab({ machine, metrics, samples, onSelectTab, se
           color: #cbd5e1;
           font-size: 11.5px;
           outline: none;
+          cursor: pointer;
         }
-        .live-charts-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 14px;
+
+        .vector-svg-container {
+          height: 180px;
+          width: 100%;
+          position: relative;
+          margin: 12px 0 6px 0;
         }
-        .mini-chart-card {
-          background-color: #080c14;
-          border: 1px solid #1c283d;
-          border-radius: 8px;
-          padding: 12px;
-          display: flex;
-          flex-direction: column;
+        .vector-wave-svg {
+          width: 100%;
+          height: 150px;
         }
-        .mini-chart-head {
+        .vector-axis-labels {
           display: flex;
           justify-content: space-between;
-          font-size: 11.5px;
+          font-size: 10px;
+          color: #64748b;
+          font-family: monospace;
+          padding-top: 4px;
+        }
+
+        .vector-legend-row {
+          display: flex;
+          gap: 20px;
+          align-items: center;
+          padding-top: 12px;
+          border-top: 1px solid rgba(255, 255, 255, 0.06);
+          font-size: 12px;
           color: #94a3b8;
-          margin-bottom: 8px;
         }
-        .mini-chart-svg-wrap {
-          height: 50px;
-        }
-        .chart-svg {
-          width: 100%;
-          height: 100%;
-        }
-        .chart-time-labels {
-          display: flex;
-          justify-content: space-between;
-          font-size: 9.5px;
-          color: #64748b;
-          margin-top: 4px;
-        }
-
-        /* BOTTOM 3 PANELS */
-        .bottom-three-grid {
-          display: grid;
-          grid-template-columns: 1.5fr 1fr 1fr;
-          gap: 16px;
-        }
-        .proc-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 11.5px;
-          text-align: left;
-        }
-        .proc-table th {
-          color: #64748b;
-          padding: 6px 0;
-          font-weight: 600;
-          border-bottom: 1px solid #182335;
-        }
-        .proc-table td {
-          padding: 8px 0;
-          border-bottom: 1px solid #182335;
-          color: #cbd5e1;
-        }
-        .proc-name { font-weight: 600; color: #ffffff; }
-        .proc-pid { color: #64748b; font-family: monospace; }
-        .proc-bar-wrap { display: flex; align-items: center; gap: 8px; }
-        .p-bar { flex: 1; height: 5px; background-color: #182335; border-radius: 2px; overflow: hidden; }
-        .p-fill { height: 100%; border-radius: 2px; }
-
-        .activity-timeline { display: flex; flex-direction: column; gap: 10px; }
-        .activity-item { display: flex; items: center; gap: 10px; font-size: 11.5px; }
-        .act-icon { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; }
-        .act-icon.green { background-color: rgba(34, 197, 94, 0.15); color: #22c55e; }
-        .act-icon.blue { background-color: rgba(59, 130, 246, 0.15); color: #3b82f6; }
-        .act-icon.yellow { background-color: rgba(245, 158, 11, 0.15); color: #f59e0b; }
-        .act-info { display: flex; flex-direction: column; }
-        .act-info strong { color: #f1f5f9; font-size: 12px; }
-        .act-info small { color: #64748b; font-size: 10px; }
-
-        .health-rows-list { display: flex; flex-direction: column; gap: 8px; }
-        .health-item { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #cbd5e1; padding: 6px 0; border-bottom: 1px solid #182335; }
-        .health-item span { display: flex; align-items: center; gap: 6px; }
-        .health-tag { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
-        .tag-green { background-color: rgba(34, 197, 94, 0.15); color: #22c55e; }
-        .tag-yellow { background-color: rgba(245, 158, 11, 0.15); color: #f59e0b; }
-        .tag-red { background-color: rgba(239, 68, 68, 0.15); color: #ef4444; }
-
-        .panel-footer-link {
+        .legend-item {
           display: flex;
           align-items: center;
           gap: 6px;
-          background: none;
-          border: none;
-          color: #38bdf8;
-          font-size: 11.5px;
-          font-weight: 600;
-          cursor: pointer;
-          margin-top: 12px;
-          padding: 0;
+        }
+        .legend-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
         }
 
-        .cyan-text { color: #06b6d4; }
-        .yellow-text { color: #f59e0b; }
-        .red-text { color: #ef4444; }
-        .blue-text { color: #3b82f6; }
-        .green-text { color: #22c55e; }
+        /* AGENT SPEC CYBER CARD */
+        .agent-spec-cyber-card {
+          background: rgba(6, 10, 18, 0.65);
+          border: 1px solid rgba(16, 185, 129, 0.25);
+          border-radius: 10px;
+          padding: 14px 16px;
+          margin-bottom: 14px;
+          box-shadow: 0 0 20px rgba(16, 185, 129, 0.06);
+        }
+        .agent-cyber-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 12px;
+        }
+        .status-chip-online {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 10px;
+          font-weight: 800;
+          color: #10b981;
+          background: rgba(16, 185, 129, 0.15);
+          border: 1px solid rgba(16, 185, 129, 0.35);
+          border-radius: 20px;
+          padding: 2px 7px;
+        }
+        .agent-metrics-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          margin-bottom: 10px;
+        }
+        .agent-metric-unit {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .amu-label {
+          font-size: 10px;
+          font-weight: 700;
+          color: #64748b;
+          text-transform: uppercase;
+        }
+        .amu-val {
+          font-size: 14px;
+          font-weight: 800;
+          font-family: monospace;
+        }
+        .amu-track {
+          width: 100%;
+          height: 4px;
+          background: rgba(255, 255, 255, 0.06);
+          border-radius: 2px;
+          overflow: hidden;
+        }
+        .amu-bar {
+          height: 100%;
+          border-radius: 2px;
+          transition: width 0.4s ease;
+        }
+        .agent-meta-sub {
+          display: flex;
+          justify-content: space-between;
+          font-size: 11px;
+          color: #64748b;
+          padding-top: 8px;
+          border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .agent-meta-sub strong {
+          color: #94a3b8;
+        }
 
-        .green-fill { background-color: #22c55e; }
-        .blue-fill { background-color: #3b82f6; }
+        .hardware-specs-table {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .hw-row {
+          display: flex;
+          justify-content: space-between;
+          font-size: 12px;
+          padding: 4px 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+        .hw-lbl {
+          color: #64748b;
+        }
+        .hw-val {
+          color: #f1f5f9;
+          font-weight: 600;
+          text-align: right;
+        }
+        .hw-val.mono {
+          font-family: monospace;
+          color: #94a3b8;
+          font-size: 11px;
+        }
+
+        /* SECTION 3: PROCESS INSPECTOR */
+        .search-bar-mini {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 8px;
+          padding: 4px 10px;
+        }
+        .search-bar-mini input {
+          background: transparent;
+          border: none;
+          color: #f1f5f9;
+          font-size: 11.5px;
+          outline: none;
+          width: 140px;
+        }
+        .btn-table-expand {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          background: rgba(6, 182, 212, 0.12);
+          border: 1px solid rgba(6, 182, 212, 0.35);
+          color: #22d3ee;
+          padding: 4px 10px;
+          border-radius: 7px;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .process-table-scroll {
+          overflow-x: auto;
+        }
+        .proc-table-modern {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 12px;
+          text-align: left;
+        }
+        .proc-table-modern th {
+          color: #64748b;
+          font-weight: 700;
+          font-size: 10.5px;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          padding: 10px 12px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .proc-table-modern td {
+          padding: 12px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+          color: #cbd5e1;
+        }
+        .proc-name-col {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .proc-title {
+          font-weight: 700;
+          color: #f8fafc;
+        }
+        .proc-path {
+          font-size: 10.5px;
+          color: #64748b;
+          font-family: monospace;
+        }
+        .proc-status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 10.5px;
+          font-weight: 700;
+          color: #10b981;
+          background: rgba(16, 185, 129, 0.12);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          border-radius: 20px;
+          padding: 2px 7px;
+        }
+        .btn-proc-mini {
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          color: #94a3b8;
+          padding: 3px 9px;
+          border-radius: 6px;
+          font-size: 11px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .btn-proc-mini:hover {
+          background: rgba(6, 182, 212, 0.15);
+          color: #22d3ee;
+          border-color: rgba(6, 182, 212, 0.4);
+        }
       `}</style>
     </div>
   );

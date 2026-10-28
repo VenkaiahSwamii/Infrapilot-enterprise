@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { DashboardStoreProvider } from '../store/dashboardStore.jsx';
 import { ServerStoreProvider } from '../store/serverStore.jsx';
 import { AlertStoreProvider } from '../store/alertStore.jsx';
+import { NotificationProvider } from '../store/notificationStore.jsx';
 import Layout from '../components/layout/Layout.jsx';
 import LoginPage from '../features/auth/LoginPage.jsx';
 import EnterpriseDashboard from '../features/overview/EnterpriseDashboard.jsx';
@@ -19,10 +20,10 @@ import InfrastructurePage from '../pages/InfrastructurePage.jsx';
 import UsersPage from '../pages/UsersPage.jsx';
 import OrganizationsPage from '../pages/OrganizationsPage.jsx';
 import AuditLogsPage from '../pages/AuditLogsPage.jsx';
-import SettingsPage from '../pages/SettingsPage.jsx';
 import AgentsPage from '../pages/AgentsPage.jsx';
 
 import SREOperationsPage from '../features/sre/SREOperationsPage.jsx';
+import SREStudioPage from '../features/sre/SREStudioPage.jsx';
 import SREDiskPage from '../features/sre/SREDiskPage.jsx';
 import SRECrashPage from '../features/sre/SRECrashPage.jsx';
 import SRELatencyPage from '../features/sre/SRELatencyPage.jsx';
@@ -34,6 +35,7 @@ import SyntheticTestDetailsPage from '../features/synthetic/SyntheticTestDetails
 import AnalyticsSuite from '../features/analytics/AnalyticsSuite.jsx';
 import Reports from '../features/analytics/Reports.jsx';
 import SecuritySuitePage from '../features/security/SecuritySuitePage.jsx';
+import SettingsPage from '../pages/SettingsPage.jsx';
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem('token');
@@ -71,7 +73,8 @@ export default function App() {
     <DashboardStoreProvider>
       <ServerStoreProvider>
         <AlertStoreProvider>
-          <BrowserRouter>
+          <NotificationProvider>
+            <BrowserRouter>
             <Routes>
               {/* Public route */}
               <Route path="/login" element={<LoginPage />} />
@@ -95,13 +98,14 @@ export default function App() {
                 <Route path="sre-disk" element={<SREDiskPage />} />
                 <Route path="sre-crash" element={<SRECrashPage />} />
                 <Route path="sre-latency" element={<SRELatencyPage />} />
-                <Route path="infrastructure" element={<InfrastructurePage />} />
-                <Route path="machines" element={<InfrastructurePage />} />
+                <Route path="latency" element={<Navigate to="/sre-latency" replace />} />
+                <Route path="infrastructure" element={<Navigate to="/" replace />} />
+                <Route path="machines" element={<Navigate to="/" replace />} />
                 <Route path="live-metrics" element={<LiveMetricsPage />} />
                 <Route path="metrics" element={<LiveMetricsPage />} />
 
                 {/* Operations & Analytics */}
-                <Route path="servers" element={<InfrastructurePage />} />
+                <Route path="servers" element={<Navigate to="/" replace />} />
                 <Route path="servers/:machineId" element={<MachineDetailPage />} />
                 <Route path="machines/:machineId" element={<MachineDetailPage />} />
                 <Route path="docker" element={<DockerPage />} />
@@ -112,9 +116,10 @@ export default function App() {
                 <Route path="analytics" element={<AnalyticsSuite />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="agents" element={<AgentsPage />} />
-                <Route path="sre" element={<SREOperationsPage />} />
+                <Route path="sre-studio" element={<SREStudioPage />} />
+                <Route path="sre" element={<SREStudioPage />} />
+                <Route path="sre-ops" element={<SREOperationsPage />} />
                 <Route path="cli" element={<RoleRoute allowedRoles={['admin']}><TerminalPage /></RoleRoute>} />
-                <Route path="settings" element={<RoleRoute allowedRoles={['admin']}><SettingsPage /></RoleRoute>} />
 
                 {/* Administration Section */}
                 <Route path="users" element={<RoleRoute allowedRoles={['admin']}><UsersPage /></RoleRoute>} />
@@ -122,15 +127,21 @@ export default function App() {
                 <Route path="admin/users" element={<RoleRoute allowedRoles={['admin']}><UsersPage /></RoleRoute>} />
                 <Route path="admin/orgs" element={<RoleRoute allowedRoles={['admin']}><OrganizationsPage /></RoleRoute>} />
                 <Route path="admin/audit-logs" element={<AuditLogsPage />} />
-                <Route path="admin/settings" element={<RoleRoute allowedRoles={['admin']}><SettingsPage /></RoleRoute>} />
                 <Route path="deploy" element={<DeployPage />} />
+
+                {/* System Settings & Notifications */}
+                <Route path="settings" element={<RoleRoute allowedRoles={['admin', 'operator', 'viewer']}><SettingsPage /></RoleRoute>} />
+                <Route path="notifications" element={<RoleRoute allowedRoles={['admin', 'operator', 'viewer']}><SettingsPage initialTab="notifications" /></RoleRoute>} />
+                <Route path="admin/settings" element={<RoleRoute allowedRoles={['admin', 'operator', 'viewer']}><SettingsPage /></RoleRoute>} />
+                <Route path="admin/notifications" element={<RoleRoute allowedRoles={['admin', 'operator', 'viewer']}><SettingsPage initialTab="notifications" /></RoleRoute>} />
               </Route>
 
               {/* Catch all */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
-        </AlertStoreProvider>
+        </NotificationProvider>
+      </AlertStoreProvider>
       </ServerStoreProvider>
     </DashboardStoreProvider>
   );

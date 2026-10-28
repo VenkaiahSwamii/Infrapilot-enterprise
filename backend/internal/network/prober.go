@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
@@ -121,52 +122,56 @@ func probePing(check *models.NetworkCheck, res *ProbeResult) {
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("ping", "-n", "4", "-w", strconv.Itoa(timeoutSec*1000), targetHost)
+		cmd = exec.Command("ping", "-n", "3", "-w", strconv.Itoa(timeoutSec*1000), targetHost)
 	} else {
-		cmd = exec.Command("ping", "-c", "4", "-W", strconv.Itoa(timeoutSec), targetHost)
+		cmd = exec.Command("ping", "-c", "3", "-W", strconv.Itoa(timeoutSec), targetHost)
 	}
 
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		outStr := string(out)
-		// Parse packet loss and RTT
 		loss, rtt := parsePingOutput(outStr)
-		res.PacketLossPct = loss
-		res.LatencyMs = rtt
-		return
+		if rtt > 0 || loss < 100 {
+			res.PacketLossPct = loss
+			res.LatencyMs = rtt
+			return
+		}
 	}
 
-	// If ICMP ping failed or was restricted, fallback to TCP probe (e.g. port 80/443 or 5432)
-	fallbackPort := 80
+	// Fallback to TCP handshake if ICMP ping failed, restricted, or returned 0 RTT
+	fallbackPorts := []int{80, 53, 443, 8080}
 	if check.Port > 0 {
-		fallbackPort = check.Port
+		fallbackPorts = append([]int{check.Port}, fallbackPorts...)
 	}
 
-	tcpStart := time.Now()
-	conn, tcpErr := net.DialTimeout("tcp", net.JoinHostPort(targetHost, strconv.Itoa(fallbackPort)), time.Duration(timeoutSec)*time.Second)
-	if tcpErr == nil {
-		conn.Close()
-		res.LatencyMs = float64(time.Since(tcpStart).Microseconds()) / 1000.0
-		res.PacketLossPct = 0.0
-		return
+	for _, port := range fallbackPorts {
+		tcpStart := time.Now()
+		conn, tcpErr := net.DialTimeout("tcp", net.JoinHostPort(targetHost, strconv.Itoa(port)), time.Duration(timeoutSec)*time.Second)
+		if tcpErr == nil {
+			conn.Close()
+			rtt := float64(time.Since(tcpStart).Microseconds()) / 1000.0
+			res.LatencyMs = rtt
+			res.PacketLossPct = 0.0
+			return
+		}
 	}
 
 	res.PacketLossPct = 100.0
-	res.ErrorMessage = fmt.Sprintf("Ping target '%s' unreachable: %v", targetHost, err)
+	res.ErrorMessage = fmt.Sprintf("Ping / TCP probe to '%s' failed: %v", targetHost, err)
 }
 
 func parsePingOutput(output string) (float64, float64) {
 	lines := strings.Split(output, "\n")
 	var loss float64 = 0
 	var rtt float64 = 0
+	var sampleRtts []float64
 
 	for _, line := range lines {
 		lower := strings.ToLower(line)
 
-		// Parse loss: e.g. "Packets: Sent = 4, Received = 4, Lost = 0 (0% loss)" or "0% packet loss"
+		// 1. Parse packet loss percentage
 		if strings.Contains(lower, "loss") {
 			if idx := strings.Index(lower, "%"); idx != -1 {
-				// find preceding number
 				sub := lower[:idx]
 				parts := strings.Fields(strings.ReplaceAll(sub, "(", " "))
 				if len(parts) > 0 {
@@ -177,26 +182,55 @@ func parsePingOutput(output string) (float64, float64) {
 			}
 		}
 
-		// Parse RTT: e.g. "Average = 24ms" or "rtt min/avg/max/mdev = 12.1/24.3/35.2/2.1 ms"
-		if strings.Contains(lower, "average =") || strings.Contains(lower, "avg =") {
-			parts := strings.Split(lower, "=")
-			if len(parts) > 1 {
-				raw := strings.TrimSpace(strings.ReplaceAll(parts[1], "ms", ""))
-				if val, err := strconv.ParseFloat(raw, 64); err == nil {
+		// 2. Parse individual reply times as fallback: e.g. "time=21ms" or "time=18.4 ms"
+		if idx := strings.Index(lower, "time="); idx != -1 {
+			afterTime := strings.TrimSpace(lower[idx+len("time="):])
+			fields := strings.Fields(afterTime)
+			if len(fields) > 0 {
+				clean := strings.TrimSuffix(fields[0], "ms")
+				if val, err := strconv.ParseFloat(clean, 64); err == nil && val > 0 {
+					sampleRtts = append(sampleRtts, val)
+				}
+			}
+		}
+
+		// 3. Parse Windows summary line: "Minimum = 21ms, Maximum = 34ms, Average = 26ms"
+		if idx := strings.Index(lower, "average ="); idx != -1 {
+			afterAvg := strings.TrimSpace(lower[idx+len("average ="):])
+			fields := strings.Fields(afterAvg)
+			if len(fields) > 0 {
+				clean := strings.TrimSuffix(fields[0], "ms")
+				if val, err := strconv.ParseFloat(clean, 64); err == nil && val > 0 {
 					rtt = val
 				}
 			}
-		} else if strings.Contains(lower, "min/avg/max") {
+		}
+
+		// 4. Parse Linux summary line: "rtt min/avg/max/mdev = 17.912/18.150/18.401/0.174 ms"
+		if (strings.Contains(lower, "min/avg/max") || strings.Contains(lower, "round-trip")) && strings.Contains(lower, "=") {
 			parts := strings.Split(lower, "=")
 			if len(parts) > 1 {
-				subParts := strings.Split(strings.TrimSpace(parts[1]), "/")
-				if len(subParts) >= 2 {
-					if val, err := strconv.ParseFloat(subParts[1], 64); err == nil {
-						rtt = val
+				fields := strings.Fields(strings.TrimSpace(parts[1]))
+				if len(fields) > 0 {
+					slashParts := strings.Split(fields[0], "/")
+					if len(slashParts) >= 2 {
+						// slashParts[1] is avg RTT
+						if val, err := strconv.ParseFloat(slashParts[1], 64); err == nil && val > 0 {
+							rtt = val
+						}
 					}
 				}
 			}
 		}
+	}
+
+	// If summary parser couldn't find avg, calculate from sample replies
+	if rtt == 0 && len(sampleRtts) > 0 {
+		var sum float64
+		for _, v := range sampleRtts {
+			sum += v
+		}
+		rtt = sum / float64(len(sampleRtts))
 	}
 
 	return loss, rtt
@@ -225,7 +259,7 @@ func probeTCP(check *models.NetworkCheck, res *ProbeResult) {
 
 	timeout := time.Duration(check.TimeoutMs) * time.Millisecond
 	if timeout <= 0 {
-		timeout = 5 * time.Second
+		timeout = 3 * time.Second
 	}
 
 	start := time.Now()
@@ -255,7 +289,43 @@ func probeDNS(check *models.NetworkCheck, res *ProbeResult) {
 		targetDomain = targetDomain[:idx]
 	}
 
+	timeoutSec := 3
+	if check.TimeoutMs > 0 {
+		timeoutSec = check.TimeoutMs / 1000
+		if timeoutSec < 1 {
+			timeoutSec = 1
+		}
+	}
+
 	start := time.Now()
+
+	// If target is an IP literal (e.g. 1.1.1.1, 8.8.8.8, 192.168.1.1), query that specific DNS server on UDP port 53!
+	if net.ParseIP(targetDomain) != nil {
+		r := &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{Timeout: time.Duration(timeoutSec) * time.Second}
+				return d.DialContext(ctx, "udp", net.JoinHostPort(targetDomain, "53"))
+			},
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+		defer cancel()
+
+		ips, err := r.LookupIP(ctx, "ip", "cloudflare.com")
+		durationMs := float64(time.Since(start).Microseconds()) / 1000.0
+		res.DNSTimeMs = durationMs
+		res.LatencyMs = durationMs
+
+		if err != nil || len(ips) == 0 {
+			res.ErrorMessage = fmt.Sprintf("DNS query to %s:53 failed: %v", targetDomain, err)
+			res.PacketLossPct = 100
+		} else {
+			res.PacketLossPct = 0
+		}
+		return
+	}
+
+	// Domain name lookup via system resolver
 	ips, err := net.LookupIP(targetDomain)
 	durationMs := float64(time.Since(start).Microseconds()) / 1000.0
 

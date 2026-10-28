@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Palette,
   Save,
@@ -34,10 +34,27 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
+import { useNotificationSettings } from '../../store/notificationStore.jsx';
 
-export default function Settings({ settings, onSave }) {
+export default function Settings({ settings, onSave, initialTab }) {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('branding');
+  const location = useLocation();
+  const queryTab = new URLSearchParams(location.search).get('tab');
+  const pathTab = location.pathname.includes('notification') ? 'notifications' : null;
+  const resolvedInitialTab = initialTab || queryTab || pathTab || 'branding';
+
+  const { defaultRecipient, saveDefaultRecipient, refreshSettings } = useNotificationSettings();
+  const [activeTab, setActiveTab] = useState(resolvedInitialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    } else if (queryTab) {
+      setActiveTab(queryTab);
+    } else if (pathTab) {
+      setActiveTab(pathTab);
+    }
+  }, [initialTab, queryTab, pathTab]);
   const [copiedToken, setCopiedToken] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -50,7 +67,7 @@ export default function Settings({ settings, onSave }) {
     smtp_user: '',
     smtp_password: '',
     from_address: '',
-    default_recipient: '',
+    default_recipient: defaultRecipient || '',
     send_resolved_emails: true,
     consecutive_breaches_required: 2,
     consecutive_normal_required: 2,
@@ -81,7 +98,7 @@ export default function Settings({ settings, onSave }) {
     // 3. Notifications & Webhooks
     slack_webhook_url: 'https://hooks.slack.com/services/T00/B00/XXXXX',
     pagerduty_key: 'pd_integration_key_prod_8819',
-    email_recipients: 'infrapilotadmin@gmail.com',
+    email_recipients: '',
     teams_webhook_url: '',
     enable_critical_pager: true,
 
@@ -117,6 +134,8 @@ export default function Settings({ settings, onSave }) {
       try {
         const res = await apiClient.get('/notifications/settings');
         if (res && res.data) {
+          const rec = res.data.default_recipient;
+          const cleanRec = (rec === 'infrapilotadmin@gmail.com' || rec === 'admin@company.com') ? '' : (rec || '');
           setSmtpForm((prev) => ({
             ...prev,
             enabled: res.data.enabled ?? prev.enabled,
@@ -125,13 +144,13 @@ export default function Settings({ settings, onSave }) {
             smtp_user: res.data.smtp_user || prev.smtp_user,
             smtp_password: res.data.smtp_password || '',
             from_address: res.data.from_address || prev.from_address,
-            default_recipient: res.data.default_recipient || prev.default_recipient,
+            default_recipient: cleanRec || prev.default_recipient,
             send_resolved_emails: res.data.send_resolved_emails ?? prev.send_resolved_emails,
             consecutive_breaches_required: res.data.consecutive_breaches_required || prev.consecutive_breaches_required,
             consecutive_normal_required: res.data.consecutive_normal_required || prev.consecutive_normal_required,
           }));
-          if (res.data.default_recipient) {
-            setTestRecipient(res.data.default_recipient);
+          if (cleanRec) {
+            setTestRecipient(cleanRec);
           }
         }
       } catch (err) {
@@ -208,6 +227,12 @@ export default function Settings({ settings, onSave }) {
         apiClient.patch('/orgs/default/settings', form).catch(() => null),
         apiClient.put('/notifications/settings', smtpForm).catch(() => null),
       ]);
+      if (smtpForm.default_recipient !== undefined) {
+        await saveDefaultRecipient(smtpForm.default_recipient);
+      }
+      if (typeof refreshSettings === 'function') {
+        refreshSettings();
+      }
       if (onSave) onSave(form);
       setSavedMsg(true);
       setTimeout(() => setSavedMsg(false), 3000);
@@ -232,7 +257,7 @@ export default function Settings({ settings, onSave }) {
   const tabs = [
     { id: 'branding', label: 'Organization & Branding', icon: Building, badge: 'PORTAL' },
     { id: 'fleet', label: 'Agent & Telemetry', icon: Server, badge: 'AGENT' },
-    { id: 'notifications', label: 'Alerts & Webhooks', icon: Bell, badge: 'ROUTING' },
+    { id: 'notifications', label: 'Notifications & Email', icon: Mail, badge: 'SMTP' },
     { id: 'sre', label: 'SRE & Remediation', icon: Zap, badge: 'SLO' },
     { id: 'security', label: 'Security & SAML SSO', icon: Shield, badge: 'RBAC' },
     { id: 'retention', label: 'Data Retention & Backup', icon: HardDrive, badge: 'STORAGE' },
@@ -657,7 +682,7 @@ export default function Settings({ settings, onSave }) {
                     type="text"
                     value={smtpForm.smtp_user}
                     onChange={(e) => setSmtpForm({ ...smtpForm, smtp_user: e.target.value })}
-                    placeholder="e.g. infrapilotadmin@gmail.com"
+                    placeholder="e.g. notifications@company.com"
                   />
                 </div>
 
@@ -702,7 +727,7 @@ export default function Settings({ settings, onSave }) {
                     type="text"
                     value={smtpForm.from_address}
                     onChange={(e) => setSmtpForm({ ...smtpForm, from_address: e.target.value })}
-                    placeholder="InfraPilot Enterprise <infrapilotadmin@gmail.com>"
+                    placeholder="InfraPilot Enterprise <notifications@infrapilot.enterprise>"
                   />
                 </div>
 

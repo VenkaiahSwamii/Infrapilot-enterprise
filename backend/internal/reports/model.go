@@ -50,6 +50,9 @@ type Report struct {
 	Status      ReportStatus   `gorm:"not null;default:'pending'" json:"status"`
 	Format      string         `gorm:"not null" json:"format"` // pdf, excel, csv
 	Schedule    ReportSchedule `gorm:"not null;default:'none'" json:"schedule"`
+	FileSize    string         `gorm:"type:varchar" json:"file_size"`
+	RowCount    int64          `gorm:"type:bigint" json:"row_count"`
+	Scope       string         `gorm:"type:varchar" json:"scope"`
 	DateFrom    *time.Time     `json:"date_from"`
 	DateTo      *time.Time     `json:"date_to"`
 	MachineIDs  []byte         `gorm:"type:jsonb" json:"machine_ids"` // JSON array of UUIDs
@@ -78,8 +81,9 @@ type ReportFilter struct {
 type GenerateReportRequest struct {
 	Name       string         `json:"name" binding:"required"`
 	Type       ReportType     `json:"type" binding:"required"`
-	Format     string         `json:"format" binding:"required,oneof=pdf excel csv"`
+	Format     string         `json:"format" binding:"required,oneof=pdf excel csv xlsx PDF EXCEL CSV XLSX"`
 	Schedule   ReportSchedule `json:"schedule"`
+	Scope      string         `json:"scope"`
 	DateFrom   *time.Time     `json:"date_from"`
 	DateTo     *time.Time     `json:"date_to"`
 	MachineIDs []uuid.UUID    `json:"machine_ids"`
@@ -89,8 +93,9 @@ type GenerateReportRequest struct {
 type ScheduleReportRequest struct {
 	Name       string         `json:"name" binding:"required"`
 	Type       ReportType     `json:"type" binding:"required"`
-	Format     string         `json:"format" binding:"required,oneof=pdf excel csv"`
-	Schedule   ReportSchedule `json:"schedule" binding:"required,oneof=daily weekly monthly"`
+	Format     string         `json:"format" binding:"required,oneof=pdf excel csv xlsx PDF EXCEL CSV XLSX"`
+	Schedule   ReportSchedule `json:"schedule" binding:"required,oneof=daily weekly monthly DAILY WEEKLY MONTHLY"`
+	Scope      string         `json:"scope"`
 	DateFrom   *time.Time     `json:"date_from"`
 	DateTo     *time.Time     `json:"date_to"`
 	MachineIDs []uuid.UUID    `json:"machine_ids"`

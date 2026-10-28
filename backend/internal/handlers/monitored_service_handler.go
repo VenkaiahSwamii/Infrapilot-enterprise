@@ -24,9 +24,17 @@ type AddServiceRequest struct {
 	AlertLevel  string `json:"alert_level"`
 }
 
+func parseServerID(c *gin.Context) (uuid.UUID, error) {
+	idStr := strings.TrimSpace(c.Param("id"))
+	if idStr == "" {
+		idStr = strings.TrimSpace(c.Param("serverId"))
+	}
+	cleanID := strings.Split(idStr, "_")[0]
+	return uuid.Parse(cleanID)
+}
+
 func (h *MonitoredServiceHandler) GetMonitoredServices(c *gin.Context) {
-	idStr := c.Param("id")
-	serverID, err := uuid.Parse(idStr)
+	serverID, err := parseServerID(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID format"})
 		return
@@ -42,8 +50,7 @@ func (h *MonitoredServiceHandler) GetMonitoredServices(c *gin.Context) {
 }
 
 func (h *MonitoredServiceHandler) AddMonitoredService(c *gin.Context) {
-	idStr := c.Param("id")
-	serverID, err := uuid.Parse(idStr)
+	serverID, err := parseServerID(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID format"})
 		return
@@ -65,8 +72,7 @@ func (h *MonitoredServiceHandler) AddMonitoredService(c *gin.Context) {
 }
 
 func (h *MonitoredServiceHandler) RemoveMonitoredService(c *gin.Context) {
-	idStr := c.Param("id")
-	serverID, err := uuid.Parse(idStr)
+	serverID, err := parseServerID(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID format"})
 		return
@@ -87,8 +93,7 @@ func (h *MonitoredServiceHandler) RemoveMonitoredService(c *gin.Context) {
 }
 
 func (h *MonitoredServiceHandler) ToggleMonitoredService(c *gin.Context) {
-	idStr := c.Param("id")
-	serverID, err := uuid.Parse(idStr)
+	serverID, err := parseServerID(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID format"})
 		return

@@ -56,9 +56,19 @@ nohup npm run dev -- --port 5173 --host 0.0.0.0 > "$SCRIPT_DIR/frontend.log" 2>&
 FRONTEND_PID=$!
 echo "✓ Frontend running (PID: $FRONTEND_PID, Log: frontend.log)"
 
+BACKEND_URL="http://192.168.1.86:8080"
+if [ -f "$SCRIPT_DIR/config.toml" ]; then
+    CFG_BACKEND=$(grep -m 1 'backend_url' "$SCRIPT_DIR/config.toml" | sed -E 's/.*backend_url\s*=\s*"([^"]+)".*/\1/' || true)
+    if [ -n "$CFG_BACKEND" ]; then
+        BACKEND_URL="$CFG_BACKEND"
+    fi
+fi
+FRONTEND_HOST=$(echo "$BACKEND_URL" | sed -E 's|https?://([^:/]+).*|\1|')
+FRONTEND_URL="http://${FRONTEND_HOST:-localhost}:5173"
+
 echo "========================================================"
 echo "   ✅ InfraPilot Enterprise Platform Started (No Docker) "
-echo "   Frontend Web UI: http://192.168.1.13:5173              "
-echo "   Backend API:     http://192.168.1.13:8080/api/v1/health"
+echo "   Frontend Web UI: $FRONTEND_URL"
+echo "   Backend API:     $BACKEND_URL/api/v1/health"
 echo "   Default Login:   admin@infrapilot.com / password     "
 echo "========================================================"

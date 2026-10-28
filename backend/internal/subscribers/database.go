@@ -10,40 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// SaveMetric saves metrics to the database when a metric.received event is published
+// SaveMetric is a no-op as telemetry is already comprehensively persisted
+// with full memory, disk, process, and interface fields synchronously by metricService.SaveMetric.
+// Creating a second record here previously generated duplicate rows with 0% memory/disk metrics.
 func SaveMetric(e events.Event) {
-	metricEvent, ok := e.(events.MetricReceivedEvent)
-	if !ok {
-		log.Printf("Invalid event type for SaveMetric: %T", e)
-		return
-	}
-
-	log.Printf("Saving metric to database for machine %s", metricEvent.MachineID)
-
-	// Find the machine
-	var machine models.Machine
-	if err := database.DB.Where("id = ?", metricEvent.MachineID).First(&machine).Error; err != nil {
-		log.Printf("Failed to find machine %s: %v", metricEvent.MachineID, err)
-		return
-	}
-
-	metric := models.Metric{
-		ID:          uuid.New(),
-		MachineID:   machine.ID,
-		CPUUsage:    metricEvent.CPU,
-		MemoryUsage: metricEvent.Memory,
-		DiskUsage:   metricEvent.Disk,
-		Hostname:    machine.Hostname,
-		IPAddress:   machine.IPAddress,
-		OS:          machine.OS,
-	}
-
-	if err := database.DB.Create(&metric).Error; err != nil {
-		log.Printf("Failed to save metric: %v", err)
-		return
-	}
-
-	log.Printf("Metric saved successfully for machine %s", metricEvent.MachineID)
+	return
 }
 
 // SaveAuditLog saves audit events to the database

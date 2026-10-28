@@ -1,50 +1,55 @@
 param(
-    [string]$ServerURL = "http://192.168.1.13:8080"
+    [string]$ServerURL = ""
 )
+
+if (-not $ServerURL) {
+    if (Test-Path ".\config.toml") {
+        $cfgMatch = Select-String -Path ".\config.toml" -Pattern 'backend_url\s*=\s*"([^"]+)"'
+        if ($cfgMatch -and $cfgMatch.Matches.Count -gt 0) {
+            $ServerURL = $cfgMatch.Matches[0].Groups[1].Value
+        }
+    } elseif (Test-Path "..\config.toml") {
+        $cfgMatch = Select-String -Path "..\config.toml" -Pattern 'backend_url\s*=\s*"([^"]+)"'
+        if ($cfgMatch -and $cfgMatch.Matches.Count -gt 0) {
+            $ServerURL = $cfgMatch.Matches[0].Groups[1].Value
+        }
+    }
+}
+if (-not $ServerURL) {
+    $ServerURL = "http://localhost:8080"
+}
 
 # Requires administrator privileges to update C:\Program Files\InfraPilot
 Write-Host "Stopping InfraPilot Agent..." -ForegroundColor Cyan
-Stop-Service InfraPilotAgent -Force -ErrorAction SilentlyContinue
+Stop-Service -Name "infrapilot-agent", "InfraPilotAgent" -Force -ErrorAction SilentlyContinue
 
 $dir = "C:\Program Files\InfraPilot"
 if (-not (Test-Path $dir)) {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
 }
 
-$jsonContent = @"
-{
-  "backend_url": "$ServerURL",
-  "machine_id": "8296e585-82b2-4f83-bf73-ca965accb7b6",
-  "api_key": "ip_live_21cecaf15ba9e649ad84fd306ab26602",
-  "key_version": 1,
-  "organization": "Default Organization",
-  "interval": 5,
-  "heartbeat_interval": 15,
-  "os": "windows"
+# Sync authoritative config.toml
+$sourceConfig = ""
+if (Test-Path ".\config.toml") {
+    $sourceConfig = ".\config.toml"
+} elseif (Test-Path "..\config.toml") {
+    $sourceConfig = "..\config.toml"
 }
-"@
-Set-Content -Path "$dir\config.json" -Value $jsonContent -Force
 
-$tomlContent = @"
-backend_url = "$ServerURL"
-registered_hostname = "SSA"
-interval = 5
+if ($sourceConfig -ne "") {
+    Copy-Item $sourceConfig "$dir\config.toml" -Force
+    $cfgRaw = Get-Content -Path "$dir\config.toml" -Raw
+    $cfgRaw = $cfgRaw -replace 'backend_url\s*=\s*"[^"]*"', "backend_url = `"$ServerURL`""
+    Set-Content -Path "$dir\config.toml" -Value $cfgRaw -Encoding UTF8
+    Write-Host "[+] Synced config.toml from repository to $dir" -ForegroundColor Green
+}
 
-[logging]
-log_level = "info"
-log_format = "text"
-
-[collectors]
-system = true
-processes = true
-docker = true
-kubernetes = true
-logs = true
-security = true
-"@
-Set-Content -Path "$dir\config.toml" -Value $tomlContent -Force
+# Clean stale cached identity to trigger fresh re-enrollment
+Remove-Item -Path "$dir\config.json" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$dir\offline_queue.json" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$env:ProgramData\InfraPilot\offline_queue.json" -Force -ErrorAction SilentlyContinue
 
 Write-Host "Starting InfraPilot Agent..." -ForegroundColor Cyan
-Start-Service InfraPilotAgent
+Start-Service -Name "infrapilot-agent"
 Write-Host "SUCCESS: Connected this machine (SSA) to central dashboard at $ServerURL!" -ForegroundColor Green
+Write-Host "[+] View Live Logs: Get-Content `"$env:ProgramData\InfraPilot\logs\agent.log`" -Wait -Tail 30" -ForegroundColor Yellow

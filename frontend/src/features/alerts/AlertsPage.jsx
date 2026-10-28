@@ -79,8 +79,13 @@ export default function AlertsPage() {
 
   const { addToast } = useDashboardStore();
 
+  // Top-Level Navigation Mode: 'alerts' vs 'rules'
+  const [activeView, setActiveView] = useState('alerts'); // 'alerts' | 'rules'
+  const [rulesSearch, setRulesSearch] = useState('');
+
   // Filters & Search
-  const [statusFilter, setStatusFilter] = useState('active'); // active, critical, warning, acknowledged, resolved, silenced, rules
+  const [statusFilter, setStatusFilter] = useState('active'); // active, critical, warning, acknowledged, resolved, silenced
+  const [sourceFilter, setSourceFilter] = useState('all'); // all, rules, events
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [severityFilter, setSeverityFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -117,7 +122,7 @@ export default function AlertsPage() {
     consecutive_breaches: 2,
   });
 
-  // Load alert rules if on rules tab
+  // Load alert rules
   const fetchRules = useCallback(async () => {
     try {
       setRulesLoading(true);
@@ -130,23 +135,36 @@ export default function AlertsPage() {
     }
   }, []);
 
-  // Fetch rules on initial mount so tab badges reflect real count
+  // Fetch rules on initial mount
   useEffect(() => {
     fetchRules();
   }, [fetchRules]);
 
   useEffect(() => {
-    if (statusFilter === 'rules') {
+    if (activeView === 'rules') {
       fetchRules();
     }
-  }, [statusFilter, fetchRules]);
+  }, [activeView, fetchRules]);
+
+  // Filtered Rules
+  const filteredRules = useMemo(() => {
+    if (!rulesSearch.trim()) return rules;
+    const q = rulesSearch.toLowerCase();
+    return rules.filter((r) => {
+      const name = (r.name || '').toLowerCase();
+      const metric = (r.metric || '').toLowerCase();
+      const scope = (r.target_scope || '').toLowerCase();
+      const sev = (r.severity || '').toLowerCase();
+      return name.includes(q) || metric.includes(q) || scope.includes(q) || sev.includes(q);
+    });
+  }, [rules, rulesSearch]);
 
   // Auto-refresh interval
   useEffect(() => {
     if (refreshInterval === 'off') return;
     const ms = refreshInterval === '5s' ? 5000 : refreshInterval === '10s' ? 10000 : 30000;
     const timer = setInterval(() => {
-      fetchAlerts({ status: statusFilter === 'all' ? 'all' : 'all', limit: 200 });
+      fetchAlerts({ status: 'all', limit: 300 });
     }, ms);
     return () => clearInterval(timer);
   }, [refreshInterval, statusFilter, fetchAlerts]);
@@ -172,6 +190,11 @@ export default function AlertsPage() {
       const pri = (a.priority || '').toUpperCase();
       const cat = (a.category || a.type || '').toLowerCase();
       const mId = a.machine_id || a.MachineID;
+
+      // Source / Origin filter: 'all' | 'rules' | 'events'
+      const isEvent = (a.source || '').toUpperCase() === 'EVENT' || (a.origin || '').toLowerCase() === 'event';
+      if (sourceFilter === 'events' && !isEvent) return false;
+      if (sourceFilter === 'rules' && isEvent) return false;
 
       // Status filter
       if (statusFilter === 'active') {
@@ -216,7 +239,7 @@ export default function AlertsPage() {
 
       return true;
     });
-  }, [alerts, statusFilter, severityFilter, categoryFilter, selectedMachine, search]);
+  }, [alerts, statusFilter, sourceFilter, severityFilter, categoryFilter, selectedMachine, search]);
 
   // Bulk selection helpers
   const handleToggleSelect = (id) => {
@@ -305,10 +328,12 @@ export default function AlertsPage() {
   const handleCreateRuleSubmit = async (e) => {
     e.preventDefault();
     try {
+      const parsed = parseFloat(newRule.threshold);
+      const val = isNaN(parsed) ? 0 : parsed;
       const payload = {
         ...newRule,
-        threshold: Number(newRule.threshold || newRule.value || 0),
-        value: Number(newRule.threshold || newRule.value || 0),
+        threshold: val,
+        value: val,
       };
       await createAlertRule('default', payload);
       addToast('success', 'Rule Created', `Rule "${newRule.name}" created successfully`);
@@ -380,10 +405,12 @@ export default function AlertsPage() {
     e.preventDefault();
     if (!editingRule) return;
     try {
+      const parsed = parseFloat(editingRule.threshold);
+      const val = isNaN(parsed) ? 0 : parsed;
       const payload = {
         ...editingRule,
-        threshold: Number(editingRule.threshold),
-        value: Number(editingRule.threshold),
+        threshold: val,
+        value: val,
       };
       await updateAlertRule('default', editingRule.id, payload);
       addToast('success', 'Rule Updated', `Rule "${editingRule.name}" updated successfully`);
@@ -446,62 +473,124 @@ export default function AlertsPage() {
         </div>
 
         <div className="header-right-actions">
-          {/* Refresh Selector */}
-          <div className="refresh-control-pill">
-            <RefreshCw size={13} className={loading ? 'spin' : ''} />
-            <select value={refreshInterval} onChange={(e) => setRefreshInterval(e.target.value)}>
-              <option value="5s">Auto 5s</option>
-              <option value="10s">Auto 10s</option>
-              <option value="30s">Auto 30s</option>
-              <option value="off">Manual</option>
-            </select>
-          </div>
+          {activeView === 'alerts' ? (
+            <>
+              {/* Refresh Selector */}
+              <div className="refresh-control-pill">
+                <RefreshCw size={13} className={loading ? 'spin' : ''} />
+                <select value={refreshInterval} onChange={(e) => setRefreshInterval(e.target.value)}>
+                  <option value="5s">Auto 5s</option>
+                  <option value="10s">Auto 10s</option>
+                  <option value="30s">Auto 30s</option>
+                  <option value="off">Manual</option>
+                </select>
+              </div>
 
-          <button
-            className="action-btn secondary"
-            onClick={() => fetchAlerts({ status: 'all', limit: 200 })}
-            disabled={loading}
-            title="Refresh All Alerts"
-          >
-            <RefreshCw size={14} className={loading ? 'spin' : ''} />
-            <span>Sync</span>
-          </button>
+              <button
+                className="action-btn secondary"
+                onClick={() => fetchAlerts({ status: 'all', limit: 300 })}
+                disabled={loading}
+                title="Refresh All Alerts"
+              >
+                <RefreshCw size={14} className={loading ? 'spin' : ''} />
+                <span>Sync</span>
+              </button>
 
-          <button className="action-btn secondary" onClick={handleExportCSV} title="Export CSV">
-            <Download size={14} />
-            <span>Export CSV</span>
-          </button>
+              <button className="action-btn secondary" onClick={handleExportCSV} title="Export CSV">
+                <Download size={14} />
+                <span>Export CSV</span>
+              </button>
 
-          <button
-            className="action-btn secondary danger"
-            onClick={async () => {
-              if (window.confirm('Purge all resolved alerts from database history?')) {
-                await purgeResolved();
-                addToast('info', 'Purged', 'Resolved alerts purged.');
-              }
-            }}
-            title="Clean up resolved historical alerts"
-          >
-            <Trash2 size={14} />
-            <span>Purge Resolved</span>
-          </button>
+              <button
+                className="action-btn secondary danger"
+                onClick={async () => {
+                  if (window.confirm('Purge all resolved alerts from database history?')) {
+                    await purgeResolved();
+                    addToast('info', 'Purged', 'Resolved alerts purged.');
+                  }
+                }}
+                title="Clean up resolved historical alerts"
+              >
+                <Trash2 size={14} />
+                <span>Purge Resolved</span>
+              </button>
 
-          <button
-            className="action-btn primary"
-            onClick={() => setShowCreateRuleModal(true)}
-            title="Create Custom Alert Rule"
-          >
-            <Plus size={15} />
-            <span>New Alert Rule</span>
-          </button>
+              <button
+                className="action-btn primary"
+                onClick={() => setShowCreateRuleModal(true)}
+                title="Create Custom Alert Rule"
+              >
+                <Plus size={15} />
+                <span>New Alert Rule</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="action-btn secondary"
+                onClick={fetchRules}
+                disabled={rulesLoading}
+                title="Refresh Alert Rules"
+              >
+                <RefreshCw size={14} className={rulesLoading ? 'spin' : ''} />
+                <span>Sync Rules</span>
+              </button>
+
+              <button
+                className="action-btn secondary"
+                onClick={handleSeedPresets}
+                disabled={seedingPresets}
+                title="Load Standard Enterprise Presets"
+              >
+                <Sparkles size={14} color="#38bdf8" />
+                <span>{seedingPresets ? 'Seeding...' : 'Load Default Presets'}</span>
+              </button>
+
+              <button
+                className="action-btn primary"
+                onClick={() => setShowCreateRuleModal(true)}
+                title="Create Custom Alert Rule"
+              >
+                <Plus size={15} />
+                <span>Create Rule</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* ── 2. EXECUTIVE KPI CARDS ── */}
-      <div className="alerts-kpi-grid">
+      {/* ── 2. SEGMENTED VIEW SWITCHER ── */}
+      <div className="segmented-view-container">
+        <button
+          className={`segmented-view-tab ${activeView === 'alerts' ? 'active' : ''}`}
+          onClick={() => setActiveView('alerts')}
+        >
+          <Bell size={16} />
+          <span>Fired Alerts & Incidents</span>
+          <span className="view-pill red">{activeCount}</span>
+        </button>
+
+        <button
+          className={`segmented-view-tab ${activeView === 'rules' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveView('rules');
+            fetchRules();
+          }}
+        >
+          <Sliders size={16} />
+          <span>Alert Rules & Policies</span>
+          <span className="view-pill blue">{rules.length}</span>
+        </button>
+      </div>
+
+      {/* ── 3. EXECUTIVE KPI CARDS (4 Essential Metrics) ── */}
+      <div className="alerts-kpi-grid four-cards">
         <div
-          className={`kpi-card ${statusFilter === 'active' ? 'active-border' : ''}`}
-          onClick={() => setStatusFilter('active')}
+          className={`kpi-card ${activeView === 'alerts' && statusFilter === 'active' ? 'active-border' : ''}`}
+          onClick={() => {
+            setActiveView('alerts');
+            setStatusFilter('active');
+          }}
         >
           <div className="kpi-icon-wrap blue">
             <Bell size={20} color="#38bdf8" />
@@ -517,8 +606,11 @@ export default function AlertsPage() {
         </div>
 
         <div
-          className={`kpi-card crit-glow ${statusFilter === 'critical' ? 'active-border' : ''}`}
-          onClick={() => setStatusFilter('critical')}
+          className={`kpi-card crit-glow ${activeView === 'alerts' && statusFilter === 'critical' ? 'active-border' : ''}`}
+          onClick={() => {
+            setActiveView('alerts');
+            setStatusFilter('critical');
+          }}
         >
           <div className="kpi-icon-wrap red">
             <XCircle size={20} color="#ef4444" />
@@ -534,8 +626,11 @@ export default function AlertsPage() {
         </div>
 
         <div
-          className={`kpi-card ${statusFilter === 'warning' ? 'active-border' : ''}`}
-          onClick={() => setStatusFilter('warning')}
+          className={`kpi-card ${activeView === 'alerts' && statusFilter === 'warning' ? 'active-border' : ''}`}
+          onClick={() => {
+            setActiveView('alerts');
+            setStatusFilter('warning');
+          }}
         >
           <div className="kpi-icon-wrap yellow">
             <AlertTriangle size={20} color="#f59e0b" />
@@ -553,115 +648,115 @@ export default function AlertsPage() {
         </div>
 
         <div
-          className={`kpi-card ${statusFilter === 'acknowledged' ? 'active-border' : ''}`}
-          onClick={() => setStatusFilter('acknowledged')}
+          className={`kpi-card ${activeView === 'rules' ? 'active-border' : ''}`}
+          onClick={() => {
+            setActiveView('rules');
+            fetchRules();
+          }}
         >
-          <div className="kpi-icon-wrap cyan">
-            <ShieldCheck size={20} color="#06b6d4" />
-          </div>
-          <div className="kpi-info">
-            <span className="kpi-label">Acknowledged</span>
-            <div className="kpi-value-row">
-              <span className="kpi-value cyan-text">{stats.acknowledged || 0}</span>
-              <span className="kpi-tag cyan">In Triage</span>
-            </div>
-            <span className="kpi-sub">Assigned to operators</span>
-          </div>
-        </div>
-
-        <div className="kpi-card">
-          <div className="kpi-icon-wrap green">
-            <Clock size={20} color="#22c55e" />
-          </div>
-          <div className="kpi-info">
-            <span className="kpi-label">Avg MTTR</span>
-            <div className="kpi-value-row">
-              <span className="kpi-value green-text">{stats.avg_mttr_min || 4.2}m</span>
-              <span className="kpi-tag green">&lt; 15m SLA</span>
-            </div>
-            <span className="kpi-sub">Mean Time To Resolution</span>
-          </div>
-        </div>
-
-        <div className="kpi-card">
           <div className="kpi-icon-wrap purple">
-            <Activity size={20} color="#a855f7" />
+            <Sliders size={20} color="#c084fc" />
           </div>
           <div className="kpi-info">
-            <span className="kpi-label">System Health</span>
+            <span className="kpi-label">Configured Rules</span>
             <div className="kpi-value-row">
-              <span className="kpi-value purple-text">{stats.health_score ?? 98}%</span>
-              <span className="kpi-tag purple">Optimal</span>
+              <span className="kpi-value purple-text">{rules.length}</span>
+              <span className="kpi-tag purple">
+                {rules.filter((r) => r.is_enabled !== false).length} Active
+              </span>
             </div>
-            <span className="kpi-sub">Calculated cluster score</span>
+            <span className="kpi-sub">Click to manage rule policies</span>
           </div>
         </div>
       </div>
 
-      {/* ── 3. FILTER TABS & TOOLBAR ── */}
-      <div className="alerts-controls-panel">
-        <div className="panel-top-row">
-          {/* Status Tabs */}
-          <div className="status-tabs-list">
-            <button
-              className={`status-tab-btn ${statusFilter === 'active' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('active')}
-            >
-              <span>Active</span>
-              <span className="tab-pill red">{activeCount}</span>
-            </button>
+      {/* ── 4. FILTER TABS & TOOLBAR (ALERTS VIEW ONLY) ── */}
+      {activeView === 'alerts' && (
+        <div className="alerts-controls-panel">
+          <div className="panel-top-row">
+            {/* Status Tabs */}
+            <div className="status-tabs-list">
+              <button
+                className={`status-tab-btn ${statusFilter === 'active' ? 'active' : ''}`}
+                onClick={() => setStatusFilter('active')}
+              >
+                <span>Active</span>
+                <span className="tab-pill red">{activeCount}</span>
+              </button>
 
-            <button
-              className={`status-tab-btn ${statusFilter === 'critical' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('critical')}
-            >
-              <span>Critical (P1)</span>
-              <span className="tab-pill red">{criticalCount}</span>
-            </button>
+              <button
+                className={`status-tab-btn ${statusFilter === 'critical' ? 'active' : ''}`}
+                onClick={() => setStatusFilter('critical')}
+              >
+                <span>Critical (P1)</span>
+                <span className="tab-pill red">{criticalCount}</span>
+              </button>
 
-            <button
-              className={`status-tab-btn ${statusFilter === 'warning' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('warning')}
-            >
-              <span>Major & Warnings</span>
-              <span className="tab-pill yellow">{(stats.major_p2 || 0) + (stats.warning_p3 || 0)}</span>
-            </button>
+              <button
+                className={`status-tab-btn ${statusFilter === 'warning' ? 'active' : ''}`}
+                onClick={() => setStatusFilter('warning')}
+              >
+                <span>Major & Warnings</span>
+                <span className="tab-pill yellow">{(stats.major_p2 || 0) + (stats.warning_p3 || 0)}</span>
+              </button>
 
-            <button
-              className={`status-tab-btn ${statusFilter === 'acknowledged' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('acknowledged')}
-            >
-              <span>Acknowledged</span>
-              <span className="tab-pill cyan">{stats.acknowledged || 0}</span>
-            </button>
+              <button
+                className={`status-tab-btn ${statusFilter === 'acknowledged' ? 'active' : ''}`}
+                onClick={() => setStatusFilter('acknowledged')}
+              >
+                <span>Acknowledged</span>
+                <span className="tab-pill cyan">{stats.acknowledged || 0}</span>
+              </button>
 
-            <button
-              className={`status-tab-btn ${statusFilter === 'resolved' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('resolved')}
-            >
-              <span>Resolved</span>
-              <span className="tab-pill gray">{stats.total_resolved || 0}</span>
-            </button>
+              <button
+                className={`status-tab-btn ${statusFilter === 'resolved' ? 'active' : ''}`}
+                onClick={() => setStatusFilter('resolved')}
+              >
+                <span>Resolved</span>
+                <span className="tab-pill gray">{stats.total_resolved || 0}</span>
+              </button>
 
-            <button
-              className={`status-tab-btn ${statusFilter === 'silenced' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('silenced')}
-            >
-              <span>Silenced</span>
-              <span className="tab-pill muted">{stats.silenced || 0}</span>
-            </button>
+              <button
+                className={`status-tab-btn ${statusFilter === 'silenced' ? 'active' : ''}`}
+                onClick={() => setStatusFilter('silenced')}
+              >
+                <span>Silenced</span>
+                <span className="tab-pill muted">{stats.silenced || 0}</span>
+              </button>
+            </div>
 
-            <button
-              className={`status-tab-btn ${statusFilter === 'rules' ? 'active' : ''}`}
-              onClick={() => setStatusFilter('rules')}
-            >
-              <Sliders size={13} style={{ marginRight: 5 }} />
-              <span>Alert Rules ({rules.length})</span>
-            </button>
+            {/* Origin Filter (All / Metric Rules / System Events) */}
+            <div className="source-filter-toggle">
+              <button
+                className={`source-toggle-btn ${sourceFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setSourceFilter('all')}
+                title="Show all alerts (metric breaches and system events)"
+                type="button"
+              >
+                All Alerts
+              </button>
+              <button
+                className={`source-toggle-btn ${sourceFilter === 'rules' ? 'active' : ''}`}
+                onClick={() => setSourceFilter('rules')}
+                title="Filter alerts triggered by metric threshold rules"
+                type="button"
+              >
+                <Sliders size={12} />
+                <span>Metric Rules</span>
+              </button>
+              <button
+                className={`source-toggle-btn ${sourceFilter === 'events' ? 'active' : ''}`}
+                onClick={() => setSourceFilter('events')}
+                title="Filter alerts triggered by discrete system, container, and SRE events"
+                type="button"
+              >
+                <Zap size={12} color="#f59e0b" />
+                <span>System Events</span>
+                {stats.event_alerts > 0 && <span className="tab-pill amber">{stats.event_alerts}</span>}
+              </button>
+            </div>
           </div>
-        </div>
 
-        {statusFilter !== 'rules' && (
           <div className="panel-bottom-row">
             {/* Search Input */}
             <div className="alerts-search-box">
@@ -677,19 +772,6 @@ export default function AlertsPage() {
                   ×
                 </button>
               )}
-            </div>
-
-            {/* Category Pills */}
-            <div className="category-pill-group">
-              {['all', 'CPU', 'Memory', 'Disk', 'Network', 'Docker', 'Kubernetes', 'Security'].map((cat) => (
-                <button
-                  key={cat}
-                  className={`category-pill ${categoryFilter.toLowerCase() === cat.toLowerCase() ? 'active' : ''}`}
-                  onClick={() => setCategoryFilter(cat.toLowerCase())}
-                >
-                  {cat}
-                </button>
-              ))}
             </div>
 
             {/* Machine Filter Dropdown */}
@@ -719,11 +801,11 @@ export default function AlertsPage() {
               <ChevronDown size={12} color="#64748b" />
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* ── 4. BULK ACTION BANNER ── */}
-      {isOperator && selectedAlertIds.size > 0 && statusFilter !== 'rules' && (
+      {/* ── 5. BULK ACTION BANNER ── */}
+      {isOperator && selectedAlertIds.size > 0 && activeView === 'alerts' && (
         <div className="bulk-actions-floating-bar">
           <div className="bulk-left-info">
             <span className="selected-count-badge">{selectedAlertIds.size}</span>
@@ -760,13 +842,13 @@ export default function AlertsPage() {
         </div>
       )}
 
-      {/* ── 5. MAIN CONTENT VIEW ── */}
-      {statusFilter === 'rules' ? (
+      {/* ── 6. MAIN CONTENT VIEW ── */}
+      {activeView === 'rules' ? (
         /* ── RULES TAB VIEW ── */
         <div className="alert-rules-manager-card">
           <div className="rules-header">
             <div>
-              <h3>Configured Alert Rules</h3>
+              <h3>Configured Alert Rules & Policies</h3>
               <p>Automated threshold evaluation engine rules for CPU, Memory, Disk, Network and Telemetry</p>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -777,13 +859,33 @@ export default function AlertsPage() {
                 title="Seed standard production enterprise alert rules"
               >
                 <Sparkles size={14} color="#38bdf8" />
-                <span>{seedingPresets ? 'Seeding...' : 'Load Presets'}</span>
+                <span>{seedingPresets ? 'Seeding...' : 'Load Default Presets'}</span>
               </button>
               <button className="action-btn primary" onClick={() => setShowCreateRuleModal(true)}>
                 <Plus size={15} />
                 <span>Create Rule</span>
               </button>
             </div>
+          </div>
+
+          <div className="rules-toolbar-row">
+            <div className="rules-search-box">
+              <Search size={15} color="#64748b" />
+              <input
+                type="text"
+                placeholder="Search rules by name, metric, or scope..."
+                value={rulesSearch}
+                onChange={(e) => setRulesSearch(e.target.value)}
+              />
+              {rulesSearch && (
+                <button className="clear-search-btn" onClick={() => setRulesSearch('')}>
+                  ×
+                </button>
+              )}
+            </div>
+            <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+              Showing {filteredRules.length} of {rules.length} configured rules
+            </span>
           </div>
 
           <div className="rules-table-wrap">
@@ -800,8 +902,8 @@ export default function AlertsPage() {
                 </tr>
               </thead>
               <tbody>
-                {rules && rules.length > 0 ? (
-                  rules.map((r) => {
+                {filteredRules && filteredRules.length > 0 ? (
+                  filteredRules.map((r) => {
                     const ruleId = r.id || r.ID;
                     const scopeType = (r.target_scope || 'all').toLowerCase();
                     let scopeLabel = 'All Machines (Global)';
@@ -889,8 +991,25 @@ export default function AlertsPage() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
-                      No custom alert rules configured. Default system rules are actively monitoring.
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '36px 20px', color: '#64748b' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                        <Sliders size={28} color="#475569" />
+                        <span style={{ fontSize: '14px', fontWeight: 600, color: '#94a3b8' }}>
+                          {rulesSearch ? 'No alert rules match your search filter.' : 'No custom alert rules configured yet.'}
+                        </span>
+                        {!rulesSearch && (
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                            <button className="action-btn secondary" onClick={handleSeedPresets} disabled={seedingPresets}>
+                              <Sparkles size={14} color="#38bdf8" />
+                              <span>{seedingPresets ? 'Seeding...' : 'Load Default Presets'}</span>
+                            </button>
+                            <button className="action-btn primary" onClick={() => setShowCreateRuleModal(true)}>
+                              <Plus size={14} />
+                              <span>Create Custom Rule</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -995,6 +1114,11 @@ export default function AlertsPage() {
                       <div className="alert-title-main">
                         <strong>{a.title || a.message || 'Infrastructure Anomaly Detected'}</strong>
                         {a.category && <span className="category-tag">{a.category}</span>}
+                        {((a.source || '').toUpperCase() === 'EVENT' || (a.origin || '').toLowerCase() === 'event') && (
+                          <span className="category-tag event-origin-tag" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)' }}>
+                            ⚡ SYSTEM EVENT
+                          </span>
+                        )}
                         {String(a.message || a.title || '').includes('FLAPPING') && (
                           <span className="category-tag" style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', border: '1px solid #f59e0b' }}>
                             FLAPPING_LOOP_DETECTED
@@ -1023,7 +1147,11 @@ export default function AlertsPage() {
 
                     {/* Trigger Value vs Threshold */}
                     <div className="row-cell-metric">
-                      {a.metric_value ? (
+                      {((a.source || '').toUpperCase() === 'EVENT' || (a.origin || '').toLowerCase() === 'event') ? (
+                        <div className="metric-spike-badge event-badge" style={{ background: 'rgba(245, 158, 11, 0.1)', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+                          <span className="metric-val" style={{ color: '#fbbf24' }}>Event #{Number(a.metric_value || 1).toFixed(0)}</span>
+                        </div>
+                      ) : a.metric_value ? (
                         <div className="metric-spike-badge">
                           <span className="metric-val">{Number(a.metric_value).toFixed(1)}%</span>
                           {a.threshold ? <span className="metric-thresh">/{a.threshold}%</span> : null}
@@ -1275,51 +1403,54 @@ export default function AlertsPage() {
                 />
               </div>
 
+              <div className="form-group">
+                <label>Metric to Monitor</label>
+                <select
+                  value={newRule.metric}
+                  onChange={(e) => setNewRule({ ...newRule, metric: e.target.value })}
+                >
+                  <option value="cpu_usage">CPU Utilization (%)</option>
+                  <option value="memory_percent">Memory Usage (%)</option>
+                  <option value="disk_percent">Disk Storage Used (%)</option>
+                  <option value="latency_ms">Network Latency (ms)</option>
+                  <option value="packet_loss">Network Packet Loss (%)</option>
+                  <option value="upload_mbps">Upload Bandwidth (MB/s)</option>
+                  <option value="download_mbps">Download Bandwidth (MB/s)</option>
+                  <option value="cpu_temperature">CPU Temperature (°C)</option>
+                </select>
+              </div>
+
               <div className="form-row-2">
                 <div className="form-group">
-                  <label>Metric</label>
+                  <label>Condition / Operator</label>
                   <select
-                    value={newRule.metric}
-                    onChange={(e) => setNewRule({ ...newRule, metric: e.target.value })}
+                    value={newRule.operator}
+                    onChange={(e) => setNewRule({ ...newRule, operator: e.target.value })}
                   >
-                    <option value="cpu_usage">CPU Utilization (%)</option>
-                    <option value="memory_percent">Memory Usage (%)</option>
-                    <option value="disk_percent">Disk Storage Used (%)</option>
-                    <option value="latency_ms">Network Latency (ms)</option>
-                    <option value="packet_loss">Network Packet Loss (%)</option>
-                    <option value="upload_mbps">Upload Bandwidth (MB/s)</option>
-                    <option value="download_mbps">Download Bandwidth (MB/s)</option>
-                    <option value="cpu_temperature">CPU Temperature (°C)</option>
+                    <option value=">">&gt; (Greater than)</option>
+                    <option value=">=">&gt;= (Greater or equal)</option>
+                    <option value="<">&lt; (Less than)</option>
+                    <option value="<=">&lt;= (Less or equal)</option>
+                    <option value="==">== (Equals)</option>
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label>Condition & Threshold</label>
-                  <div className="condition-input-group">
-                    <select
-                      value={newRule.operator}
-                      onChange={(e) => setNewRule({ ...newRule, operator: e.target.value })}
-                    >
-                      <option value=">">&gt; (Greater than)</option>
-                      <option value=">=">&gt;= (Greater or equal)</option>
-                      <option value="<">&lt; (Less than)</option>
-                      <option value="<=">&lt;= (Less or equal)</option>
-                      <option value="==">== (Equals)</option>
-                    </select>
-                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', position: 'relative' }}>
-                      <input
-                        type="number"
-                        step="any"
-                        required
-                        value={newRule.threshold}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setNewRule({ ...newRule, threshold: val, value: val });
-                        }}
-                        style={{ width: '100%', paddingRight: '36px' }}
-                      />
-                      <span className="metric-unit-badge">{getMetricUnit(newRule.metric)}</span>
-                    </div>
+                  <label>Threshold Value</label>
+                  <div className="threshold-input-wrapper">
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      placeholder="e.g. 90"
+                      value={newRule.threshold === '' ? '' : newRule.threshold}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setNewRule({ ...newRule, threshold: raw, value: raw });
+                      }}
+                      className="threshold-number-input"
+                    />
+                    <span className="metric-unit-badge">{getMetricUnit(newRule.metric)}</span>
                   </div>
                 </div>
               </div>
@@ -1431,51 +1562,54 @@ export default function AlertsPage() {
                 />
               </div>
 
+              <div className="form-group">
+                <label>Metric to Monitor</label>
+                <select
+                  value={editingRule.metric}
+                  onChange={(e) => setEditingRule({ ...editingRule, metric: e.target.value })}
+                >
+                  <option value="cpu_usage">CPU Utilization (%)</option>
+                  <option value="memory_percent">Memory Usage (%)</option>
+                  <option value="disk_percent">Disk Storage Used (%)</option>
+                  <option value="latency_ms">Network Latency (ms)</option>
+                  <option value="packet_loss">Network Packet Loss (%)</option>
+                  <option value="upload_mbps">Upload Bandwidth (MB/s)</option>
+                  <option value="download_mbps">Download Bandwidth (MB/s)</option>
+                  <option value="cpu_temperature">CPU Temperature (°C)</option>
+                </select>
+              </div>
+
               <div className="form-row-2">
                 <div className="form-group">
-                  <label>Metric</label>
+                  <label>Condition / Operator</label>
                   <select
-                    value={editingRule.metric}
-                    onChange={(e) => setEditingRule({ ...editingRule, metric: e.target.value })}
+                    value={editingRule.operator}
+                    onChange={(e) => setEditingRule({ ...editingRule, operator: e.target.value })}
                   >
-                    <option value="cpu_usage">CPU Utilization (%)</option>
-                    <option value="memory_percent">Memory Usage (%)</option>
-                    <option value="disk_percent">Disk Storage Used (%)</option>
-                    <option value="latency_ms">Network Latency (ms)</option>
-                    <option value="packet_loss">Network Packet Loss (%)</option>
-                    <option value="upload_mbps">Upload Bandwidth (MB/s)</option>
-                    <option value="download_mbps">Download Bandwidth (MB/s)</option>
-                    <option value="cpu_temperature">CPU Temperature (°C)</option>
+                    <option value=">">&gt; (Greater than)</option>
+                    <option value=">=">&gt;= (Greater or equal)</option>
+                    <option value="<">&lt; (Less than)</option>
+                    <option value="<=">&lt;= (Less or equal)</option>
+                    <option value="==">== (Equals)</option>
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label>Condition & Threshold</label>
-                  <div className="condition-input-group">
-                    <select
-                      value={editingRule.operator}
-                      onChange={(e) => setEditingRule({ ...editingRule, operator: e.target.value })}
-                    >
-                      <option value=">">&gt; (Greater than)</option>
-                      <option value=">=">&gt;= (Greater or equal)</option>
-                      <option value="<">&lt; (Less than)</option>
-                      <option value="<=">&lt;= (Less or equal)</option>
-                      <option value="==">== (Equals)</option>
-                    </select>
-                    <div style={{ display: 'flex', alignItems: 'center', width: '100%', position: 'relative' }}>
-                      <input
-                        type="number"
-                        step="any"
-                        required
-                        value={editingRule.threshold}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setEditingRule({ ...editingRule, threshold: val, value: val });
-                        }}
-                        style={{ width: '100%', paddingRight: '36px' }}
-                      />
-                      <span className="metric-unit-badge">{getMetricUnit(editingRule.metric)}</span>
-                    </div>
+                  <label>Threshold Value</label>
+                  <div className="threshold-input-wrapper">
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      placeholder="e.g. 90"
+                      value={editingRule.threshold === '' ? '' : editingRule.threshold}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setEditingRule({ ...editingRule, threshold: raw, value: raw });
+                      }}
+                      className="threshold-number-input"
+                    />
+                    <span className="metric-unit-badge">{getMetricUnit(editingRule.metric)}</span>
                   </div>
                 </div>
               </div>
@@ -2311,7 +2445,7 @@ export default function AlertsPage() {
           animation: scaleUp 0.15s ease-out;
         }
         .rule-modal-content {
-          width: 520px;
+          width: 560px;
           max-width: 95vw;
           background: #0f172a;
           border: 1px solid #334155;
@@ -2651,13 +2785,46 @@ export default function AlertsPage() {
           margin-top: 2px;
         }
 
+        .threshold-input-wrapper {
+          position: relative;
+          display: flex;
+          align-items: center;
+          width: 100%;
+        }
+        .threshold-input-wrapper input.threshold-number-input {
+          width: 100% !important;
+          min-width: 0 !important;
+          box-sizing: border-box !important;
+          height: 38px !important;
+          padding-left: 12px !important;
+          padding-right: 48px !important;
+          font-size: 13.5px !important;
+          font-weight: 600 !important;
+          color: #ffffff !important;
+          background: #090d16 !important;
+          border: 1px solid #1e293b !important;
+          border-radius: 8px !important;
+          outline: none !important;
+        }
+        .threshold-input-wrapper input.threshold-number-input:focus {
+          border-color: #3b82f6 !important;
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+        }
+
         .metric-unit-badge {
           position: absolute;
           right: 10px;
-          color: #94a3b8;
-          font-size: 11.5px;
+          color: #38bdf8;
+          font-size: 11px;
           font-weight: 700;
           pointer-events: none;
+          background: rgba(56, 189, 248, 0.12);
+          border: 1px solid rgba(56, 189, 248, 0.25);
+          padding: 2px 7px;
+          border-radius: 4px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .rule-action-btns {
@@ -2731,12 +2898,147 @@ export default function AlertsPage() {
           display: flex;
           gap: 6px;
         }
-        .modal-footer-btn-row {
+        .source-filter-toggle {
           display: flex;
           align-items: center;
-          justify-content: flex-end;
+          gap: 6px;
+          background: rgba(15, 23, 42, 0.6);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 8px;
+          padding: 3px;
+        }
+        .source-toggle-btn {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          background: transparent;
+          border: none;
+          color: #94a3b8;
+          font-size: 11.5px;
+          font-weight: 600;
+          padding: 5px 10px;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .source-toggle-btn:hover {
+          color: #ffffff;
+          background: rgba(255, 255, 255, 0.05);
+        }
+        .source-toggle-btn.active {
+          color: #38bdf8;
+          background: rgba(56, 189, 248, 0.12);
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          box-shadow: 0 0 10px rgba(56, 189, 248, 0.1);
+        }
+        .tab-pill.amber {
+          background: rgba(245, 158, 11, 0.2);
+          color: #fbbf24;
+          border: 1px solid rgba(245, 158, 11, 0.4);
+          font-size: 10px;
+          padding: 1px 6px;
+          border-radius: 999px;
+          font-weight: 700;
+        }
+        .event-origin-tag {
+          font-size: 9.5px;
+          font-weight: 700;
+          letter-spacing: 0.3px;
+        }
+
+        /* Segmented View Switcher */
+        .segmented-view-container {
+          display: flex;
+          align-items: center;
           gap: 10px;
-          margin-top: 10px;
+          background: #090d16;
+          border: 1px solid #1e293b;
+          border-radius: 12px;
+          padding: 5px;
+          margin-bottom: 20px;
+          width: fit-content;
+        }
+        .segmented-view-tab {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: transparent;
+          border: 1px solid transparent;
+          color: #94a3b8;
+          font-size: 13px;
+          font-weight: 700;
+          padding: 8px 18px;
+          border-radius: 9px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .segmented-view-tab:hover {
+          color: #ffffff;
+          background: rgba(255, 255, 255, 0.04);
+        }
+        .segmented-view-tab.active {
+          background: #1e293b;
+          color: #ffffff;
+          border-color: #334155;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        .view-pill {
+          font-size: 10.5px;
+          font-weight: 800;
+          padding: 1px 7px;
+          border-radius: 10px;
+        }
+        .view-pill.red {
+          background: #ef4444;
+          color: #ffffff;
+        }
+        .view-pill.blue {
+          background: #0284c7;
+          color: #ffffff;
+        }
+
+        /* 4-Card KPI Grid */
+        .alerts-kpi-grid.four-cards {
+          grid-template-columns: repeat(4, 1fr);
+        }
+        @media (max-width: 1100px) {
+          .alerts-kpi-grid.four-cards {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+        @media (max-width: 640px) {
+          .alerts-kpi-grid.four-cards {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        /* Rules Toolbar */
+        .rules-toolbar-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 16px;
+          flex-wrap: wrap;
+        }
+        .rules-search-box {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: #090d16;
+          border: 1px solid #1e293b;
+          border-radius: 8px;
+          padding: 7px 12px;
+          flex: 1;
+          max-width: 420px;
+        }
+        .rules-search-box input {
+          background: transparent;
+          border: none;
+          outline: none;
+          color: #ffffff;
+          font-size: 12.5px;
+          width: 100%;
         }
       `}</style>
     </div>

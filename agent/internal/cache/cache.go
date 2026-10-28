@@ -23,6 +23,11 @@ func Init(filePath string) {
 	if err := GlobalQueue.load(); err != nil {
 		log.Printf("[Cache] Failed to load offline queue: %v. Initializing empty queue.", err)
 	}
+	if len(GlobalQueue.items) > 60 {
+		log.Printf("[Cache] Pruning oversized offline queue from %d to 60 items.", len(GlobalQueue.items))
+		GlobalQueue.items = GlobalQueue.items[len(GlobalQueue.items)-60:]
+		_ = GlobalQueue.save()
+	}
 }
 
 func (q *MetricsQueue) load() error {
@@ -59,6 +64,11 @@ func QueueMetric(item interface{}) {
 	}
 	GlobalQueue.mu.Lock()
 	defer GlobalQueue.mu.Unlock()
+
+	const maxQueueSize = 60
+	if len(GlobalQueue.items) >= maxQueueSize {
+		GlobalQueue.items = GlobalQueue.items[len(GlobalQueue.items)-maxQueueSize+1:]
+	}
 
 	GlobalQueue.items = append(GlobalQueue.items, item)
 	if err := GlobalQueue.save(); err != nil {

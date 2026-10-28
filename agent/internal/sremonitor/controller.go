@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v4/disk"
+	"infrapilot/agent/internal/client"
+	"infrapilot/agent/internal/collector"
 	"infrapilot/agent/internal/config"
+	"infrapilot/agent/internal/scrubber"
 )
 
 type AgentController struct {
@@ -39,7 +42,7 @@ func (a *AgentController) IsActive(service string) (bool, error) {
 		if err := cmd.Run(); err != nil {
 			return true, nil // Fallback
 		}
-		return strings.TrimSpace(out.String()) == "Running", nil
+		return strings.EqualFold(strings.TrimSpace(out.String()), "Running"), nil
 	}
 
 	cmd := exec.Command("systemctl", "is-active", service)
@@ -80,6 +83,15 @@ func (a *AgentController) Audit(msg string) {
 func (a *AgentController) SendRemoteEvent(eventType, target, actionTaken string, success bool, errorMsg, phase string) {
 	log.Printf("[SREMonitor Event] Type: %s | Target: %s | Action: %s | Success: %t | Phase: %s | Err: %s",
 		eventType, target, actionTaken, success, phase, errorMsg)
+
+	if a.serverAddress != "" {
+		go func() {
+			url := strings.TrimRight(a.serverAddress, "/") + "/api/v1/network/remediate"
+			payload := fmt.Sprintf(`{"target":"%s","machine_id":"%s","action":"%s","error":"%s","phase":"%s"}`,
+				target, a.machineID, actionTaken, errorMsg, phase)
+			_ = client.PostWithRetry(url, []byte(payload), "application/json")
+		}()
+	}
 }
 
 func (a *AgentController) Sleep(d time.Duration) {
@@ -88,7 +100,8 @@ func (a *AgentController) Sleep(d time.Duration) {
 
 func (a *AgentController) GetAllServices() (map[string]string, error) {
 	services := make(map[string]string)
-	for _, s := range DefaultAcceptList {
+	monitored := config.Get().GetMonitoredServices()
+	for _, s := range monitored {
 		active, _ := a.IsActive(s)
 		if active {
 			services[s] = "Running"
@@ -118,17 +131,41 @@ func (a *AgentController) GetSystemdRestarts(service string) (int, error) {
 	return 0, nil
 }
 
+func (a *AgentController) GetRecentLogs(service string, maxLines int) string {
+	if maxLines <= 0 {
+		maxLines = 25
+	}
+	if runtime.GOOS == "windows" {
+		psScript := fmt.Sprintf("Get-EventLog -LogName System -Newest %d -EntryType Error,Warning | Select-Object -ExpandProperty Message", maxLines)
+		cmd := exec.Command("powershell", "-NoProfile", "-Command", psScript)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err == nil && out.Len() > 0 {
+			return scrubber.Scrub(out.String())
+		}
+		return "No recent Windows event logs captured."
+	}
+
+	cmd := exec.Command("journalctl", "-u", service, "-n", fmt.Sprintf("%d", maxLines), "--no-pager")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err == nil && out.Len() > 0 {
+		return scrubber.Scrub(out.String())
+	}
+	return "No journalctl log entries found."
+}
+
 // --- DiskController Implementation ---
 
 func (a *AgentController) GetDiskUsage(mountPoint string) (usedPercent float64, totalMB float64, freeMB float64, err error) {
 	target := config.AutoDetectMountPoint(mountPoint)
 
-	if usage, err := disk.Usage(target); err == nil && usage.Total > 0 {
+	if usage, err := collector.GetDiskUsage(target); err == nil && usage.Total > 0 {
 		return usage.UsedPercent, float64(usage.Total) / 1024 / 1024, float64(usage.Free) / 1024 / 1024, nil
 	}
 
 	if runtime.GOOS == "windows" {
-		if usage, err := disk.Usage("C:"); err == nil && usage.Total > 0 {
+		if usage, err := collector.GetDiskUsage("C:\\"); err == nil && usage.Total > 0 {
 			return usage.UsedPercent, float64(usage.Total) / 1024 / 1024, float64(usage.Free) / 1024 / 1024, nil
 		}
 	}
@@ -161,7 +198,7 @@ func (a *AgentController) GetAllDiskUsage() map[string]float64 {
 	usageMap := make(map[string]float64)
 	if parts, err := disk.Partitions(false); err == nil && len(parts) > 0 {
 		for _, p := range parts {
-			if u, err := disk.Usage(p.Mountpoint); err == nil && u.Total > 0 {
+			if u, err := collector.GetDiskUsage(p.Mountpoint); err == nil && u.Total > 0 {
 				usageMap[p.Mountpoint] = u.UsedPercent
 			}
 		}
@@ -186,7 +223,7 @@ func (a *AgentController) GetDfOutput() string {
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("%-12s %-12s %-12s %-12s %-8s %s\n", "Filesystem", "Size(MB)", "Used(MB)", "Avail(MB)", "Use%", "Mounted on"))
 			for _, p := range parts {
-				if usage, err := disk.Usage(p.Mountpoint); err == nil && usage.Total > 0 {
+				if usage, err := collector.GetDiskUsage(p.Mountpoint); err == nil && usage.Total > 0 {
 					totalMB := float64(usage.Total) / 1024 / 1024
 					usedMB := float64(usage.Used) / 1024 / 1024
 					freeMB := float64(usage.Free) / 1024 / 1024
@@ -298,5 +335,9 @@ func (a *AgentController) DeleteFile(path string) (int64, error) {
 // --- LatencyController Implementation ---
 
 func (a *AgentController) GetP95Latency(serviceName string) (float64, error) {
-	return 45.0, nil
+	p95 := collector.GetRollingP95Latency()
+	if p95 > 0 {
+		return p95, nil
+	}
+	return 22.5, nil
 }

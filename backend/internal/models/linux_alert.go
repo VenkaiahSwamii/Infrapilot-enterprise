@@ -15,7 +15,9 @@ type LinuxAlert struct {
 	Type               string     `json:"type"`
 	Category           string     `gorm:"index" json:"category"` // CPU, Memory, Storage, Network, Process, Service, Docker, Kubernetes, Filesystem, Security
 	Component          string     `json:"component"`             // processor, ram, disk_sda, docker_mysql, kubelet, etc.
-	Source             string     `json:"source"`                // Agent, AlertEngine, CPUChecker, DockerChecker, etc.
+	Source             string     `json:"source"`                // Agent, AlertEngine, CPUChecker, DockerChecker, EVENT, etc.
+	Origin             string     `gorm:"index;default:'rule'" json:"origin"` // "rule" | "event"
+	EventData          string     `gorm:"type:text" json:"event_data,omitempty"`
 	Severity           string     `json:"severity"`              // Critical, Major, Warning, Info
 	Priority           string     `json:"priority"`              // P1, P2, P3, P4
 	Message            string     `json:"message"`

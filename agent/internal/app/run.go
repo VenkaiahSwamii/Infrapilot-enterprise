@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"infrapilot/agent/internal/cache"
@@ -25,17 +26,59 @@ import (
 )
 
 
+type syncWriter struct {
+	file *os.File
+}
+
+func (s *syncWriter) Write(p []byte) (n int, err error) {
+	n, err = s.file.Write(p)
+	if err == nil {
+		_ = s.file.Sync()
+	}
+	return n, err
+}
+
 func RunAgent() {
 	cfgPath := config.DefaultConfigPath()
-	logDir := filepath.Join(filepath.Dir(cfgPath), "logs")
-	_ = os.MkdirAll(logDir, 0755)
-	if logFile, err := os.OpenFile(filepath.Join(logDir, "agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-		log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+	var logDir string
+	if runtime.GOOS == "windows" {
+		progData := os.Getenv("ProgramData")
+		if progData == "" {
+			progData = `C:\ProgramData`
+		}
+		logDir = filepath.Join(progData, "InfraPilot", "logs")
+	} else {
+		logDir = filepath.Join(filepath.Dir(cfgPath), "logs")
+	}
+	_ = os.MkdirAll(logDir, 0777)
+
+	logFilePath := filepath.Join(logDir, "agent.log")
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		// Fallback to alongside config directory if primary logDir failed
+		fallbackDir := filepath.Join(filepath.Dir(cfgPath), "logs")
+		_ = os.MkdirAll(fallbackDir, 0777)
+		logFilePath = filepath.Join(fallbackDir, "agent.log")
+		logFile, _ = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	}
+
+	if logFile != nil {
+		log.SetOutput(io.MultiWriter(os.Stderr, &syncWriter{file: logFile}))
 	}
 
 	log.Println("Starting InfraPilot Monitoring Agent...")
 
-	cache.Init(filepath.Join(filepath.Dir(cfgPath), "offline_queue.json"))
+	var cachePath string
+	if runtime.GOOS == "windows" {
+		progData := os.Getenv("ProgramData")
+		if progData == "" {
+			progData = `C:\ProgramData`
+		}
+		cachePath = filepath.Join(progData, "InfraPilot", "offline_queue.json")
+	} else {
+		cachePath = filepath.Join(filepath.Dir(cfgPath), "offline_queue.json")
+	}
+	cache.Init(cachePath)
 
 	store := config.NewConfigStore(cfgPath)
 
@@ -233,14 +276,6 @@ func RunAgent() {
 	// Start SREMonitor background crash, disk, and latency monitors
 	ctrl := sremonitor.NewAgentController(cfg.Server, cfg.APIKey, cfg.MachineID)
 
-	crashMon := sremonitor.NewMonitor(sremonitor.Config{
-		ServiceName:    "ssh.service",
-		AcceptList:     sremonitor.DefaultAcceptList,
-		MaxRestarts:    2,
-		RestartWindow:  10 * time.Minute,
-		VerifyDuration: 5 * time.Second,
-	}, ctrl)
-
 	diskCfg := config.Get().Disk
 	targetMount := config.AutoDetectMountPoint(diskCfg.TargetMountPoint)
 	reactiveThresh := 90.0
@@ -273,19 +308,55 @@ func RunAgent() {
 		alertWin = time.Duration(latCfg.AlertWindowMinutes) * time.Minute
 	}
 
+	targetLatencyService := ""
+	if len(latCfg.AcceptList) > 0 {
+		targetLatencyService = latCfg.AcceptList[0]
+	} else if monitored := config.Get().GetMonitoredServices(); len(monitored) > 0 {
+		targetLatencyService = monitored[0]
+	}
+
 	latencyMon := sremonitor.NewLatencyMonitor(sremonitor.LatencyConfig{
-		ServiceName:         "ssh.service",
+		ServiceName:         targetLatencyService,
 		AcceptList:          latCfg.AcceptList,
 		BaselineP95:         baseP95,
 		ThresholdMultiplier: threshMult,
 		AlertWindow:         alertWin,
 	}, ctrl)
 
+	monitorsMap := make(map[string]*sremonitor.Monitor)
+	var monitorsMu sync.Mutex
+
 	go func() {
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			_, _ = crashMon.Check()
+			activeServices := collector.GetMonitoredServicesList()
+			if len(activeServices) == 0 {
+				activeServices = config.Get().GetMonitoredServices()
+			}
+
+			effectiveAcceptList := config.Get().GetAcceptList()
+
+			monitorsMu.Lock()
+			for _, svc := range activeServices {
+				cleanSvc := strings.TrimSpace(svc)
+				if cleanSvc == "" {
+					continue
+				}
+				if _, exists := monitorsMap[cleanSvc]; !exists {
+					monitorsMap[cleanSvc] = sremonitor.NewMonitor(sremonitor.Config{
+						ServiceName:      cleanSvc,
+						AcceptList:       effectiveAcceptList,
+						MaxRestarts:      3,
+						RestartWindow:    10 * time.Minute,
+						CooldownDuration: 10 * time.Minute,
+						VerifyDuration:   5 * time.Second,
+					}, ctrl)
+				}
+				_, _ = monitorsMap[cleanSvc].Check()
+			}
+			monitorsMu.Unlock()
+
 			_, _ = diskMon.Check()
 			_ = latencyMon.Check(time.Now())
 		}

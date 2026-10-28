@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -78,25 +77,32 @@ func (h *RemoteDeployHandler) ExecuteDeploy(c *gin.Context) {
 		return
 	}
 
-	// Default server URL if omitted in request
-	if target.ServerURL == "" {
-		cfg := config.Get()
-		if cfg != nil && cfg.BackendURL != "" {
-			target.ServerURL = cfg.BackendURL
-		} else {
-			scheme := "http"
-			if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
-				scheme = "https"
-			}
-			host := c.Request.Host
-			if host == "" {
-				host = "localhost:8080"
-			}
-			target.ServerURL = scheme + "://" + host
+	// Dynamic server URL resolution (falling back to config.toml backend_url if omitted or localhost)
+	target.ServerURL = services.ResolveServerURL(target.ServerURL, target.Host)
+
+	// Check if caller explicitly requested synchronous execution via ?sync=true
+	isSync := strings.EqualFold(c.Query("sync"), "true")
+	if isSync {
+		result, err := h.deployService.DeployAgent(c.Request.Context(), target)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
 		}
+
+		status := http.StatusOK
+		if !result.Success {
+			status = http.StatusUnprocessableEntity
+		}
+
+		c.JSON(status, result)
+		return
 	}
 
-	result, err := h.deployService.DeployAgent(c.Request.Context(), target)
+	// Default: Asynchronous execution for real-time UI step polling and log streaming
+	result, err := h.deployService.StartDeployAsync(target)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -105,12 +111,7 @@ func (h *RemoteDeployHandler) ExecuteDeploy(c *gin.Context) {
 		return
 	}
 
-	status := http.StatusOK
-	if !result.Success {
-		status = http.StatusUnprocessableEntity
-	}
-
-	c.JSON(status, result)
+	c.JSON(http.StatusOK, result)
 }
 
 // GetHistory handles GET /api/v1/agent/remote-deploy/history

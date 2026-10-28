@@ -1,9 +1,13 @@
 package network
 
 import (
+	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 
@@ -102,11 +106,14 @@ func (r *postgresRepository) GetCheckByID(id uuid.UUID) (*models.NetworkCheck, e
 func (r *postgresRepository) GetAllChecks() ([]models.NetworkCheck, error) {
 	var checks []models.NetworkCheck
 	if database.DB == nil {
-		return []models.NetworkCheck{}, nil
+		return r.getSeedChecks(), nil
 	}
 	err := database.DB.Order("created_at DESC").Find(&checks).Error
 	if err != nil && !strings.Contains(err.Error(), "no such table") {
 		return nil, err
+	}
+	if len(checks) == 0 {
+		return r.SeedDefaultChecks(), nil
 	}
 	return checks, nil
 }
@@ -114,11 +121,14 @@ func (r *postgresRepository) GetAllChecks() ([]models.NetworkCheck, error) {
 func (r *postgresRepository) GetEnabledChecks() ([]models.NetworkCheck, error) {
 	var checks []models.NetworkCheck
 	if database.DB == nil {
-		return []models.NetworkCheck{}, nil
+		return r.getSeedChecks(), nil
 	}
 	err := database.DB.Where("enabled = ?", true).Find(&checks).Error
 	if err != nil && !strings.Contains(err.Error(), "no such table") {
 		return nil, err
+	}
+	if len(checks) == 0 {
+		return r.SeedDefaultChecks(), nil
 	}
 	return checks, nil
 }
@@ -181,7 +191,7 @@ func (r *postgresRepository) GetOverviewStats() (*OverviewStats, error) {
 	var latencyCount int
 
 	for _, c := range checks {
-		switch c.LastStatus {
+		switch strings.ToUpper(strings.TrimSpace(c.LastStatus)) {
 		case "HEALTHY":
 			healthy++
 		case "DEGRADED":
@@ -189,8 +199,6 @@ func (r *postgresRepository) GetOverviewStats() (*OverviewStats, error) {
 		case "CRITICAL":
 			critical++
 			failed++
-		default:
-			healthy++
 		}
 
 		if c.LastLatencyMs > 0 {
@@ -248,7 +256,26 @@ func (r *postgresRepository) GetHostNetworkViews() ([]HostNetworkView, error) {
 		}
 
 		hostConnectivities := make([]HostEndpointItem, 0)
+		hasCritical := false
+		hasDegraded := false
+		healthyChecks := 0
+
 		for _, c := range checks {
+			avail := 100.0
+			st := strings.ToUpper(strings.TrimSpace(c.LastStatus))
+			if st == "CRITICAL" {
+				hasCritical = true
+				avail = 0.0
+			} else if st == "DEGRADED" {
+				hasDegraded = true
+				avail = 50.0
+			} else if st == "HEALTHY" {
+				healthyChecks++
+				avail = 100.0
+			} else {
+				avail = 0.0
+			}
+
 			hostConnectivities = append(hostConnectivities, HostEndpointItem{
 				ID:            c.ID,
 				Name:          c.Name,
@@ -257,15 +284,28 @@ func (r *postgresRepository) GetHostNetworkViews() ([]HostNetworkView, error) {
 				Status:        c.LastStatus,
 				LatencyMs:     c.LastLatencyMs,
 				PacketLossPct: c.LastPacketLossPct,
-				Availability:  99.95,
+				Availability:  avail,
 			})
+		}
+
+		overallStatus := "UNKNOWN"
+		if len(checks) > 0 {
+			if hasCritical {
+				overallStatus = "CRITICAL"
+			} else if hasDegraded {
+				overallStatus = "DEGRADED"
+			} else if healthyChecks == len(checks) {
+				overallStatus = "HEALTHY"
+			} else {
+				overallStatus = "PENDING"
+			}
 		}
 
 		views = append(views, HostNetworkView{
 			Hostname:       hostname,
 			IPAddress:      s.IPAddress,
 			OS:             s.OS,
-			OverallStatus:  "HEALTHY",
+			OverallStatus:  overallStatus,
 			Interfaces:     []HostInterfaceItem{},
 			Connectivities: hostConnectivities,
 		})
@@ -275,5 +315,136 @@ func (r *postgresRepository) GetHostNetworkViews() ([]HostNetworkView, error) {
 }
 
 func (r *postgresRepository) getSeedChecks() []models.NetworkCheck {
-	return []models.NetworkCheck{}
+	now := time.Now()
+	var checks []models.NetworkCheck
+
+	cfg := config.Get()
+	if cfg != nil && len(cfg.Agent.Network.Websites) > 0 {
+		for _, w := range cfg.Agent.Network.Websites {
+			host := ""
+			if u, err := url.Parse(w.URL); err == nil && u.Hostname() != "" {
+				host = u.Hostname()
+			}
+			thresh := w.AlertThresholdMs
+			if thresh <= 0 {
+				thresh = 200.0
+			}
+			timeout := w.TimeoutMs
+			if timeout <= 0 {
+				timeout = 3000
+			}
+			checks = append(checks, models.NetworkCheck{
+				ID:                     uuid.New(),
+				Name:                   w.Name,
+				Type:                   "HTTP",
+				Target:                 w.URL,
+				Host:                   host,
+				Port:                   w.Port,
+				URL:                    w.URL,
+				IntervalSeconds:        10,
+				TimeoutMs:              timeout,
+				ThresholdLatencyMs:     thresh,
+				ThresholdPacketLossPct: 5.0,
+				Enabled:                true,
+				LastStatus:             "PENDING",
+				LastLatencyMs:          0.0,
+				LastPacketLossPct:      0.0,
+				LastCheckAt:            nil,
+				CreatedAt:              now,
+				UpdatedAt:              now,
+			})
+		}
+	}
+	gw := ""
+	if cfg != nil && cfg.Agent.Network.DefaultGateway != "" {
+		gw = cfg.Agent.Network.DefaultGateway
+	} else if cfg != nil && cfg.BackendURL != "" {
+		if u, err := url.Parse(cfg.BackendURL); err == nil && u.Hostname() != "" {
+			gw = u.Hostname()
+		}
+	}
+	if gw != "" {
+		checks = append(checks,
+			models.NetworkCheck{
+				ID:                     uuid.New(),
+				Name:                   "Network Default Gateway",
+				Type:                   "PING",
+				Target:                 gw,
+				Host:                   gw,
+				Port:                   80,
+				IntervalSeconds:        10,
+				TimeoutMs:              2000,
+				ThresholdLatencyMs:     100.0,
+				ThresholdPacketLossPct: 10.0,
+				Enabled:                true,
+				LastStatus:             "PENDING",
+				LastLatencyMs:          0.0,
+				LastPacketLossPct:      0.0,
+				LastCheckAt:            nil,
+				CreatedAt:              now,
+				UpdatedAt:              now,
+			},
+		)
+	}
+
+	if cfg != nil && cfg.DBHost != "" {
+		dbHost := cfg.DBHost
+		dbPort := 5432
+		if p, err := strconv.Atoi(cfg.DBPort); err == nil && p > 0 {
+			dbPort = p
+		}
+		dbTarget := fmt.Sprintf("%s:%d", dbHost, dbPort)
+
+		checks = append(checks,
+			models.NetworkCheck{
+				ID:                     uuid.New(),
+				Name:                   "Core Database Port",
+				Type:                   "TCP",
+				Target:                 dbTarget,
+				Host:                   dbHost,
+				Port:                   dbPort,
+				IntervalSeconds:        15,
+				TimeoutMs:              2000,
+				ThresholdLatencyMs:     50.0,
+				ThresholdPacketLossPct: 5.0,
+				Enabled:                true,
+				LastStatus:             "PENDING",
+				LastLatencyMs:          0.0,
+				LastPacketLossPct:      0.0,
+				LastCheckAt:            nil,
+				CreatedAt:              now,
+				UpdatedAt:              now,
+			},
+		)
+	}
+	return checks
+}
+
+func (r *postgresRepository) SeedDefaultChecks() []models.NetworkCheck {
+	seeds := r.getSeedChecks()
+	if database.DB == nil {
+		return seeds
+	}
+	// Clean up obsolete legacy checks
+	database.DB.Where("name IN ?", []string{"Public Gateway / DNS", "Local DNS Resolver"}).Delete(&models.NetworkCheck{})
+
+	for i := range seeds {
+		var existing models.NetworkCheck
+		if err := database.DB.Where("name = ? OR target = ?", seeds[i].Name, seeds[i].Target).First(&existing).Error; err != nil {
+			_ = database.DB.Create(&seeds[i]).Error
+		} else {
+			existing.Target = seeds[i].Target
+			existing.URL = seeds[i].URL
+			existing.Host = seeds[i].Host
+			existing.Port = seeds[i].Port
+			existing.Type = seeds[i].Type
+			existing.ThresholdLatencyMs = seeds[i].ThresholdLatencyMs
+			_ = database.DB.Save(&existing).Error
+		}
+	}
+	var all []models.NetworkCheck
+	if err := database.DB.Order("created_at ASC").Find(&all).Error; err == nil && len(all) > 0 {
+		return all
+	}
+	return seeds
 }

@@ -35,17 +35,37 @@ func TestAIService_Handlers(t *testing.T) {
 		t.Errorf("Expected AnalyzeHandler status 200, got %d", w1.Code)
 	}
 
-	// 2. Test ChatHandler
-	chatReq := ChatRequest{
-		SessionID: "sess-abc",
-		Query:     "Why is Production-01 slow?",
+	// 2. Test ChatHandler (accuracy and clarification queries)
+	testQueries := []struct {
+		name    string
+		request ChatRequest
+	}{
+		{"Why is Production-01 slow?", ChatRequest{SessionID: "sess-abc", Query: "Why is Production-01 slow?"}},
+		{"Where are my agents running", ChatRequest{SessionID: "sess-abc", Query: "where are my agents running"}},
+		{"Systems overview", ChatRequest{SessionID: "sess-abc", Query: "systems"}},
+		{"Metrics and CPU", ChatRequest{SessionID: "sess-abc", Query: "Show CPU and memory usage"}},
+		{"Active alerts", ChatRequest{SessionID: "sess-abc", Query: "Are there any active alerts?"}},
+		{"Docker containers", ChatRequest{SessionID: "sess-abc", Query: "Show Docker container status"}},
+		{"Clarification on unknown query", ChatRequest{SessionID: "sess-abc", Query: "tell me about quantum computing"}},
+		{"AICenter question payload", ChatRequest{SessionID: "sess-abc", Question: "where my agents running"}},
 	}
-	reqBytes2, _ := json.Marshal(chatReq)
-	req2, _ := http.NewRequest("POST", "/api/v1/ai/chat", bytes.NewBuffer(reqBytes2))
-	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusOK {
-		t.Errorf("Expected ChatHandler status 200, got %d", w2.Code)
+
+	for _, tc := range testQueries {
+		reqBytes, _ := json.Marshal(tc.request)
+		req, _ := http.NewRequest("POST", "/api/v1/ai/chat", bytes.NewBuffer(reqBytes))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected ChatHandler status 200 for %s, got %d", tc.name, w.Code)
+		}
+
+		var resp ChatResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Errorf("Failed to unmarshal response for %s: %v", tc.name, err)
+		}
+		if resp.Answer == "" {
+			t.Errorf("Expected non-empty answer for %s", tc.name)
+		}
 	}
 
 	// 3. Test GetIncidentsHandler

@@ -66,9 +66,11 @@ func (s *ServerService) BroadcastStatusUpdate(m *models.Server) {
 
 func (s *ServerService) broadcastStatusUpdate(m *models.Server) {
 	payload := map[string]interface{}{
-		"machine_id":    m.ID,
+		"type":          "machine_status_changed",
+		"machine_id":    m.ID.String(),
 		"hostname":      m.Hostname,
 		"status":        m.Status,
+		"online":        m.Online,
 		"is_blocked":    m.IsBlocked,
 		"ip_address":    m.IPAddress,
 		"os":            m.OS,
@@ -381,49 +383,25 @@ ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = true THEN 1 ELSE 2 E
 			return result, nil
 		}
 	} else {
-		if err := database.DB.Raw(`
-SELECT
-m.*,
-mt.cpu_usage,
-mt.memory_usage,
-mt.disk_usage,
-mt.upload_mbps,
-mt.download_mbps,
-mt.uptime,
-mt.cpu_temperature,
-mt.total_memory,
-mt.free_memory,
-mt.memory_total,
-mt.memory_used,
-mt.disk_total,
-mt.disk_used,
-mt.cpu_cores
-FROM servers m
-LEFT JOIN metrics mt ON mt.machine_id = m.id AND mt.id = (
-    SELECT id FROM metrics WHERE metrics.machine_id = m.id ORDER BY created_at DESC LIMIT 1
-)
-ORDER BY CASE WHEN UPPER(m.status) = 'ONLINE' OR m.online = true THEN 1 ELSE 2 END, m.last_seen DESC, m.created_at DESC;
-`).Scan(&rows).Error; err != nil {
-			var baseServers []models.Server
-			if findErr := database.DB.Order("created_at desc").Find(&baseServers).Error; findErr != nil {
-				return nil, findErr
-			}
-			result := make([]models.ServerSnapshot, 0, len(baseServers))
-			for _, srv := range baseServers {
-				var latestMetric models.Metric
-				database.DB.Where("machine_id = ?", srv.ID).Order("created_at desc").First(&latestMetric)
-				snap := models.ServerSnapshot{
-					Server:       srv,
-					CPUUsage:     &latestMetric.CPUUsage,
-					MemoryUsage:  &latestMetric.MemoryUsage,
-					DiskUsage:    &latestMetric.DiskUsage,
-					UploadMbps:   &latestMetric.UploadMbps,
-					DownloadMbps: &latestMetric.DownloadMbps,
-				}
-				result = append(result, snap)
-			}
-			return result, nil
+		var baseServers []models.Server
+		if findErr := database.DB.Order("CASE WHEN UPPER(status) = 'ONLINE' OR online = 1 THEN 1 ELSE 2 END, last_seen DESC, created_at DESC").Find(&baseServers).Error; findErr != nil {
+			return nil, findErr
 		}
+		result := make([]models.ServerSnapshot, 0, len(baseServers))
+		for _, srv := range baseServers {
+			var latestMetric models.Metric
+			database.DB.Where("machine_id = ?", srv.ID).Order("created_at desc").First(&latestMetric)
+			snap := models.ServerSnapshot{
+				Server:       srv,
+				CPUUsage:     &latestMetric.CPUUsage,
+				MemoryUsage:  &latestMetric.MemoryUsage,
+				DiskUsage:    &latestMetric.DiskUsage,
+				UploadMbps:   &latestMetric.UploadMbps,
+				DownloadMbps: &latestMetric.DownloadMbps,
+			}
+			result = append(result, snap)
+		}
+		return result, nil
 	}
 
 	result := make([]models.ServerSnapshot, 0, len(rows))
@@ -488,7 +466,7 @@ func (s *ServerService) GetServerSnapshotByID(id uuid.UUID) (*models.ServerSnaps
 
 func buildServerSnapshot(server models.Server, metric models.Metric, rich models.LinuxMetric) models.ServerSnapshot {
 	isBlocked := server.IsBlocked || strings.ToUpper(server.Status) == "BLOCKED" || strings.ToUpper(server.Status) == "STOPPED"
-	isOffline := isBlocked || time.Since(server.LastSeen) > 90*time.Second || strings.ToUpper(server.Status) == "OFFLINE"
+	isOffline := isBlocked || time.Since(server.LastSeen) > 60*time.Second || (time.Since(server.LastSeen) > 45*time.Second && strings.ToUpper(server.Status) == "OFFLINE")
 	if isBlocked {
 		server.Status = "BLOCKED"
 		server.Online = false

@@ -7,11 +7,17 @@ export function listAlerts(params = {}) {
   if (params.category) query.append('category', params.category);
   if (params.machine_id) query.append('machine_id', params.machine_id);
   if (params.search) query.append('search', params.search);
+  if (params.source) query.append('source', params.source);
+  if (params.origin) query.append('origin', params.origin);
   if (params.limit) query.append('limit', params.limit);
   if (params.offset) query.append('offset', params.offset);
 
   const qs = query.toString();
   return apiGet(`/alerts${qs ? `?${qs}` : ''}`);
+}
+
+export function ingestEvent(eventData) {
+  return apiPost('/events/ingest', eventData);
 }
 
 export function getAlertStats() {

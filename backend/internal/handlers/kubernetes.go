@@ -177,10 +177,14 @@ func GetKubernetesOverview(c *gin.Context) {
 // Legacy API endpoints
 func GetKubernetesNodes(c *gin.Context) {
 	if database.DB != nil {
-		var nodes []models.KubernetesNode
-		if err := database.DB.Find(&nodes).Error; err == nil {
-			c.JSON(http.StatusOK, nodes)
-			return
+		var activeClusterIDs []uuid.UUID
+		_ = database.DB.Model(&models.KubernetesCluster{}).Where("status != ?", "Kubernetes Not Installed").Pluck("id", &activeClusterIDs).Error
+		if len(activeClusterIDs) > 0 {
+			var nodes []models.KubernetesNode
+			if err := database.DB.Where("cluster_id IN ?", activeClusterIDs).Find(&nodes).Error; err == nil {
+				c.JSON(http.StatusOK, nodes)
+				return
+			}
 		}
 	}
 	c.JSON(http.StatusOK, []models.KubernetesNode{})
@@ -188,10 +192,14 @@ func GetKubernetesNodes(c *gin.Context) {
 
 func GetKubernetesPods(c *gin.Context) {
 	if database.DB != nil {
-		var pods []models.KubernetesPod
-		if err := database.DB.Find(&pods).Error; err == nil {
-			c.JSON(http.StatusOK, pods)
-			return
+		var activeClusterIDs []uuid.UUID
+		_ = database.DB.Model(&models.KubernetesCluster{}).Where("status != ?", "Kubernetes Not Installed").Pluck("id", &activeClusterIDs).Error
+		if len(activeClusterIDs) > 0 {
+			var pods []models.KubernetesPod
+			if err := database.DB.Where("cluster_id IN ?", activeClusterIDs).Find(&pods).Error; err == nil {
+				c.JSON(http.StatusOK, pods)
+				return
+			}
 		}
 	}
 	c.JSON(http.StatusOK, []models.KubernetesPod{})
@@ -199,10 +207,14 @@ func GetKubernetesPods(c *gin.Context) {
 
 func GetKubernetesDeployments(c *gin.Context) {
 	if database.DB != nil {
-		var deps []models.KubernetesDeployment
-		if err := database.DB.Find(&deps).Error; err == nil {
-			c.JSON(http.StatusOK, deps)
-			return
+		var activeClusterIDs []uuid.UUID
+		_ = database.DB.Model(&models.KubernetesCluster{}).Where("status != ?", "Kubernetes Not Installed").Pluck("id", &activeClusterIDs).Error
+		if len(activeClusterIDs) > 0 {
+			var deps []models.KubernetesDeployment
+			if err := database.DB.Where("cluster_id IN ?", activeClusterIDs).Find(&deps).Error; err == nil {
+				c.JSON(http.StatusOK, deps)
+				return
+			}
 		}
 	}
 	c.JSON(http.StatusOK, []models.KubernetesDeployment{})
@@ -210,10 +222,14 @@ func GetKubernetesDeployments(c *gin.Context) {
 
 func GetKubernetesServices(c *gin.Context) {
 	if database.DB != nil {
-		var svcs []models.KubernetesService
-		if err := database.DB.Find(&svcs).Error; err == nil {
-			c.JSON(http.StatusOK, svcs)
-			return
+		var activeClusterIDs []uuid.UUID
+		_ = database.DB.Model(&models.KubernetesCluster{}).Where("status != ?", "Kubernetes Not Installed").Pluck("id", &activeClusterIDs).Error
+		if len(activeClusterIDs) > 0 {
+			var svcs []models.KubernetesService
+			if err := database.DB.Where("cluster_id IN ?", activeClusterIDs).Find(&svcs).Error; err == nil {
+				c.JSON(http.StatusOK, svcs)
+				return
+			}
 		}
 	}
 	c.JSON(http.StatusOK, []models.KubernetesService{})
@@ -448,6 +464,19 @@ func GetKubernetesClusters(c *gin.Context) {
 	c.JSON(http.StatusOK, clusters)
 }
 
+func resolveClusterUUID(clusterId string) *uuid.UUID {
+	if parsed, err := uuid.Parse(clusterId); err == nil {
+		return &parsed
+	}
+	if database.DB != nil {
+		var cluster models.KubernetesCluster
+		if err := database.DB.Where("status != ? AND status != ?", "Kubernetes Not Installed", "").Order("updated_at desc").First(&cluster).Error; err == nil {
+			return &cluster.ID
+		}
+	}
+	return nil
+}
+
 // GET /api/v1/kubernetes/nodes/:clusterId
 func GetKubernetesNodesForCluster(c *gin.Context) {
 	clusterId := c.Param("clusterId")
@@ -457,12 +486,14 @@ func GetKubernetesNodesForCluster(c *gin.Context) {
 		return
 	}
 
-	var nodes []models.KubernetesNode
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Find(&nodes).Error
-	} else {
-		_ = db.Find(&nodes).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesNode{})
+		return
 	}
+
+	var nodes []models.KubernetesNode
+	_ = db.Where("cluster_id = ?", *cUUID).Find(&nodes).Error
 	c.JSON(http.StatusOK, nodes)
 }
 
@@ -475,12 +506,14 @@ func GetKubernetesPodsForCluster(c *gin.Context) {
 		return
 	}
 
-	var pods []models.KubernetesPod
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Find(&pods).Error
-	} else {
-		_ = db.Find(&pods).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesPod{})
+		return
 	}
+
+	var pods []models.KubernetesPod
+	_ = db.Where("cluster_id = ?", *cUUID).Find(&pods).Error
 	c.JSON(http.StatusOK, pods)
 }
 
@@ -493,12 +526,14 @@ func GetKubernetesDeploymentsForCluster(c *gin.Context) {
 		return
 	}
 
-	var deployments []models.KubernetesDeployment
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Find(&deployments).Error
-	} else {
-		_ = db.Find(&deployments).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesDeployment{})
+		return
 	}
+
+	var deployments []models.KubernetesDeployment
+	_ = db.Where("cluster_id = ?", *cUUID).Find(&deployments).Error
 	c.JSON(http.StatusOK, deployments)
 }
 
@@ -511,12 +546,14 @@ func GetKubernetesStatefulSetsForCluster(c *gin.Context) {
 		return
 	}
 
-	var statefulsets []models.KubernetesStatefulSet
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Find(&statefulsets).Error
-	} else {
-		_ = db.Find(&statefulsets).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesStatefulSet{})
+		return
 	}
+
+	var statefulsets []models.KubernetesStatefulSet
+	_ = db.Where("cluster_id = ?", *cUUID).Find(&statefulsets).Error
 	c.JSON(http.StatusOK, statefulsets)
 }
 
@@ -529,12 +566,14 @@ func GetKubernetesDaemonSetsForCluster(c *gin.Context) {
 		return
 	}
 
-	var daemonsets []models.KubernetesDaemonSet
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Find(&daemonsets).Error
-	} else {
-		_ = db.Find(&daemonsets).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesDaemonSet{})
+		return
 	}
+
+	var daemonsets []models.KubernetesDaemonSet
+	_ = db.Where("cluster_id = ?", *cUUID).Find(&daemonsets).Error
 	c.JSON(http.StatusOK, daemonsets)
 }
 
@@ -547,12 +586,14 @@ func GetKubernetesServicesForCluster(c *gin.Context) {
 		return
 	}
 
-	var services []models.KubernetesService
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Find(&services).Error
-	} else {
-		_ = db.Find(&services).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesService{})
+		return
 	}
+
+	var services []models.KubernetesService
+	_ = db.Where("cluster_id = ?", *cUUID).Find(&services).Error
 	c.JSON(http.StatusOK, services)
 }
 
@@ -565,12 +606,14 @@ func GetKubernetesNamespacesForCluster(c *gin.Context) {
 		return
 	}
 
-	var namespaces []models.KubernetesNamespace
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Find(&namespaces).Error
-	} else {
-		_ = db.Find(&namespaces).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesNamespace{})
+		return
 	}
+
+	var namespaces []models.KubernetesNamespace
+	_ = db.Where("cluster_id = ?", *cUUID).Find(&namespaces).Error
 	c.JSON(http.StatusOK, namespaces)
 }
 
@@ -583,12 +626,14 @@ func GetKubernetesStorageForCluster(c *gin.Context) {
 		return
 	}
 
-	var storage []models.KubernetesStorage
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Find(&storage).Error
-	} else {
-		_ = db.Find(&storage).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesStorage{})
+		return
 	}
+
+	var storage []models.KubernetesStorage
+	_ = db.Where("cluster_id = ?", *cUUID).Find(&storage).Error
 	c.JSON(http.StatusOK, storage)
 }
 
@@ -601,12 +646,14 @@ func GetKubernetesEventsForCluster(c *gin.Context) {
 		return
 	}
 
-	var events []models.KubernetesEvent
-	if clusterUUID, err := uuid.Parse(clusterId); err == nil {
-		_ = db.Where("cluster_id = ?", clusterUUID).Order("time desc").Limit(100).Find(&events).Error
-	} else {
-		_ = db.Order("time desc").Limit(100).Find(&events).Error
+	cUUID := resolveClusterUUID(clusterId)
+	if cUUID == nil {
+		c.JSON(http.StatusOK, []models.KubernetesEvent{})
+		return
 	}
+
+	var events []models.KubernetesEvent
+	_ = db.Where("cluster_id = ?", *cUUID).Order("time desc").Limit(100).Find(&events).Error
 	c.JSON(http.StatusOK, events)
 }
 

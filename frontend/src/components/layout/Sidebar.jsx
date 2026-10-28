@@ -9,7 +9,6 @@ import {
   TrendingUp,
   Layers,
   Bot,
-  Settings,
   Shield,
   ShieldCheck,
   Database,
@@ -20,6 +19,8 @@ import {
   Network,
   Globe,
   Users,
+  Mail,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 
 import { useAlertStore } from '../../store/alertStore.jsx';
@@ -36,7 +37,6 @@ export default function Sidebar({ collapsed, userProfile }) {
     { id: 'sre', label: 'SRE Disk Space', icon: HardDrive, path: '/sre-disk' },
     { id: 'sre', label: 'Crash & Service Health', icon: Zap, path: '/sre-crash' },
     { id: 'sre', label: 'Latency & Gateway', icon: Radio, path: '/sre-latency' },
-    { id: 'machines', label: 'Machines', icon: Server, path: '/infrastructure' },
     { id: 'docker', label: 'Docker', icon: Layers, path: '/docker' },
     { id: 'kubernetes', label: 'Kubernetes', icon: Network, path: '/kubernetes' },
     { id: 'metrics', label: 'Metrics', icon: Activity, path: '/live-metrics' },
@@ -50,8 +50,9 @@ export default function Sidebar({ collapsed, userProfile }) {
     },
     { id: 'reports', label: 'Reports', icon: FileText, path: '/reports' },
     { id: 'agents', label: 'Agents', icon: Bot, path: '/agents' },
+    { id: 'notifications', label: 'Notifications & Email', icon: Mail, path: '/notifications' },
     { id: 'users', label: 'User Management', icon: Users, path: '/admin/users' },
-    { id: 'settings', label: 'Settings', icon: Settings, path: '/admin/settings' },
+    { id: 'settings', label: 'System Settings', icon: SettingsIcon, path: '/settings' },
   ], [activeCount]);
 
   const userRole = String(userProfile?.role || localStorage.getItem('user_role') || 'Viewer').toLowerCase();
@@ -73,11 +74,11 @@ export default function Sidebar({ collapsed, userProfile }) {
   const visibleNavItems = useMemo(() => {
     let items = navItems;
     if (!isAdmin) {
-      // Fleet Terminal, Admin Settings, and User Management are strictly Admin/SuperAdmin only
-      items = items.filter(item => item.id !== 'terminal' && item.id !== 'settings' && item.id !== 'users');
+      // Fleet Terminal and User Management are strictly Admin/SuperAdmin only
+      items = items.filter(item => item.id !== 'terminal' && item.id !== 'users');
     }
     if (allowedModules === 'all') return items;
-    return items.filter(item => !item.id || allowedModules.has(item.id) || item.id === 'overview');
+    return items.filter(item => !item.id || allowedModules.has(item.id) || item.id === 'overview' || item.id === 'notifications' || item.id === 'settings');
   }, [navItems, allowedModules, isAdmin]);
 
   return (
@@ -98,11 +99,10 @@ export default function Sidebar({ collapsed, userProfile }) {
       {/* Navigation Links */}
       <nav className="sidebar-nav-list" aria-label="Main Navigation">
         {visibleNavItems.map((item) => {
-          const isMachines = item.path === '/infrastructure' && location.pathname.includes('/machines');
           const isActive =
             item.path === '/'
               ? location.pathname === '/'
-              : location.pathname.startsWith(item.path) || isMachines;
+              : location.pathname.startsWith(item.path);
           const Icon = item.icon;
 
           return (
@@ -187,8 +187,10 @@ export default function Sidebar({ collapsed, userProfile }) {
         .sidebar-container {
           width: 220px;
           height: 100vh;
-          background-color: #0b0f19;
-          border-right: 1px solid #161e2e;
+          background: rgba(8, 12, 20, 0.82);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border-right: 1px solid rgba(255, 255, 255, 0.07);
           display: flex;
           flex-direction: column;
           padding: 16px 12px;
@@ -214,11 +216,11 @@ export default function Sidebar({ collapsed, userProfile }) {
           width: 34px;
           height: 34px;
           border-radius: 9px;
-          background: linear-gradient(135deg, #1d4ed8, #0284c7);
+          background: linear-gradient(135deg, #06b6d4, #3b82f6);
           display: flex;
           align-items: center;
           justify-content: center;
-          box-shadow: 0 4px 12px rgba(2, 132, 199, 0.4);
+          box-shadow: 0 0 16px rgba(6, 182, 212, 0.45);
           flex-shrink: 0;
         }
         .brand-text-block {
@@ -253,23 +255,28 @@ export default function Sidebar({ collapsed, userProfile }) {
           padding: 8px 12px;
           border-radius: 8px;
           background: transparent;
-          border: none;
+          border: 1px solid transparent;
           color: #94a3b8;
-          font-size: 13px;
+          font-size: 12.5px;
           font-weight: 500;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
           text-align: left;
         }
         .nav-item-btn:hover {
-          background-color: #121824;
+          background: rgba(255, 255, 255, 0.04);
           color: #f1f5f9;
+          border-color: rgba(255, 255, 255, 0.06);
         }
         .nav-item-btn.active {
-          background-color: #1d4ed8;
+          background: linear-gradient(90deg, rgba(6, 182, 212, 0.18) 0%, rgba(59, 130, 246, 0.12) 100%);
+          border: 1px solid rgba(6, 182, 212, 0.38);
           color: #ffffff;
           font-weight: 600;
-          box-shadow: 0 4px 12px rgba(29, 78, 216, 0.35);
+          box-shadow: 0 0 16px -2px rgba(6, 182, 212, 0.28);
+        }
+        .nav-item-btn.active .nav-item-icon {
+          color: #22d3ee;
         }
         .nav-item-icon {
           flex-shrink: 0;
@@ -289,12 +296,12 @@ export default function Sidebar({ collapsed, userProfile }) {
           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
         }
 
-
-
         /* Bottom System Status Box */
         .sidebar-system-status-card {
-          background: #0d1220;
-          border: 1px solid #161e2e;
+          background: rgba(14, 21, 38, 0.65);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px solid rgba(255, 255, 255, 0.07);
           border-radius: 10px;
           padding: 12px;
           display: flex;
@@ -317,17 +324,17 @@ export default function Sidebar({ collapsed, userProfile }) {
           align-items: center;
           gap: 6px;
           font-size: 10px;
-          color: #22c55e;
+          color: #10b981;
           font-weight: 600;
         }
         .status-dot {
           width: 6px;
           height: 6px;
           border-radius: 50%;
-          background-color: #22c55e;
+          background-color: #10b981;
         }
         .status-dot.pulse {
-          box-shadow: 0 0 6px #22c55e;
+          box-shadow: 0 0 8px #10b981;
         }
 
         .status-rows-list {
@@ -348,15 +355,15 @@ export default function Sidebar({ collapsed, userProfile }) {
           color: #94a3b8;
         }
         .badge-operational {
-          color: #22c55e;
+          color: #10b981;
           font-size: 10px;
           font-weight: 600;
         }
 
         .btn-view-system-health {
           width: 100%;
-          background: #121824;
-          border: 1px solid #1f2e44;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 6px;
           color: #94a3b8;
           font-size: 11px;
@@ -367,9 +374,9 @@ export default function Sidebar({ collapsed, userProfile }) {
           text-align: center;
         }
         .btn-view-system-health:hover {
-          background: #1a2333;
+          background: rgba(6, 182, 212, 0.12);
           color: #ffffff;
-          border-color: #38bdf8;
+          border-color: rgba(6, 182, 212, 0.35);
         }
       `}</style>
     </aside>

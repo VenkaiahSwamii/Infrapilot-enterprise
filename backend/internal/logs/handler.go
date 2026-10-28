@@ -138,9 +138,24 @@ func (h *Handler) GetMachineLogs(c *gin.Context) {
 }
 
 func (h *Handler) GetLogStats(c *gin.Context) {
+	query := c.Query("query")
+	if query == "" {
+		query = c.Query("q")
+	}
+
 	filter := LogFilter{
-		MachineID: c.Query("machine_id"),
-		TimeRange: c.Query("time_range"),
+		MachineID:     c.Query("machine_id"),
+		Hostname:      c.Query("hostname"),
+		Platform:      c.Query("platform"),
+		OS:            c.Query("os"),
+		Source:        c.Query("source"),
+		Service:       c.Query("service"),
+		ContainerName: c.Query("container_name"),
+		PodName:       c.Query("pod_name"),
+		Namespace:     c.Query("namespace"),
+		ClusterName:   c.Query("cluster_name"),
+		TimeRange:     c.Query("time_range"),
+		Query:         query,
 	}
 
 	stats, err := h.service.GetLogStats(filter)
@@ -153,10 +168,25 @@ func (h *Handler) GetLogStats(c *gin.Context) {
 }
 
 func (h *Handler) GetLogPatterns(c *gin.Context) {
+	query := c.Query("query")
+	if query == "" {
+		query = c.Query("q")
+	}
+
 	filter := LogFilter{
-		MachineID: c.Query("machine_id"),
-		TimeRange: c.Query("time_range"),
-		Level:     c.Query("level"),
+		MachineID:     c.Query("machine_id"),
+		Hostname:      c.Query("hostname"),
+		Platform:      c.Query("platform"),
+		OS:            c.Query("os"),
+		Level:         c.Query("level"),
+		Source:        c.Query("source"),
+		Service:       c.Query("service"),
+		ContainerName: c.Query("container_name"),
+		PodName:       c.Query("pod_name"),
+		Namespace:     c.Query("namespace"),
+		ClusterName:   c.Query("cluster_name"),
+		TimeRange:     c.Query("time_range"),
+		Query:         query,
 	}
 
 	patterns, err := h.service.GetLogPatterns(filter)

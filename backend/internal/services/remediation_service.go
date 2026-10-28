@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/utils"
@@ -15,11 +16,7 @@ import (
 )
 
 var (
-	DefaultAcceptList = []string{
-		"ssh.service", "ssh", "nginx.service", "nginx", "docker.service", "docker",
-		"postgresql.service", "postgresql", "systemd-journald", "systemd-resolved",
-		"infrapilot-agent", "cron", "dbus", "network-manager",
-	}
+	DefaultAcceptList = []string{}
 
 	flapMu          sync.Mutex
 	serviceRestarts = make(map[string][]time.Time)
@@ -32,7 +29,7 @@ func NewRemediationService() *RemediationService {
 }
 
 // RecordAndCheckFlap tracks service restart timestamps within a 10-minute sliding window.
-// Returns true if flapping limit is exceeded (max 2 restarts allowed per 10 mins).
+// Returns true if flapping limit is exceeded (max 3 restarts allowed per 10 mins).
 func RecordAndCheckFlap(machineID, service string) (isFlapping bool, count int) {
 	flapMu.Lock()
 	defer flapMu.Unlock()
@@ -41,7 +38,7 @@ func RecordAndCheckFlap(machineID, service string) (isFlapping bool, count int) 
 	now := time.Now()
 	cutoff := now.Add(-10 * time.Minute)
 
-	// Filter timestamps within the 10-minute window
+	// Filter timestamps within the 10-minute window (Sliding Window)
 	recent := make([]time.Time, 0)
 	for _, t := range serviceRestarts[key] {
 		if t.After(cutoff) {
@@ -49,9 +46,9 @@ func RecordAndCheckFlap(machineID, service string) (isFlapping bool, count int) 
 		}
 	}
 
-	if len(recent) >= 2 {
+	if len(recent) >= 3 {
 		serviceRestarts[key] = recent
-		return true, len(recent) + 1
+		return true, len(recent)
 	}
 
 	recent = append(recent, now)
@@ -64,16 +61,35 @@ func ResetFlapCounter(machineID, service string) {
 	flapMu.Lock()
 	defer flapMu.Unlock()
 
-	key := fmt.Sprintf("%s:%s", machineID, strings.TrimSuffix(service, ".service"))
+	svcClean := strings.TrimSpace(strings.TrimSuffix(service, ".service"))
+	if svcClean == "" || strings.EqualFold(svcClean, "ALL") {
+		prefix := fmt.Sprintf("%s:", machineID)
+		for k := range serviceRestarts {
+			if strings.HasPrefix(k, prefix) {
+				delete(serviceRestarts, k)
+			}
+		}
+		return
+	}
+
+	key := fmt.Sprintf("%s:%s", machineID, svcClean)
 	delete(serviceRestarts, key)
 }
 
-// IsServiceAccepted checks if a target service is on the accepted auto-remediation list
+// IsServiceAccepted checks if a target service is on the accepted auto-remediation list from config.toml
 func IsServiceAccepted(service string) bool {
 	svc := strings.ToLower(strings.TrimSpace(service))
-	for _, acc := range DefaultAcceptList {
-		if svc == strings.ToLower(acc) {
-			return true
+	cleanSvc := strings.TrimSuffix(svc, ".service")
+	cfg := config.Get()
+	if cfg != nil {
+		allAllowed := append([]string{}, cfg.Agent.Services.AcceptList...)
+		allAllowed = append(allAllowed, cfg.Agent.Services.Windows...)
+		allAllowed = append(allAllowed, cfg.Agent.Services.Linux...)
+		for _, acc := range allAllowed {
+			a := strings.ToLower(strings.TrimSpace(acc))
+			if svc == a || cleanSvc == strings.TrimSuffix(a, ".service") {
+				return true
+			}
 		}
 	}
 	return false
@@ -175,7 +191,7 @@ func (s *RemediationService) EvaluateAndRemediate(alert models.LinuxAlert, incid
 	// Service crash recovery & Flap protection checks
 	isFlapping := false
 	if policy.ActionType == "restart_service" && !policy.RequiresApproval {
-		// Flap protection check (Max 2 restarts per 10 mins)
+		// Flap protection check (Max 3 restarts per 10 mins)
 		flapping, _ := RecordAndCheckFlap(alert.MachineID.String(), targetService)
 		if flapping {
 			isFlapping = true
@@ -199,7 +215,7 @@ func (s *RemediationService) EvaluateAndRemediate(alert models.LinuxAlert, incid
 	}
 
 	if isFlapping {
-		job.Output = fmt.Sprintf("FLAP PROTECTION ESCALATION: Service '%s' exceeded 2 restarts in 10 mins. Auto-remediation halted for human review.", targetService)
+		job.Output = fmt.Sprintf("FLAP PROTECTION ESCALATION: Service '%s' reached 3 restarts in 10 mins. Auto-remediation halted for human review.", targetService)
 	}
 
 	if database.DB != nil {

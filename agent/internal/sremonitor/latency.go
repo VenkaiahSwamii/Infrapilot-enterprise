@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"infrapilot/agent/internal/config"
 )
 
 type LatencyConfig struct {
@@ -71,7 +73,10 @@ func (m *LatencyMonitor) Check(currentTime time.Time) error {
 		targetSvc = m.config.AcceptList[0]
 	}
 	if targetSvc == "" {
-		targetSvc = "ssh.service"
+		monitored := config.Get().GetMonitoredServices()
+		if len(monitored) > 0 {
+			targetSvc = monitored[0]
+		}
 	}
 
 	currentP95, err := m.sys.GetP95Latency(targetSvc)
@@ -112,8 +117,14 @@ func (m *LatencyMonitor) Check(currentTime time.Time) error {
 					m.config.ServiceName,
 					m.config.ServiceName,
 				)
-				m.sys.Escalate(m.config.ServiceName, msg)
-				m.sys.SendRemoteEvent("LATENCY_SPIKE", m.config.ServiceName, "Escalated to human", false, fmt.Sprintf("Latency exceeded threshold for %s", elapsed.String()), "TRIGGERED")
+				mode := GetLatencyPolicyMode(m.config.ServiceName)
+				if mode == "NOTIFY_EMAIL" {
+					m.sys.Escalate(m.config.ServiceName, "Policy mode NOTIFY_EMAIL active: Auto-remediation suppressed, email alert triggered.\n"+msg)
+					m.sys.SendRemoteEvent("LATENCY_SPIKE", m.config.ServiceName, "NOTIFY_EMAIL", false, fmt.Sprintf("Latency elevated (%.1f ms > %.1f ms threshold)", currentP95, threshold), "TRIGGERED")
+				} else {
+					m.sys.Escalate(m.config.ServiceName, msg)
+					m.sys.SendRemoteEvent("LATENCY_SPIKE", m.config.ServiceName, "AUTO_REMEDIATE", true, fmt.Sprintf("Latency exceeded threshold for %s (%.1f ms)", elapsed.String(), currentP95), "TRIGGERED")
+				}
 				m.isAlerting = true
 
 				if m.config.OnTriggered != nil {

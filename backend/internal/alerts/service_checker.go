@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"infrapilot/backend/internal/config"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/services"
 )
@@ -32,9 +33,19 @@ func CheckServiceHealth(machine models.Machine, metric models.Metric, input serv
 	}
 
 	isWindows := strings.EqualFold(machine.OS, "windows") || strings.Contains(strings.ToLower(machine.OS), "win")
+	cfg := config.Get()
+	var configuredServices []string
+	if cfg != nil {
+		if isWindows {
+			configuredServices = cfg.Agent.Services.Windows
+		} else {
+			configuredServices = cfg.Agent.Services.Linux
+		}
+	}
 
 	for _, svc := range input.Services {
 		svcName := strings.ToLower(strings.TrimSpace(svc.Name))
+		svcClean := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(svc.Name), ".service"))
 		svcStatus := strings.ToLower(strings.TrimSpace(svc.Status))
 
 		// Skip Linux-specific daemons on Windows hosts
@@ -42,7 +53,22 @@ func CheckServiceHealth(machine models.Machine, metric models.Metric, input serv
 			continue
 		}
 
-		if description, isCritical := criticalServices[svcName]; isCritical {
+		description, isCritical := criticalServices[svcName]
+		if !isCritical {
+			description, isCritical = criticalServices[svcClean]
+		}
+		if !isCritical && len(configuredServices) > 0 {
+			for _, cSvc := range configuredServices {
+				cC := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(cSvc), ".service"))
+				if cC == svcClean || strings.ToLower(strings.TrimSpace(cSvc)) == svcName {
+					isCritical = true
+					description = "Monitored Service in config.toml"
+					break
+				}
+			}
+		}
+
+		if isCritical {
 			if svcStatus == "stopped" || svcStatus == "failed" || svcStatus == "inactive" || svcStatus == "dead" || svcStatus == "exited" {
 				alerts = append(alerts, models.LinuxAlert{
 					Title:              "Service Down",

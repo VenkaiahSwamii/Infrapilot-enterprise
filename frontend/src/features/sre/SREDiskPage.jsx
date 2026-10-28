@@ -16,7 +16,6 @@ import {
   FileText,
   Activity,
   Play,
-  TrendingDown,
   Lock,
   Check,
   Mail,
@@ -29,9 +28,11 @@ import { useDashboardStore } from '../../store/dashboardStore.jsx';
 import { apiClient } from '../../api/client.js';
 import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
 import AdminSREPolicyControl from '../../components/sre/AdminSREPolicyControl.jsx';
+import { useNotificationSettings } from '../../store/notificationStore.jsx';
 
 export default function SREDiskPage() {
   const { addToast } = useDashboardStore();
+  const { defaultRecipient } = useNotificationSettings();
   const { selectedServer, servers: storeServers } = useServerStore();
 
   const [machines, setMachines] = useState([]);
@@ -39,7 +40,6 @@ export default function SREDiskPage() {
   const [loading, setLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
-  const [dryRun, setDryRun] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -79,8 +79,26 @@ export default function SREDiskPage() {
           const mId = m.id || m.ID || getMachineId(m);
           if (!mId) return null;
           try {
-            const metricsRes = await getServerMetrics(mId, '5m').catch(() => null);
-            return metricsRes?.latest ? [mId, metricsRes.latest] : null;
+            const [metricsRes, storageRes] = await Promise.all([
+              getServerMetrics(mId, '5m').catch(() => null),
+              apiClient.get(`/linux/servers/${mId}/storage`).catch(() => null),
+            ]);
+            let parsedFS = [];
+            if (storageRes?.data) {
+              const rows = Array.isArray(storageRes.data) ? storageRes.data : [storageRes.data];
+              const latestRow = rows[0];
+              const raw = latestRow?.filesystems || latestRow?.filesystems_json;
+              if (raw) {
+                try {
+                  parsedFS = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                } catch (_) {}
+              }
+            }
+            const baseMetric = metricsRes?.latest || {};
+            if (Array.isArray(parsedFS) && parsedFS.length > 0) {
+              baseMetric.filesystems = parsedFS;
+            }
+            return [mId, baseMetric];
           } catch {
             return null;
           }
@@ -117,9 +135,9 @@ export default function SREDiskPage() {
         );
         backendMapped = diskJobs.map((j, idx) => {
           const outputStr = String(j.output || '');
-          let freedMBVal = 3840.0;
-          let postUsageVal = 78.2;
-          let filesPurgedVal = 46;
+          let freedMBVal = 0.0;
+          let postUsageVal = 0.0;
+          let filesPurgedVal = 0;
 
           const mbMatch = outputStr.match(/reclaimed ([\d.]+) GB/i);
           if (mbMatch && mbMatch[1]) freedMBVal = Number((parseFloat(mbMatch[1]) * 1024).toFixed(1));
@@ -128,10 +146,7 @@ export default function SREDiskPage() {
           const filesMatch = outputStr.match(/purged (\d+) cache files/i) || outputStr.match(/cleaned (\d+) files/i);
           if (filesMatch && filesMatch[1]) filesPurgedVal = parseInt(filesMatch[1], 10);
 
-          let cleanReason = outputStr;
-          if (!cleanReason || cleanReason.includes('Status: PENDING') || cleanReason.includes('Auto-remediation job') || cleanReason.includes('restart_service')) {
-            cleanReason = `Reactive threshold breached (92.8% >= 90%) - Storage Auto-remediation Solved`;
-          }
+          let cleanReason = outputStr || 'Storage Auto-remediation Execution';
 
           return {
             id: j.id || `rem-job-${idx}`,
@@ -139,10 +154,10 @@ export default function SREDiskPage() {
             machine: activeHostname || 'Local Host',
             mountPoint: isWindows ? 'C:' : '/',
             reason: cleanReason,
-            filesScanned: filesPurgedVal + 202,
+            filesScanned: filesPurgedVal,
             filesDeleted: filesPurgedVal,
             freedMB: freedMBVal,
-            status: 'VERIFIED_PASSED',
+            status: j.status || 'VERIFIED_PASSED',
             postUsagePct: postUsageVal,
             dryRun: false,
           };
@@ -246,20 +261,30 @@ export default function SREDiskPage() {
   };
 
   const handleSendEmailAlert = async (vol) => {
+    const targetEmail = defaultRecipient || '';
     try {
-      await apiClient.post('/platform/email-alert', {
+      const resp = await apiClient.post('/platform/email-alert', {
         service: vol?.name || vol?.mountPoint || 'Disk Volume',
         host: activeHostname,
-        recipient: 'infrapilotadmin@gmail.com',
-      }).catch(() => null);
-      if (addToast) {
-        addToast('info', '📧 Email Alert Sent', `Notification dispatched to infrapilotadmin@gmail.com for volume ${vol?.name || 'Storage Drive'}. Files were NOT deleted.`);
+        recipient: targetEmail,
+      });
+      const destText = targetEmail ? ` to ${targetEmail}` : '';
+      if (resp?.data?.status === 'failed') {
+        if (addToast) {
+          addToast('warning', '⚠️ Email Delivery Note', resp.data.message || 'SMTP issue. Policy mode is NOTIFY_EMAIL. Safe cleanup was suppressed and no files were deleted.');
+        } else {
+          alert(`⚠️ Email Delivery Note: ${resp.data?.message || 'Policy mode is NOTIFY_EMAIL. Files were NOT deleted.'}`);
+        }
       } else {
-        alert(`📧 Email Alert Sent: Notification dispatched to infrapilotadmin@gmail.com for "${vol?.name || 'Storage Drive'}". Files were NOT deleted.`);
+        if (addToast) {
+          addToast('info', '📧 Email Alert Sent', `Notification dispatched${destText} for volume ${vol?.name || 'Storage Drive'}. Files were NOT deleted.`);
+        } else {
+          alert(`📧 Email Alert Sent: Notification dispatched${destText} for "${vol?.name || 'Storage Drive'}". Files were NOT deleted.`);
+        }
       }
     } catch {
       if (addToast) {
-        addToast('info', '📧 Email Alert Dispatched', `Notification sent to infrapilotadmin@gmail.com.`);
+        addToast('info', '📧 Email Policy Active', `Policy mode is NOTIFY_EMAIL. Auto-cleanup suppressed, no files were deleted.`);
       }
     }
   };
@@ -351,23 +376,19 @@ export default function SREDiskPage() {
         status: safePct >= diskPolicy.reactiveThreshold ? 'CRITICAL' : safePct >= 80 ? 'WARNING' : 'HEALTHY',
       };
     });
-  } else if (machines.length > 0 && primaryMachine && (live?.disk_total || primaryMachine?.total_disk_gb || live?.disk_usage !== undefined || primaryMachine?.disk_used)) {
-    const totalDiskGB = Number(primaryMachine?.total_disk_gb || 0);
-    const totalDiskBytes = live?.disk_total || primaryMachine?.disk_total || (totalDiskGB > 0 ? totalDiskGB * 1024 * 1024 * 1024 : 0);
-    const usedDiskBytes = live?.disk_used || primaryMachine?.disk_used || ((live?.disk_usage !== undefined && live?.disk_usage !== null && totalDiskBytes) ? (live.disk_usage / 100) * totalDiskBytes : 0);
-
-    const totalGBNum = totalDiskBytes > 0 ? Number((totalDiskBytes / (1024 * 1024 * 1024)).toFixed(1)) : 0;
-    const usedGBNum = usedDiskBytes > 0 ? Number((usedDiskBytes / (1024 * 1024 * 1024)).toFixed(1)) : 0;
-    const freeGBNum = Math.max(0, Number((totalGBNum - usedGBNum).toFixed(1)));
-
-    let usagePctNum = 0;
+  } else if (live?.disk_total || primaryMachine?.disk_total || primaryMachine?.total_disk_gb) {
+    const totalDiskGB = Number(primaryMachine?.total_disk_gb || primaryMachine?.TotalDiskGB || (live?.disk_total ? (live.disk_total / (1024*1024*1024)).toFixed(1) : 0));
+    const effectiveTotalGB = totalDiskGB > 0 ? totalDiskGB : 0;
+    let usagePctNum = 0.0;
     if (live?.disk_usage !== undefined && !isNaN(Number(live.disk_usage))) {
       usagePctNum = Number(Number(live.disk_usage).toFixed(1));
-    } else if (totalGBNum > 0) {
-      usagePctNum = Number(((usedGBNum / totalGBNum) * 100).toFixed(1));
+    } else if (primaryMachine?.disk_usage !== undefined && !isNaN(Number(primaryMachine.disk_usage))) {
+      usagePctNum = Number(Number(primaryMachine.disk_usage).toFixed(1));
     }
+    const usedGBNum = Number(((effectiveTotalGB * usagePctNum) / 100).toFixed(1));
+    const freeGBNum = Math.max(0, Number((effectiveTotalGB - usedGBNum).toFixed(1)));
 
-    if (totalGBNum > 0 || usedGBNum > 0 || live?.disk_usage !== undefined) {
+    if (effectiveTotalGB > 0) {
       volumes = [
         {
           id: 'vol-root',
@@ -376,7 +397,7 @@ export default function SREDiskPage() {
           mountPoint: isWindows ? 'C:' : '/',
           usedGB: usedGBNum,
           freeGB: freeGBNum,
-          totalGB: totalGBNum,
+          totalGB: effectiveTotalGB,
           usagePct: usagePctNum,
           status: usagePctNum >= diskPolicy.reactiveThreshold ? 'CRITICAL' : usagePctNum >= 80 ? 'WARNING' : 'HEALTHY',
         },
@@ -392,87 +413,7 @@ export default function SREDiskPage() {
   const totalGBAll = volumes.reduce((acc, v) => acc + (v.totalGB || 0), 0).toFixed(1);
   const clusterPct = Number(totalGBAll) > 0 ? Math.min(100, Math.max(0, Number(((Number(totalUsedAll) / Number(totalGBAll)) * 100).toFixed(1)))) : 0;
 
-  // SRE Predictive burn rate simulation based on consumption trend
-  const burnRateMBPerMin = 14.5;
-  const totalFreeMB = volumes.reduce((acc, v) => acc + (v.freeGB || 0), 0) * 1024;
-  const minutesUntilFull = burnRateMBPerMin > 0 ? Math.round(totalFreeMB / burnRateMBPerMin) : 9999;
-  const hoursUntilFull = (minutesUntilFull / 60).toFixed(1);
-  const isPredictiveBreached = Number(hoursUntilFull) < diskPolicy.predictiveHours;
 
-  const handleTriggerCleanup = async () => {
-    setIsCleaning(true);
-    try {
-      const res = await apiClient.post('/remediation/execute-disk-cleanup', {
-        machine_id: String(machineId || ''),
-        mount_point: isWindows ? 'C:' : '/',
-        dry_run: dryRun,
-      }).catch(async (err) => {
-        if (err?.response?.status === 404 || err?.status === 404 || err?.message?.includes('404')) {
-          return await apiClient.post('/remediation/test', {
-            machine_id: String(machineId || ''),
-            action_type: 'cleanup_disk',
-            command: 'powershell safe cleanup',
-          }).catch(() => null);
-        }
-        return null;
-      });
-
-      const data = res?.data?.cleanup || res?.data || {};
-      const freedMB = Number(data.bytes_freed ? (data.bytes_freed / (1024 * 1024)).toFixed(1) : (data.freed_gb ? (data.freed_gb * 1024).toFixed(1) : 0));
-      const freedGB = data.freed_gb ? Number(data.freed_gb).toFixed(2) : (freedMB / 1024).toFixed(2);
-      const postUsage = data.post_usage_pct != null ? Number(data.post_usage_pct).toFixed(1) : clusterPct;
-
-      const newAuditItem = {
-        id: `rem-disk-${Date.now()}`,
-        timestamp: data.timestamp || 'Just now',
-        machine: activeHostname,
-        mountPoint: isWindows ? 'C:' : '/',
-        reason: dryRun ? 'Manual Dry-Run simulation triggered' : 'Operator interactive cleanup dispatched',
-        filesScanned: data.files_scanned || 0,
-        filesDeleted: dryRun ? 0 : (data.files_deleted || 0),
-        freedMB: freedMB,
-        status: data.status || (dryRun ? 'DRY_RUN_SIMULATION' : 'VERIFIED_PASSED'),
-        postUsagePct: postUsage,
-        dryRun: dryRun,
-      };
-
-      setRemediationHistory((prev) => [newAuditItem, ...prev]);
-
-      if (machineId && !dryRun && (data.post_usage_pct != null || data.post_used_gb != null)) {
-        setLiveMetrics((prev) => {
-          const current = prev[machineId] || {};
-          const totalBytes = data.total_gb ? data.total_gb * 1024 * 1024 * 1024 : current.disk_total;
-          const usedBytes = data.post_used_gb ? data.post_used_gb * 1024 * 1024 * 1024 : current.disk_used;
-          return {
-            ...prev,
-            [machineId]: {
-              ...current,
-              disk_usage: Number(postUsage),
-              disk_percent: Number(postUsage),
-              ...(usedBytes ? { disk_used: usedBytes } : {}),
-              ...(totalBytes ? { disk_total: totalBytes } : {}),
-            },
-          };
-        });
-      }
-
-      await fetchDiskData().catch(() => null);
-      await fetchAuditLogs().catch(() => null);
-
-      if (addToast) {
-        if (dryRun) {
-          addToast('info', 'Dry-Run Simulation Complete', `Scanned ${newAuditItem.filesScanned} candidate files. 0 deleted (Dry-Run mode active).`);
-        } else {
-          addToast('success', 'SRE Disk Remediation Complete', `Deleted ${newAuditItem.filesDeleted} volatile files, freeing ${freedGB} GB with denylist protection.`);
-        }
-      }
-    } catch (err) {
-      console.warn('Trigger cleanup error:', err);
-      if (addToast) addToast('success', 'SRE Disk Remediation Complete', 'Volatile cache directories purged successfully.');
-    } finally {
-      setTimeout(() => setIsCleaning(false), 600);
-    }
-  };
 
 
 
@@ -498,7 +439,7 @@ export default function SREDiskPage() {
             <span className="badge-prod">ENTERPRISE SRE</span>
           </div>
           <p className="subtitle-txt">
-            Continuous filesystem saturation telemetry, predictive burn-rate time-to-full forecasting, and safe zero-disruption disk auto-cleaning.
+            Continuous filesystem saturation telemetry, storage volume monitoring, and safe zero-disruption disk auto-cleaning.
           </p>
         </div>
 
@@ -512,41 +453,6 @@ export default function SREDiskPage() {
             <span className="green-dot pulse" /> Live Telemetry
           </span>
           <span className="updated-time-txt">⏱ {lastUpdated}</span>
-        </div>
-      </div>
-
-      {/* ── SRE PREDICTIVE FORECASTING BANNER ── */}
-      <div className={`sre-predictive-banner ${isPredictiveBreached ? 'breached' : ''}`}>
-        <div className="predictive-left">
-          <div className="burn-icon-badge">
-            <TrendingDown size={22} color={isPredictiveBreached ? '#ef4444' : '#06b6d4'} />
-          </div>
-          <div>
-            <h4>Predictive Disk Exhaustion Forecasting (Time-to-Full)</h4>
-            <p>
-              Current telemetry burn rate: <strong>{burnRateMBPerMin} MB/min</strong>. Node disk is estimated to reach exhaustion in{' '}
-              <strong className={isPredictiveBreached ? 'red-txt' : 'green-txt'}>
-                {hoursUntilFull} hours ({minutesUntilFull} mins)
-              </strong>
-              . SRE threshold alerts when time-to-full drops below <strong>{diskPolicy.predictiveHours} hours</strong>.
-            </p>
-          </div>
-        </div>
-
-        <div className="predictive-actions">
-          <label className="dryrun-toggle">
-            <input
-              type="checkbox"
-              checked={dryRun}
-              onChange={(e) => setDryRun(e.target.checked)}
-            />
-            <span className="toggle-label">Dry-Run Only</span>
-          </label>
-
-          <button className="trigger-clean-btn" onClick={handleTriggerCleanup} disabled={isCleaning}>
-            <Trash2 size={14} className={isCleaning ? 'spin' : ''} />
-            <span>{isCleaning ? 'Cleaning Cache...' : dryRun ? 'Simulate Dry-Run' : 'Trigger SRE Cleanup'}</span>
-          </button>
         </div>
       </div>
 
@@ -740,31 +646,14 @@ export default function SREDiskPage() {
                   <span>Auto-Remediation armed (Reactive threshold: {diskPolicy.reactiveThreshold}%)</span>
                 </div>
 
-                {/* Admin Remediation Choice Buttons */}
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px', marginBottom: '12px' }}>
-                  <button
-                    type="button"
-                    className="ctrl-btn"
-                    style={{ flex: 1, backgroundColor: '#22c55e', color: '#000', fontWeight: 'bold', justifyContent: 'center', height: '36px' }}
-                    disabled={isCleaning}
-                    onClick={() => handleManualRemediate(vol)}
-                  >
-                    <Zap size={13} className={isCleaning ? 'spin' : ''} />
-                    <span>{isCleaning ? 'Cleaning...' : '⚡ Auto Remediate'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="ctrl-btn"
-                    style={{ flex: 1, backgroundColor: '#1f293d', color: '#e2e8f0', justifyContent: 'center', height: '36px' }}
-                    onClick={() => handleSendEmailAlert(vol)}
-                  >
-                    <Mail size={13} />
-                    <span>Send Email Alert</span>
-                  </button>
-                </div>
-
-                <AdminSREPolicyControl category="Storage" component={vol.mountPoint === '/' ? 'root_disk' : vol.mountPoint === '/var/log' || String(vol.name).includes('var') ? 'var_log_disk' : 'root_disk'} compact />
+                {/* Unified Enterprise SRE Policy Routing & Execution Controls */}
+                <AdminSREPolicyControl
+                  category="Storage"
+                  component={vol.mountPoint === '/' ? 'root_disk' : vol.mountPoint === '/var/log' || String(vol.name).includes('var') ? 'var_log_disk' : 'root_disk'}
+                  compact
+                  onAutoRemediate={() => handleManualRemediate(vol)}
+                  onEmailAlert={() => handleSendEmailAlert(vol)}
+                />
               </div>
             );
           })}
@@ -1040,88 +929,7 @@ export default function SREDiskPage() {
         .green-dot.pulse { box-shadow: 0 0 8px #22c55e; }
         .updated-time-txt { color: #64748b; }
 
-        /* SRE Predictive Burn-Rate Banner */
-        .sre-predictive-banner {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          background: linear-gradient(135deg, rgba(6, 182, 212, 0.12), rgba(15, 23, 42, 0.8));
-          border: 1px solid rgba(6, 182, 212, 0.3);
-          border-left: 4px solid #06b6d4;
-          border-radius: 12px;
-          padding: 16px 22px;
-          margin-bottom: 20px;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-        .sre-predictive-banner.breached {
-          background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(15, 23, 42, 0.8));
-          border-color: rgba(239, 68, 68, 0.4);
-          border-left-color: #ef4444;
-        }
-        .predictive-left {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          flex: 1;
-        }
-        .burn-icon-badge {
-          width: 44px;
-          height: 44px;
-          border-radius: 10px;
-          background: rgba(15, 23, 42, 0.8);
-          border: 1px solid #1e293b;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-        .predictive-left h4 {
-          font-size: 14.5px;
-          font-weight: 800;
-          color: #f8fafc;
-          margin: 0 0 4px 0;
-        }
-        .predictive-left p {
-          font-size: 12.5px;
-          color: #94a3b8;
-          margin: 0;
-        }
-        .predictive-actions {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .dryrun-toggle {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 12px;
-          color: #cbd5e1;
-          cursor: pointer;
-        }
-        .trigger-clean-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          background: linear-gradient(135deg, #0284c7, #0369a1);
-          border: 1px solid #38bdf8;
-          color: #ffffff;
-          padding: 8px 16px;
-          border-radius: 8px;
-          font-size: 12.5px;
-          font-weight: 700;
-          cursor: pointer;
-          box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
-          transition: all 0.2s ease;
-        }
-        .trigger-clean-btn:hover:not(:disabled) {
-          background: linear-gradient(135deg, #0369a1, #075985);
-        }
-        .trigger-clean-btn:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
+
 
         /* KPI Row */
         .storage-kpi-row {

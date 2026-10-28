@@ -33,4 +33,6 @@ type Metric struct {
 	MemoryUsed     uint64  `json:"memory_used"`
 	DiskTotal      uint64  `json:"disk_total"`
 	DiskUsed       uint64  `json:"disk_used"`
+	AgentCPUUsage  float64 `json:"agent_cpu_usage"`
+	AgentMemoryMB  float64 `json:"agent_memory_mb"`
 }

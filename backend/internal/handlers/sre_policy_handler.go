@@ -7,6 +7,7 @@ import (
 
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
+	"infrapilot/backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "ssh",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 	{
@@ -27,7 +28,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "cron",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 	{
@@ -35,7 +36,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "systemd-journald",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 	{
@@ -43,7 +44,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "nginx",
 		Mode:           "NOTIFY_EMAIL",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 	{
@@ -51,7 +52,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Service",
 		Component:      "postgresql",
 		Mode:           "NOTIFY_EMAIL",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 	{
@@ -59,7 +60,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Storage",
 		Component:      "root_disk",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 	{
@@ -67,7 +68,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Storage",
 		Component:      "var_log_disk",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 	{
@@ -75,7 +76,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Network",
 		Component:      "gateway",
 		Mode:           "AUTO_REMEDIATE",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 	{
@@ -83,7 +84,7 @@ var DefaultSREActionPolicies = []models.SREActionPolicy{
 		Category:       "Network",
 		Component:      "dns_latency",
 		Mode:           "NOTIFY_EMAIL",
-		RecipientEmail: "infrapilotadmin@gmail.com",
+		RecipientEmail: "",
 		Enabled:        true,
 	},
 }
@@ -115,9 +116,12 @@ func GetSREActionPolicies(c *gin.Context) {
 		policies = seeded
 	}
 
+	smtpCfg := services.GetResolvedSMTPConfig()
+	defaultEmail := smtpCfg.DefaultRecipient
+
 	for i := range policies {
-		if policies[i].RecipientEmail == "" || policies[i].RecipientEmail == "admin@company.com" {
-			policies[i].RecipientEmail = "infrapilotadmin@gmail.com"
+		if policies[i].RecipientEmail == "" || policies[i].RecipientEmail == "infrapilotadmin@gmail.com" || policies[i].RecipientEmail == "admin@company.com" {
+			policies[i].RecipientEmail = defaultEmail
 		}
 	}
 
@@ -154,8 +158,8 @@ func SaveSREActionPolicy(c *gin.Context) {
 	}
 
 	recipient := strings.TrimSpace(input.RecipientEmail)
-	if recipient == "" {
-		recipient = "infrapilotadmin@gmail.com"
+	if recipient == "infrapilotadmin@gmail.com" || recipient == "admin@company.com" {
+		recipient = ""
 	}
 
 	now := time.Now()
@@ -191,7 +195,11 @@ func SaveSREActionPolicy(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update SRE action policy: " + err.Error()})
 				return
 			}
-			c.JSON(http.StatusOK, existing)
+			respPolicy := existing
+			if respPolicy.RecipientEmail == "" || respPolicy.RecipientEmail == "infrapilotadmin@gmail.com" || respPolicy.RecipientEmail == "admin@company.com" {
+				respPolicy.RecipientEmail = services.GetResolvedSMTPConfig().DefaultRecipient
+			}
+			c.JSON(http.StatusOK, respPolicy)
 			return
 		}
 
@@ -235,7 +243,11 @@ func SaveSREActionPolicy(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusCreated, policy)
+	respPolicy := policy
+	if respPolicy.RecipientEmail == "" || respPolicy.RecipientEmail == "infrapilotadmin@gmail.com" || respPolicy.RecipientEmail == "admin@company.com" {
+		respPolicy.RecipientEmail = services.GetResolvedSMTPConfig().DefaultRecipient
+	}
+	c.JSON(http.StatusCreated, respPolicy)
 }
 
 // UpdateSREActionPolicy handles PUT /api/v1/sre/policies/:id
@@ -290,7 +302,11 @@ func UpdateSREActionPolicy(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, policy)
+	respPolicy := policy
+	if respPolicy.RecipientEmail == "" || respPolicy.RecipientEmail == "infrapilotadmin@gmail.com" || respPolicy.RecipientEmail == "admin@company.com" {
+		respPolicy.RecipientEmail = services.GetResolvedSMTPConfig().DefaultRecipient
+	}
+	c.JSON(http.StatusOK, respPolicy)
 }
 
 // DeleteSREActionPolicy handles DELETE /api/v1/sre/policies/:id

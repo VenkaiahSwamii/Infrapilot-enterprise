@@ -30,7 +30,30 @@ type DiskTOMLConfig struct {
 }
 
 type ServicesTOMLConfig struct {
+	Linux      []string `yaml:"linux" json:"linux" toml:"linux"`
+	Windows    []string `yaml:"windows" json:"windows" toml:"windows"`
 	AcceptList []string `yaml:"accept_list" json:"accept_list" toml:"accept_list"`
+}
+
+type ServerTOMLConfig struct {
+	HTTPPort       int      `yaml:"http_port" json:"http_port" toml:"http_port"`
+	GRPCPort       int      `yaml:"grpc_port" json:"grpc_port" toml:"grpc_port"`
+	BackendURL     string   `yaml:"backend_url" json:"backend_url" toml:"backend_url"`
+	AllowedOrigins []string `yaml:"allowed_origins" json:"allowed_origins" toml:"allowed_origins"`
+}
+
+type AgentTableConfig struct {
+	ServerAddress   string             `yaml:"server_address" json:"server_address" toml:"server_address"`
+	BackendURL      string             `yaml:"backend_url" json:"backend_url" toml:"backend_url"`
+	MachineID       string             `yaml:"machine_id" json:"machine_id" toml:"machine_id"`
+	APIKey          string             `yaml:"api_key" json:"api_key" toml:"api_key"`
+	EnrollmentToken string             `yaml:"enrollment_token" json:"enrollment_token" toml:"enrollment_token"`
+	Interval        int                `yaml:"interval" json:"interval" toml:"interval"`
+	MachineName     string             `yaml:"machine_name" json:"machine_name" toml:"machine_name"`
+	Tags            []string           `yaml:"tags" json:"tags" toml:"tags"`
+	Services        ServicesTOMLConfig `yaml:"services" json:"services" toml:"services"`
+	Disk            DiskTOMLConfig     `yaml:"disk" json:"disk" toml:"disk"`
+	Latency         LatencyTOMLConfig  `yaml:"latency" json:"latency" toml:"latency"`
 }
 
 type LatencyTOMLConfig struct {
@@ -70,11 +93,17 @@ type Config struct {
 	// Nested TLS table section [tls]
 	TLS TLSConfig `yaml:"tls" json:"tls" toml:"tls"`
 
+	// Nested Server table section [server]
+	Server ServerTOMLConfig `yaml:"server" json:"server" toml:"server"`
+
 	// Nested Disk table section [disk]
 	Disk DiskTOMLConfig `yaml:"disk" json:"disk" toml:"disk"`
 
 	// Nested Services table section [services]
 	Services ServicesTOMLConfig `yaml:"services" json:"services" toml:"services"`
+
+	// Nested Agent table section [agent] (supports root config.toml [agent.services], etc.)
+	Agent AgentTableConfig `yaml:"agent" json:"agent" toml:"agent"`
 
 	// Nested Latency table section [latency]
 	Latency LatencyTOMLConfig `yaml:"latency" json:"latency" toml:"latency"`
@@ -106,6 +135,60 @@ func Get() *Config {
 	return AppConfig
 }
 
+// GetMonitoredServices returns the active list of monitored services for the current OS from config.toml
+func (c *Config) GetMonitoredServices() []string {
+	var list []string
+	if runtime.GOOS == "windows" {
+		if len(c.Services.Windows) > 0 {
+			list = append(list, c.Services.Windows...)
+		} else if len(c.Agent.Services.Windows) > 0 {
+			list = append(list, c.Agent.Services.Windows...)
+		}
+	} else {
+		if len(c.Services.Linux) > 0 {
+			list = append(list, c.Services.Linux...)
+		} else if len(c.Agent.Services.Linux) > 0 {
+			list = append(list, c.Agent.Services.Linux...)
+		}
+	}
+
+	if len(list) == 0 {
+		if len(c.Services.AcceptList) > 0 {
+			list = append(list, c.Services.AcceptList...)
+		} else if len(c.Agent.Services.AcceptList) > 0 {
+			list = append(list, c.Agent.Services.AcceptList...)
+		}
+	}
+	return list
+}
+
+// GetAcceptList returns the accept list defined in config.toml
+func (c *Config) GetAcceptList() []string {
+	seen := make(map[string]bool)
+	var list []string
+	add := func(items []string) {
+		for _, it := range items {
+			clean := strings.TrimSpace(it)
+			if clean != "" {
+				lower := strings.ToLower(clean)
+				if !seen[lower] {
+					seen[lower] = true
+					list = append(list, clean)
+				}
+			}
+		}
+	}
+
+	add(c.Services.AcceptList)
+	add(c.Agent.Services.AcceptList)
+	add(c.Services.Windows)
+	add(c.Agent.Services.Windows)
+	add(c.Services.Linux)
+	add(c.Agent.Services.Linux)
+
+	return list
+}
+
 // AutoDetectMountPoint returns the appropriate target mount point for the current OS if set to "auto", empty, or default.
 // On Windows it returns "C:", on Linux/Ubuntu it returns "/".
 func AutoDetectMountPoint(target string) string {
@@ -126,6 +209,7 @@ func AutoDetectMountPoint(target string) string {
 }
 
 func syncTLSConfig(cfg *Config) {
+	syncServicesConfig(cfg)
 	if cfg.TLS.TLSEnabled {
 		cfg.TLSEnabled = true
 	} else if cfg.TLSEnabled {
@@ -169,6 +253,39 @@ func syncTLSConfig(cfg *Config) {
 	} else if cfg.KeyPath != "" {
 		cfg.TLS.AgentKey = cfg.KeyPath
 		cfg.TLS.KeyPath = cfg.KeyPath
+	}
+}
+
+func syncServicesConfig(cfg *Config) {
+	if cfg.BackendURL == "" && cfg.Agent.BackendURL != "" {
+		cfg.BackendURL = cfg.Agent.BackendURL
+	}
+	if cfg.BackendURL == "" && cfg.Server.BackendURL != "" {
+		cfg.BackendURL = cfg.Server.BackendURL
+	}
+	if cfg.ServerAddress == "" && cfg.Agent.ServerAddress != "" {
+		cfg.ServerAddress = cfg.Agent.ServerAddress
+	}
+	if cfg.EnrollmentToken == "" && cfg.Agent.EnrollmentToken != "" {
+		cfg.EnrollmentToken = cfg.Agent.EnrollmentToken
+	}
+	if cfg.MachineName == "" && cfg.Agent.MachineName != "" {
+		cfg.MachineName = cfg.Agent.MachineName
+	}
+	if len(cfg.Services.AcceptList) == 0 && len(cfg.Agent.Services.AcceptList) > 0 {
+		cfg.Services.AcceptList = cfg.Agent.Services.AcceptList
+	}
+	if len(cfg.Services.Linux) == 0 && len(cfg.Agent.Services.Linux) > 0 {
+		cfg.Services.Linux = cfg.Agent.Services.Linux
+	}
+	if len(cfg.Services.Windows) == 0 && len(cfg.Agent.Services.Windows) > 0 {
+		cfg.Services.Windows = cfg.Agent.Services.Windows
+	}
+	if cfg.Disk.TargetMountPoint == "" && cfg.Agent.Disk.TargetMountPoint != "" {
+		cfg.Disk = cfg.Agent.Disk
+	}
+	if cfg.Latency.TargetGateway == "" && cfg.Agent.Latency.TargetGateway != "" {
+		cfg.Latency = cfg.Agent.Latency
 	}
 }
 

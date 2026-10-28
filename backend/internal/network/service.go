@@ -3,6 +3,7 @@ package network
 import (
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,13 +74,32 @@ func (s *Service) processAlertLifecycle(check *models.NetworkCheck, metric *mode
 			severity = "Critical"
 		}
 
-		desc := fmt.Sprintf("Network check '%s' (%s target %s) reported status %s (Latency: %.1f ms, Packet Loss: %.1f%%): %s",
-			check.Name, check.Type, check.Target, metric.Status, metric.LatencyMs, metric.PacketLossPct, metric.ErrorMessage)
+		// Root Cause Correlation: Analyze Gateway status
+		rootCause := "Application Performance Bottleneck"
+		if check.Type == "HTTP" {
+			if check.Port > 0 {
+				rootCause = fmt.Sprintf("Application Server Bottleneck on Port %d", check.Port)
+			}
+			// Cross-correlate with Local WiFi Gateway checks
+			if allChecks, err := s.repo.GetAllChecks(); err == nil {
+				for _, other := range allChecks {
+					if strings.Contains(strings.ToLower(other.Name), "gateway") || strings.Contains(strings.ToLower(other.Name), "wifi") {
+						if other.LastLatencyMs > 100.0 || other.LastPacketLossPct > 10.0 {
+							rootCause = "Local WiFi / Router Gateway Network Congestion"
+							break
+						}
+					}
+				}
+			}
+		}
+
+		desc := fmt.Sprintf("Network check '%s' reported status %s (Latency: %.1f ms, Packet Loss: %.1f%%). Root Cause: %s. %s",
+			check.Name, metric.Status, metric.LatencyMs, metric.PacketLossPct, rootCause, metric.ErrorMessage)
 
 		alert := &models.LinuxAlert{
 			ID:          alertID,
 			MachineID:   check.ID,
-			Title:       fmt.Sprintf("Network Degradation: %s", check.Name),
+			Title:       fmt.Sprintf("SRE Latency Alert: %s (%s)", check.Name, metric.Status),
 			Description: desc,
 			Category:    "Network",
 			Component:   check.Name,
@@ -94,6 +114,20 @@ func (s *Service) processAlertLifecycle(check *models.NetworkCheck, metric *mode
 
 		if err := alerts.ProcessGeneratedAlert(models.Machine{ID: check.ID, Hostname: check.Name}, alert); err == nil {
 			s.activeAlerts[checkKey] = alert.ID
+		}
+
+		// Record Safe Policy SRE Audit event (NOTIFY_EMAIL: zero disruptive restarts)
+		if s.hub != nil {
+			s.hub.BroadcastJSON(map[string]interface{}{
+				"type":            "latency_alert_notified",
+				"target":          check.Name,
+				"latency_ms":      metric.LatencyMs,
+				"packet_loss_pct": metric.PacketLossPct,
+				"status":          metric.Status,
+				"root_cause":      rootCause,
+				"policy":          "NOTIFY_EMAIL",
+				"timestamp":       time.Now().Format("15:04:05"),
+			})
 		}
 	} else if metric.Status == "HEALTHY" {
 		if hasAlert {

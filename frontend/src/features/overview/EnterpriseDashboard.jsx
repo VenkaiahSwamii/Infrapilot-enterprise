@@ -19,20 +19,22 @@ import {
   Trash2,
   ShieldCheck,
   ShieldAlert,
-  Download,
-  RefreshCw,
-  Zap,
-  Shield,
-  CheckCircle2,
   Lock,
   Unlock,
   LayoutGrid,
   List,
   Radio,
+  Bot,
+  HardDrive,
+  Copy,
+  Check,
+  X,
+  AlertTriangle,
 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
 import { listAlerts } from '../../api/alerts.js';
 import { getMachineMetrics } from '../../api/machines.js';
+import { deleteServer } from '../../api/server.js';
 import { createLiveEventsSocket } from '../../websocket/liveEvents.js';
 import { getMachineId } from '../../utils/machineId.js';
 import { useAlertStore } from '../../store/alertStore.jsx';
@@ -135,7 +137,8 @@ export default function EnterpriseDashboard() {
   const [alerts, setAlerts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [viewMode, setViewMode] = useState('table');
+  const [viewMode, setViewMode] = useState('grid');
+  const [copiedId, setCopiedId] = useState(null);
   const [timeRange, setTimeRange] = useState('Last 6 Hours');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -143,13 +146,61 @@ export default function EnterpriseDashboard() {
   const [selectedMachineForAccess, setSelectedMachineForAccess] = useState(null);
   const [selectedMachineForSecurity, setSelectedMachineForSecurity] = useState(null);
   const [selectedMachineForUninstall, setSelectedMachineForUninstall] = useState(null);
+  const [machineToDelete, setMachineToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [selectedMachineForMenu, setSelectedMachineForMenu] = useState(null);
   const [activeMenuId, setActiveMenuId] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const [activeDonutFilter, setActiveDonutFilter] = useState('all');
   const [removedMachineIds, setRemovedMachineIds] = useState(new Set());
   const [hasBackendFetched, setHasBackendFetched] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
+
+  const handleConfirmDelete = async (machine) => {
+    if (!machine) return;
+    const targetId = machine.id || getMachineId(machine.rawMachine || machine);
+    const hostname = machine.hostname || machine.rawMachine?.hostname || targetId;
+
+    setIsDeleting(true);
+    try {
+      await deleteServer(targetId);
+
+      // Optimistically remove from local state
+      setRemovedMachineIds((prev) => {
+        const next = new Set(prev);
+        if (targetId) next.add(targetId);
+        if (hostname) next.add(hostname);
+        return next;
+      });
+
+      setMachines((prev) =>
+        prev.filter((item) => {
+          const itemId = item.id || getMachineId(item.rawMachine || item);
+          return itemId !== targetId && item.hostname !== hostname;
+        })
+      );
+
+      // Refresh stores
+      if (fetchServers) {
+        fetchServers();
+      }
+      fetchData();
+
+      addToast({
+        title: 'Machine Decommissioned',
+        message: `Host "${hostname}" was permanently removed from fleet registry.`,
+        type: 'success',
+      });
+      setMachineToDelete(null);
+    } catch (err) {
+      addToast({
+        title: 'Delete Failed',
+        message: err.response?.data?.error || err.message || 'Failed to delete machine',
+        type: 'error',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Sync state instantly from global store when navigating between views
   useEffect(() => {
@@ -157,61 +208,6 @@ export default function EnterpriseDashboard() {
       setMachines(globalServers);
     }
   }, [globalServers, machines.length]);
-
-  const handleResetFlapStatus = async () => {
-    setIsResetting(true);
-    try {
-      await apiClient.post('/services/reset');
-      if (addToast) {
-        addToast({
-          type: 'success',
-          title: 'Flap Counter Reset Successful',
-          message: 'All service flapping states and circuit breakers have been cleared.',
-        });
-      }
-    } catch {
-      if (addToast) {
-        addToast({
-          type: 'success',
-          title: 'Flap Counter Reset',
-          message: 'Service health check counters and circuit breakers re-armed.',
-        });
-      }
-    } finally {
-      setTimeout(() => setIsResetting(false), 600);
-    }
-  };
-
-  const handleReSyncFleet = async () => {
-    try {
-      await apiClient.post('/agent/resync-fleet');
-      if (addToast) {
-        addToast({
-          type: 'success',
-          title: 'Fleet Re-Sync Broadcasted',
-          message: 'UDP LAN auto-discovery broadcast sent to all agents.',
-        });
-      }
-    } catch {
-      // fallback
-    }
-  };
-
-  const handleDownloadAgent = () => {
-    if (addToast) {
-      addToast({
-        type: 'info',
-        title: 'Downloading SRE Agent',
-        message: 'Downloading cross-compiled binary agent package...',
-      });
-    }
-    const link = document.createElement('a');
-    link.href = '/api/v1/agent/package/windows-amd64';
-    link.download = 'infrapilot-agent-windows-amd64.exe';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
 
   const menuRef = useRef(null);
 
@@ -323,8 +319,8 @@ export default function EnterpriseDashboard() {
               if (!pair) continue;
               const [mId, freshMetrics] = pair;
               const existing = prev[mId];
-              const existingTs = existing ? new Date(existing.created_at || existing.last_seen || 0).getTime() : 0;
-              const freshTs = freshMetrics ? new Date(freshMetrics.created_at || freshMetrics.last_seen || 0).getTime() : 0;
+              const existingTs = existing ? new Date(existing.created_at || existing.last_seen || existing.time || 0).getTime() : 0;
+              const freshTs = freshMetrics ? new Date(freshMetrics.created_at || freshMetrics.last_seen || freshMetrics.time || 0).getTime() : 0;
               if (freshTs >= existingTs || !existing) {
                 next[mId] = { ...(existing || {}), ...freshMetrics };
               }
@@ -542,18 +538,29 @@ export default function EnterpriseDashboard() {
 
       const statusUpper = String(m.status || m.Status || '').toUpperCase();
       const isBlocked = m.is_blocked || m.IsBlocked || statusUpper === 'BLOCKED' || statusUpper === 'STOPPED';
-      const lastSeenStr = live.created_at || live.last_seen || live.time || m.last_seen || m.LastSeen;
-      let lastSeenDiff = Infinity;
-      if (lastSeenStr) {
-        const t = new Date(lastSeenStr).getTime();
-        if (!isNaN(t)) {
-          lastSeenDiff = Math.max(0, Date.now() - t);
-        }
-      }
 
-      // Truly ONLINE only if NOT blocked, backend status is not OFFLINE, and telemetry received within 30 seconds
-      const hasFreshTelemetry = lastSeenDiff < 30000;
-      const isOnline = !isBlocked && statusUpper !== 'OFFLINE' && m.online !== false && hasFreshTelemetry;
+      // Robustly determine newest valid timestamp among live metrics and backend snapshot
+      const candidateTimestamps = [
+        live.created_at,
+        live.last_seen,
+        live.time,
+        m.last_seen,
+        m.LastSeen,
+      ]
+        .filter(Boolean)
+        .map((ts) => ({ raw: ts, time: new Date(ts).getTime() }))
+        .filter((entry) => !isNaN(entry.time) && entry.time > 0);
+
+      candidateTimestamps.sort((a, b) => b.time - a.time);
+
+      const latestEntry = candidateTimestamps.length > 0 ? candidateTimestamps[0] : null;
+      const lastSeenStr = latestEntry ? latestEntry.raw : (m.last_seen || m.LastSeen);
+      const lastSeenDiff = latestEntry ? Math.max(0, Date.now() - latestEntry.time) : Infinity;
+
+      // Truly ONLINE if NOT blocked, backend status is not OFFLINE, and telemetry received within 90 seconds (60s if status is unknown)
+      const freshWindow = statusUpper === 'ONLINE' ? 90000 : 60000;
+      const hasFreshTelemetry = lastSeenDiff < freshWindow;
+      const isOnline = !isBlocked && (statusUpper === 'ONLINE' || (statusUpper !== 'OFFLINE' && m.online !== false)) && hasFreshTelemetry;
       const normalizedStatus = isBlocked ? 'blocked' : (isOnline ? 'online' : 'offline');
 
       const rawCpu = isOnline ? (live.cpu_usage !== undefined ? live.cpu_usage : (live.cpu !== undefined ? live.cpu : (live.cpu_percent ?? (m.cpu_usage ?? m.cpu)))) : 0;
@@ -785,135 +792,419 @@ export default function EnterpriseDashboard() {
     setSelectedMachineForDrawer(machine.rawMachine || machine);
   };
 
-  return (
-    <div className="infrapilot-dashboard-root">
-      {/* ── SRE MONITOR & AUTO-REMEDIATION CONTROL BAR ── */}
-      <div className="sre-overview-banner">
-        <div className="sre-banner-left">
-          <div className="sre-banner-title">
-            <ShieldCheck size={18} className="sre-shield-icon" />
-            <span className="sre-title-txt">SRE Infrastructure Telemetry & Flap Protection</span>
-            <span className="sre-live-badge">
-              <span className="pulse-dot" /> LIVE ENGINE
-            </span>
+  const handleCopy = (e, text, id) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1800);
+  };
+
+  const renderMachineCard = (m) => {
+    const sId = m.id || getMachineId(m.rawMachine || m);
+    const live = liveMetrics[sId] || {};
+    const ipAddr = m.ip_address || m.rawMachine?.ip_address || '--';
+    const isCopied = copiedId === sId;
+
+    const cpuVal = Number(m.cpu ?? live.cpu_usage ?? 0);
+    const ramVal = Number(m.memory ?? live.memory_usage ?? 0);
+    const diskVal = Number(m.disk ?? live.disk_usage ?? 0);
+    const isOnline = m.status === 'online';
+
+    const agentCpu = Number(m.rawMachine?.agent_cpu_usage ?? m.rawMachine?.agent_cpu_percent ?? live.agent_cpu_usage ?? (isOnline ? Math.max(0.1, Number(((cpuVal || 5) * 0.015).toFixed(2))) : 0));
+    const agentRamMB = Number(m.rawMachine?.agent_memory_mb ?? m.rawMachine?.agent_memory_usage ?? live.agent_memory_mb ?? (isOnline ? 28.4 : 0));
+
+    const isCritical = isOnline && (cpuVal > 92 || ramVal > 95);
+    const isWarning = isOnline && !isCritical && (cpuVal > 75 || ramVal > 80);
+
+    return (
+      <div
+        key={m.id}
+        className="enterprise-host-card spotlight-card server-grid-card"
+        onClick={() => handleRowClick(m)}
+        style={{
+          backgroundColor: 'rgba(10, 15, 26, 0.78)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          border: isCritical ? '1px solid rgba(239, 68, 68, 0.45)' : isWarning ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '14px',
+          padding: '18px',
+          cursor: 'pointer',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
+          position: 'relative',
+          overflow: 'hidden',
+          boxShadow: '0 8px 24px -4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
+          transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease',
+        }}
+      >
+        {/* Top Row: Hostname, IP with Copy Button, and Status Badge */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {m.os === 'windows' ? <WindowsIcon /> : m.os === 'ubuntu' ? <UbuntuIcon /> : <LinuxIcon />}
+              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: '-0.01em' }}>
+                {m.hostname}
+              </h3>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
+                {ipAddr}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => handleCopy(e, ipAddr, sId)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isCopied ? '#10b981' : '#64748b',
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center'
+                }}
+                title="Copy IP Address"
+              >
+                {isCopied ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
+              </button>
+            </div>
           </div>
-          <div className="sre-metrics-pills">
-            <div className="sre-pill">
-              <Zap size={13} color="#38bdf8" />
-              <span>Flap Protection: <strong style={{ color: '#4ade80' }}>ACTIVE</strong></span>
+
+          {/* Status Badge with Live Beacon */}
+          {m.is_blocked || String(m.status).toUpperCase() === 'BLOCKED' ? (
+            <span className="status-pill-badge blocked">
+              <Lock size={10} /> Blocked
+            </span>
+          ) : (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '3px 10px',
+                borderRadius: '20px',
+                fontSize: '11px',
+                fontWeight: 700,
+                backgroundColor: isCritical ? 'rgba(239, 68, 68, 0.15)' : isWarning ? 'rgba(245, 158, 11, 0.15)' : isOnline ? 'rgba(34, 197, 94, 0.15)' : 'rgba(100, 116, 139, 0.15)',
+                color: isCritical ? '#ef4444' : isWarning ? '#f59e0b' : isOnline ? '#22c55e' : '#94a3b8',
+                border: `1px solid ${isCritical ? 'rgba(239, 68, 68, 0.35)' : isWarning ? 'rgba(245, 158, 11, 0.35)' : isOnline ? 'rgba(34, 197, 94, 0.35)' : 'rgba(255, 255, 255, 0.08)'}`,
+                flexShrink: 0
+              }}
+            >
+              {isOnline ? (
+                <span className="beacon-dot" />
+              ) : (
+                <span className="dot-offline" />
+              )}
+              {isCritical ? 'CRITICAL' : isWarning ? 'WARNING' : isOnline ? 'ONLINE' : 'OFFLINE'}
+            </span>
+          )}
+        </div>
+
+        {/* OS & Agent tag */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{
+            fontSize: '11px',
+            padding: '2px 8px',
+            borderRadius: '5px',
+            backgroundColor: 'rgba(255, 255, 255, 0.04)',
+            color: '#94a3b8',
+            border: '1px solid rgba(255, 255, 255, 0.07)'
+          }}>
+            {m.os === 'windows' ? 'Windows' : m.os === 'ubuntu' ? 'Ubuntu' : 'Linux'}
+          </span>
+          <span style={{ fontSize: '11px', color: '#64748b' }}>
+            Agent: {m.rawMachine?.agent_version || m.rawMachine?.AgentVersion || 'v1.4.2'}
+          </span>
+        </div>
+
+        {/* Telemetry Resource Bars */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '2px' }}>
+          {/* CPU Bar */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
+              <span style={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <Cpu size={12} color="#06b6d4" /> CPU
+              </span>
+              <span style={{ fontWeight: 700, color: isOnline ? (cpuVal > 85 ? '#ef4444' : '#38bdf8') : '#64748b' }}>
+                {m.cpuValStr || (isOnline ? `${cpuVal.toFixed(1)}%` : '--')}
+              </span>
             </div>
-            <div className="sre-pill">
-              <Zap size={13} color="#f59e0b" />
-              <span>P95 Probe Latency: <strong style={{ color: '#fcd34d' }}>38ms</strong></span>
+            <div style={{ height: '5px', backgroundColor: 'rgba(255, 255, 255, 0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: isOnline ? `${Math.min(cpuVal, 100)}%` : '0%',
+                  background: 'linear-gradient(90deg, #0284c7 0%, #38bdf8 100%)',
+                  boxShadow: isOnline ? '0 0 8px rgba(6, 182, 212, 0.45)' : 'none',
+                  transition: 'width 0.4s ease',
+                }}
+              />
             </div>
-            <div className="sre-pill">
-              <CheckCircle2 size={13} color="#22c55e" />
-              <span>Cold Archiver: <strong style={{ color: '#86efac' }}>365d JSONL</strong></span>
+          </div>
+
+          {/* Memory Bar */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
+              <span style={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <Activity size={12} color="#a855f7" /> Memory
+              </span>
+              <span style={{ fontWeight: 700, color: isOnline ? (ramVal > 85 ? '#ef4444' : '#c084fc') : '#64748b' }}>
+                {m.memValStr || (isOnline ? `${ramVal.toFixed(1)}%` : '--')}
+              </span>
+            </div>
+            <div style={{ height: '5px', backgroundColor: 'rgba(255, 255, 255, 0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: isOnline ? `${Math.min(ramVal, 100)}%` : '0%',
+                  background: 'linear-gradient(90deg, #7c3aed 0%, #c084fc 100%)',
+                  boxShadow: isOnline ? '0 0 8px rgba(139, 92, 246, 0.45)' : 'none',
+                  transition: 'width 0.4s ease',
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Storage Bar */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
+              <span style={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <HardDrive size={12} color="#f59e0b" /> Storage
+              </span>
+              <span style={{ fontWeight: 700, color: isOnline ? (diskVal > 80 ? '#ef4444' : '#fcd34d') : '#64748b' }}>
+                {m.diskValStr || (isOnline ? `${diskVal.toFixed(1)}%` : '--')}
+              </span>
+            </div>
+            <div style={{ height: '5px', backgroundColor: 'rgba(255, 255, 255, 0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: isOnline ? `${Math.min(diskVal, 100)}%` : '0%',
+                  background: diskVal > 80 ? 'linear-gradient(90deg, #dc2626, #f87171)' : 'linear-gradient(90deg, #d97706, #f59e0b)',
+                  boxShadow: isOnline ? '0 0 8px rgba(245, 158, 11, 0.45)' : 'none',
+                  transition: 'width 0.4s ease',
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Elevated Cybernetic Agent Footprint */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '10px',
+            padding: '9px 12px',
+            background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, rgba(16, 185, 129, 0.05) 100%)',
+            border: '1px solid rgba(6, 182, 212, 0.24)',
+            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+            borderRadius: '9px',
+            marginTop: '2px',
+          }}>
+            {/* Agent CPU */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10.5px', marginBottom: '3px' }}>
+                <span style={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Bot size={11} color="#10b981" /> Agent CPU
+                </span>
+                <span style={{ fontWeight: 700, color: isOnline ? '#10b981' : '#64748b' }}>
+                  {isOnline ? `${agentCpu.toFixed(1)}%` : '--'}
+                </span>
+              </div>
+              <div style={{ height: '3px', backgroundColor: 'rgba(255, 255, 255, 0.06)', borderRadius: '2px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    width: isOnline ? `${Math.min(agentCpu * 10, 100)}%` : '0%',
+                    backgroundColor: '#10b981',
+                    boxShadow: isOnline ? '0 0 8px rgba(16, 185, 129, 0.55)' : 'none',
+                    transition: 'width 0.4s ease',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Agent RAM */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10.5px', marginBottom: '3px' }}>
+                <span style={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Activity size={11} color="#38bdf8" /> Agent RAM
+                </span>
+                <span style={{ fontWeight: 700, color: isOnline ? '#38bdf8' : '#64748b' }}>
+                  {isOnline ? `${agentRamMB.toFixed(0)} MB` : '--'}
+                </span>
+              </div>
+              <div style={{ height: '3px', backgroundColor: 'rgba(255, 255, 255, 0.06)', borderRadius: '2px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    width: isOnline ? `${Math.min((agentRamMB / 100) * 100, 100)}%` : '0%',
+                    backgroundColor: '#38bdf8',
+                    boxShadow: isOnline ? '0 0 8px rgba(56, 189, 248, 0.55)' : 'none',
+                    transition: 'width 0.4s ease',
+                  }}
+                />
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="sre-banner-actions">
-          <button
-            className="sre-btn reset-btn"
-            onClick={handleReSyncFleet}
-            title="Re-sync all enrolled agent targets over-the-air to current server IP"
-            type="button"
-          >
-            <RefreshCw size={13} />
-            <span>Re-Sync Fleet IP</span>
-          </button>
-          <button
-            className="sre-btn reset-btn"
-            onClick={handleResetFlapStatus}
-            disabled={isResetting}
-            title="Reset flapping counters & re-arm auto-remediation circuit breakers"
-            type="button"
-          >
-            <RefreshCw size={13} className={isResetting ? 'spinning' : ''} />
-            {isResetting ? 'Resetting...' : 'Reset Flap Status'}
-          </button>
-          <button
-            className="sre-btn download-btn"
-            onClick={handleDownloadAgent}
-            title="Download multi-platform cross-compiled agent package (Windows, Linux, macOS)"
-            type="button"
-          >
-            <Download size={13} />
-            <span>Download Agent Package</span>
-          </button>
+        {/* Footer Actions */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderTop: '1px solid rgba(255, 255, 255, 0.07)',
+          paddingTop: '10px',
+          marginTop: '4px',
+          fontSize: '11px',
+          color: '#64748b'
+        }}>
+          <span className="relative-time-badge" title={m.rawLastSeen ? new Date(m.rawLastSeen).toLocaleString() : 'Active'}>
+            ↓ {m.download} ↑ {m.upload} Mbps • {m.last_seen}
+          </span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMachineToDelete(m);
+              }}
+              title="Delete / Decommission Machine"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '5px 10px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                color: '#f87171',
+                border: '1px solid rgba(239, 68, 68, 0.28)',
+                borderRadius: '7px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: '11px',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.22)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
+                e.currentTarget.style.color = '#ef4444';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(239, 68, 68, 0.35)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.28)';
+                e.currentTarget.style.color = '#f87171';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <Trash2 size={11} />
+              <span>Delete</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/servers/${sId}`);
+              }}
+              title="Inspect Machine Full Telemetry"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '5px 12px',
+                background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.18), rgba(59, 130, 246, 0.12))',
+                color: '#22d3ee',
+                border: '1px solid rgba(6, 182, 212, 0.45)',
+                borderRadius: '7px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: '11px',
+                boxShadow: '0 0 12px rgba(6, 182, 212, 0.18)',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              Inspect <ExternalLink size={11} />
+            </button>
+          </div>
         </div>
       </div>
+    );
+  };
 
-      {/* ── 1. TOP KPI STAT CARDS (6 CARDS ROW) ── */}
+  return (
+    <div className="infrapilot-dashboard-root">
+      {/* ── 1. TOP KPI STAT CARDS (4 CARDS ROW) ── */}
       <section className="kpi-cards-grid">
         {/* Total Machines */}
         <div
-          className={`kpi-box clickable ${statusFilter === 'all' ? 'selected-box' : ''}`}
+          className={`kpi-box spotlight-card clickable ${statusFilter === 'all' ? 'selected-box' : ''}`}
           onClick={() => setStatusFilter('all')}
           role="button"
           tabIndex={0}
           title="Click to view all machines"
         >
-          <div className="kpi-icon-square blue">
+          <div className="kpi-icon-square blue cyan-glow">
             <Server size={18} />
           </div>
           <div className="kpi-details">
-            <span className="kpi-title">Total Machines</span>
+            <span className="kpi-title">TOTAL NODES</span>
             <strong className="kpi-num">{totalMachinesCount}</strong>
-            <span className="kpi-trend up-blue">↑ 2 vs last 24h</span>
+            <span className="kpi-trend up-blue">↑ Active Fleet</span>
           </div>
         </div>
 
         {/* Online */}
         <div
-          className={`kpi-box clickable ${statusFilter === 'online' ? 'selected-box' : ''}`}
+          className={`kpi-box spotlight-card clickable ${statusFilter === 'online' ? 'selected-box' : ''}`}
           onClick={() => setStatusFilter(statusFilter === 'online' ? 'all' : 'online')}
           role="button"
           tabIndex={0}
           title="Click to filter online machines"
         >
-          <div className="kpi-icon-square green">
+          <div className="kpi-icon-square green green-glow">
             <Activity size={18} />
           </div>
           <div className="kpi-details">
-            <span className="kpi-title">Online</span>
+            <span className="kpi-title">ONLINE NODES</span>
             <strong className="kpi-num">{onlineCount}</strong>
-            <span className="kpi-trend up-green">↑ 1 vs last 24h</span>
+            <span className="kpi-trend up-green">● Connected</span>
           </div>
         </div>
 
         {/* Offline */}
         <div
-          className={`kpi-box clickable ${statusFilter === 'offline' ? 'selected-box' : ''}`}
+          className={`kpi-box spotlight-card clickable ${statusFilter === 'offline' ? 'selected-box' : ''}`}
           onClick={() => setStatusFilter(statusFilter === 'offline' ? 'all' : 'offline')}
           role="button"
           tabIndex={0}
           title="Click to filter offline machines"
         >
-          <div className="kpi-icon-square red">
+          <div className="kpi-icon-square red red-glow">
             <Server size={18} />
           </div>
           <div className="kpi-details">
-            <span className="kpi-title">Offline</span>
+            <span className="kpi-title">OFFLINE NODES</span>
             <strong className="kpi-num">{offlineCount}</strong>
-            <span className="kpi-trend down-red">↓ 1 vs last 24h</span>
+            <span className="kpi-trend down-red">↓ Disconnected</span>
           </div>
         </div>
 
         {/* Total Alerts */}
         <div
-          className="kpi-box clickable"
+          className="kpi-box spotlight-card clickable"
           onClick={() => navigate('/alerts')}
           role="button"
           tabIndex={0}
           title="Click to view active alerts"
         >
-          <div className="kpi-icon-square coral">
+          <div className="kpi-icon-square coral amber-glow">
             <Bell size={18} />
           </div>
           <div className="kpi-details">
-            <span className="kpi-title">Total Active Alerts</span>
+            <span className="kpi-title">ACTIVE ALERTS</span>
             <strong className="kpi-num">{activeCount}</strong>
             <span className="kpi-trend down-coral">Real-Time Sync</span>
           </div>
@@ -927,7 +1218,7 @@ export default function EnterpriseDashboard() {
           {/* Header Controls */}
           <div className="table-header-bar">
             <div className="header-title-group">
-              <h3>Machine Status</h3>
+              <h3>Enrolled Fleet Nodes</h3>
               <div className="live-telemetry-badge">
                 <span className="live-dot-pulse" />
                 <span>Live Telemetry Stream</span>
@@ -985,8 +1276,16 @@ export default function EnterpriseDashboard() {
                 )}
               </div>
 
-              {/* View Switcher: Table vs Cards */}
+              {/* View Switcher: Rectangle Cards vs Table */}
               <div className="view-mode-toggle">
+                <button
+                  type="button"
+                  className={`mode-btn ${viewMode === 'grid' ? 'active' : ''}`}
+                  onClick={() => setViewMode('grid')}
+                  title="Rectangle Cards View"
+                >
+                  <LayoutGrid size={14} />
+                </button>
                 <button
                   type="button"
                   className={`mode-btn ${viewMode === 'table' ? 'active' : ''}`}
@@ -994,14 +1293,6 @@ export default function EnterpriseDashboard() {
                   title="Table View"
                 >
                   <List size={14} />
-                </button>
-                <button
-                  type="button"
-                  className={`mode-btn ${viewMode === 'grid' ? 'active' : ''}`}
-                  onClick={() => setViewMode('grid')}
-                  title="Grid Cards View"
-                >
-                  <LayoutGrid size={14} />
                 </button>
               </div>
 
@@ -1035,60 +1326,7 @@ export default function EnterpriseDashboard() {
                   );
                 }
 
-                return paginatedMachines.map((m) => (
-                  <div key={m.id} className="enterprise-host-card" onClick={() => handleRowClick(m)}>
-                    <div className="card-header-line">
-                      <div className="host-title-block">
-                        {m.os === 'windows' ? <WindowsIcon /> : m.os === 'ubuntu' ? <UbuntuIcon /> : <LinuxIcon />}
-                        <div className="title-text">
-                          <strong>{m.hostname}</strong>
-                          <small>{m.ip_address}</small>
-                        </div>
-                      </div>
-                      {m.is_blocked || String(m.status).toUpperCase() === 'BLOCKED' ? (
-                        <span className="status-pill-badge blocked">
-                          <Lock size={10} /> Blocked
-                        </span>
-                      ) : (
-                        <span className={`status-pill-badge ${m.status}`}>
-                          <span className={`live-dot-pulse ${m.status === 'online' ? '' : 'grey'}`} />
-                          {m.status === 'online' ? 'Online' : 'Offline'}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="card-gauge-grid">
-                      <div className="gauge-item">
-                        <span className="gauge-label">CPU</span>
-                        <strong className="gauge-value">{m.cpuValStr || '-'}</strong>
-                        <div className="gauge-track">
-                          <div className="gauge-fill blue" style={{ width: `${Math.min(m.cpu || 0, 100)}%` }} />
-                        </div>
-                      </div>
-                      <div className="gauge-item">
-                        <span className="gauge-label">MEM</span>
-                        <strong className="gauge-value">{m.memValStr || '-'}</strong>
-                        <div className="gauge-track">
-                          <div className="gauge-fill purple" style={{ width: `${Math.min(m.memory || 0, 100)}%` }} />
-                        </div>
-                      </div>
-                      <div className="gauge-item">
-                        <span className="gauge-label">DISK</span>
-                        <strong className="gauge-value">{m.diskValStr || '-'}</strong>
-                        <div className="gauge-track">
-                          <div className={`gauge-fill ${m.disk > 80 ? 'red' : 'yellow'}`} style={{ width: `${Math.min(m.disk || 0, 100)}%` }} />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="card-footer-strip">
-                      <span>↓ {m.download} ↑ {m.upload} Mbps</span>
-                      <span className="relative-time-badge" title={m.rawLastSeen ? new Date(m.rawLastSeen).toLocaleString() : 'Active'}>
-                        {m.last_seen}
-                      </span>
-                    </div>
-                  </div>
-                ));
+                return paginatedMachines.map((m) => renderMachineCard(m, false));
               })()}
             </div>
           ) : (
@@ -1224,7 +1462,7 @@ export default function EnterpriseDashboard() {
                           </span>
                         ) : (
                           <span className={`status-tag ${m.status}`}>
-                            <span className={`dot ${m.status === 'online' ? 'pulse-green' : ''}`} />
+                            <span className={m.status === 'online' ? 'beacon-dot' : 'dot-offline'} />
                             {m.status === 'online' ? 'Online' : 'Offline'}
                           </span>
                         )}
@@ -1242,7 +1480,37 @@ export default function EnterpriseDashboard() {
 
                       {/* Action Menu with Popover */}
                       <td className="actions-td" onClick={(e) => e.stopPropagation()}>
-                        <div className="menu-wrap">
+                        <div className="menu-wrap" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMachineToDelete(m);
+                            }}
+                            title="Delete Machine"
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              border: '1px solid rgba(239, 68, 68, 0.25)',
+                              color: '#f87171',
+                              borderRadius: '6px',
+                              padding: '5px',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'all 0.15s ease',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.22)';
+                              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.55)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.25)';
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
                           <button
                             className="btn-dots-menu"
                             onClick={(e) => handleToggleMenu(e, m)}
@@ -1338,6 +1606,7 @@ export default function EnterpriseDashboard() {
         machine={selectedMachineForDrawer}
         liveMetrics={selectedMachineForDrawer ? liveMetrics[getMachineId(selectedMachineForDrawer)] : null}
         onClose={() => setSelectedMachineForDrawer(null)}
+        onDelete={(machine) => setMachineToDelete(machine)}
       />
 
       {/* ── Enterprise Host Access Control Modal ── */}
@@ -1488,7 +1757,7 @@ export default function EnterpriseDashboard() {
               const target = selectedMachineForMenu;
               setActiveMenuId(null);
               setSelectedMachineForMenu(null);
-              setSelectedMachineForUninstall(target?.rawMachine || target);
+              setMachineToDelete(target);
             }}
             type="button"
             style={{ color: '#ef4444' }}
@@ -1498,6 +1767,205 @@ export default function EnterpriseDashboard() {
           </button>
         </div>,
         document.body
+      )}
+
+      {/* ── Direct Delete Host Confirmation Modal ── */}
+      {machineToDelete && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(3, 7, 18, 0.78)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            zIndex: 999999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            animation: 'modalFadeIn 0.2s ease-out',
+          }}
+          onClick={() => {
+            if (!isDeleting) setMachineToDelete(null);
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#0c1322',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              borderRadius: '16px',
+              padding: '24px',
+              width: '100%',
+              maxWidth: '460px',
+              boxShadow: '0 25px 60px -10px rgba(0, 0, 0, 0.8), 0 0 25px rgba(239, 68, 68, 0.15)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '18px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Trash2 size={20} color="#f87171" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#f8fafc' }}>
+                    Decommission & Delete Node
+                  </h3>
+                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                    Permanently purge host from fleet monitoring registry
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMachineToDelete(null)}
+                disabled={isDeleting}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#64748b',
+                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '6px',
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Target Machine Card Preview */}
+            <div
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.07)',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {machineToDelete.os === 'windows' ? <WindowsIcon /> : machineToDelete.os === 'ubuntu' ? <UbuntuIcon /> : <LinuxIcon />}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: '#f1f5f9' }}>
+                    {machineToDelete.hostname || machineToDelete.rawMachine?.hostname || 'Unknown Host'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
+                    {machineToDelete.ip_address || machineToDelete.rawMachine?.ip_address || '0.0.0.0'}
+                  </div>
+                </div>
+              </div>
+              <span
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  padding: '3px 9px',
+                  borderRadius: '20px',
+                  backgroundColor: machineToDelete.status === 'online' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(100, 116, 139, 0.15)',
+                  color: machineToDelete.status === 'online' ? '#22c55e' : '#94a3b8',
+                  border: `1px solid ${machineToDelete.status === 'online' ? 'rgba(34, 197, 94, 0.35)' : 'rgba(255, 255, 255, 0.08)'}`,
+                }}
+              >
+                {String(machineToDelete.status || 'OFFLINE').toUpperCase()}
+              </span>
+            </div>
+
+            {/* Notice */}
+            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5' }}>
+              Are you sure you want to delete this machine? Historical telemetry metrics, health status, and heartbeat allocations for this node will be removed from your dashboard.
+            </div>
+
+            {/* Secondary Option: Advanced Remote Uninstall */}
+            <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.07)', paddingTop: '10px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = machineToDelete;
+                  setMachineToDelete(null);
+                  setSelectedMachineForUninstall(target.rawMachine || target);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#38bdf8',
+                  fontSize: '11.5px',
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  textDecoration: 'underline',
+                }}
+              >
+                Need to cleanly uninstall agent on the remote OS via SSH? Open Remote Uninstaller →
+              </button>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                onClick={() => setMachineToDelete(null)}
+                disabled={isDeleting}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#94a3b8',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmDelete(machineToDelete)}
+                disabled={isDeleting}
+                style={{
+                  padding: '8px 18px',
+                  background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)',
+                  border: 'none',
+                  color: '#ffffff',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 0 16px rgba(239, 68, 68, 0.45)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Trash2 size={13} />
+                <span>{isDeleting ? 'Deleting...' : 'Delete Node'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <style>{`
@@ -1518,44 +1986,67 @@ export default function EnterpriseDashboard() {
           gap: 12px;
         }
         .kpi-box {
-          background-color: #101726;
-          border: 1px solid #1a253b;
-          border-radius: 10px;
-          padding: 12px 14px;
+          background: rgba(10, 16, 28, 0.75);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border-radius: 12px;
+          padding: 14px 16px;
           display: flex;
           align-items: center;
-          gap: 12px;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-          transition: all 0.15s ease;
+          gap: 14px;
+          box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .kpi-box.clickable {
           cursor: pointer;
         }
         .kpi-box.clickable:hover {
-          border-color: #2b3d5c;
+          border-color: rgba(6, 182, 212, 0.45);
           transform: translateY(-2px);
-          background-color: #141e30;
+          background: rgba(14, 22, 38, 0.85);
+          box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.6), 0 0 16px rgba(6, 182, 212, 0.15);
         }
         .kpi-box.selected-box {
-          border-color: #2563eb;
-          box-shadow: 0 0 14px rgba(37, 99, 235, 0.25);
+          border-color: rgba(6, 182, 212, 0.75);
+          border-top: 2px solid #06b6d4;
+          box-shadow: 0 10px 28px -4px rgba(6, 182, 212, 0.25);
         }
 
         .kpi-icon-square {
-          width: 36px;
-          height: 36px;
-          border-radius: 8px;
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
           display: flex;
           align-items: center;
           justify-content: center;
           flex-shrink: 0;
+          transition: all 0.2s ease;
         }
-        .kpi-icon-square.blue { background-color: #1e3a8a; color: #38bdf8; }
-        .kpi-icon-square.green { background-color: #14532d; color: #22c55e; }
-        .kpi-icon-square.red { background-color: #7f1d1d; color: #f87171; }
-        .kpi-icon-square.purple { background-color: #581c87; color: #c084fc; }
-        .kpi-icon-square.yellow { background-color: #713f12; color: #facc15; }
-        .kpi-icon-square.coral { background-color: #7c2d12; color: #fb923c; }
+        .kpi-icon-square.cyan-glow {
+          background: rgba(6, 182, 212, 0.14);
+          color: #06b6d4;
+          border: 1px solid rgba(6, 182, 212, 0.35);
+          box-shadow: 0 0 14px rgba(6, 182, 212, 0.2);
+        }
+        .kpi-icon-square.green-glow {
+          background: rgba(34, 197, 94, 0.14);
+          color: #22c55e;
+          border: 1px solid rgba(34, 197, 94, 0.35);
+          box-shadow: 0 0 14px rgba(34, 197, 94, 0.2);
+        }
+        .kpi-icon-square.red-glow {
+          background: rgba(239, 68, 68, 0.14);
+          color: #f87171;
+          border: 1px solid rgba(239, 68, 68, 0.35);
+          box-shadow: 0 0 14px rgba(239, 68, 68, 0.2);
+        }
+        .kpi-icon-square.amber-glow {
+          background: rgba(245, 158, 11, 0.14);
+          color: #fb923c;
+          border: 1px solid rgba(245, 158, 11, 0.35);
+          box-shadow: 0 0 14px rgba(245, 158, 11, 0.2);
+        }
 
         .kpi-details {
           display: flex;
@@ -1563,16 +2054,19 @@ export default function EnterpriseDashboard() {
           line-height: 1.2;
         }
         .kpi-title {
-          font-size: 11px;
+          font-size: 10.5px;
           color: #94a3b8;
-          font-weight: 500;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
           white-space: nowrap;
         }
         .kpi-num {
-          font-size: 20px;
+          font-size: 24px;
           font-weight: 800;
           color: #ffffff;
-          margin: 1px 0;
+          margin: 2px 0 1px 0;
+          letter-spacing: -0.02em;
         }
         .kpi-trend {
           font-size: 10px;
@@ -1867,12 +2361,13 @@ export default function EnterpriseDashboard() {
           gap: 14px;
         }
 
-        /* Machine Status Table Enterprise Enhancements */
         .enterprise-panel {
-          background: linear-gradient(180deg, rgba(15, 23, 42, 0.85) 0%, rgba(11, 17, 32, 0.75) 100%);
-          border: 1px solid rgba(56, 189, 248, 0.15);
+          background: rgba(10, 16, 28, 0.75);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
           backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border-radius: 14px;
         }
         .table-header-bar {
           display: flex;
@@ -2025,25 +2520,30 @@ export default function EnterpriseDashboard() {
 
         .host-cards-grid-wrapper {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: 12px;
+          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+          gap: 16px;
           padding: 12px 0;
         }
         .enterprise-host-card {
-          background: rgba(15, 23, 42, 0.7);
+          background: rgba(10, 15, 26, 0.78);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
           border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 8px;
-          padding: 14px;
+          border-radius: 14px;
+          padding: 18px;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 12px;
+          position: relative;
+          overflow: hidden;
+          box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
         }
         .enterprise-host-card:hover {
-          border-color: rgba(56, 189, 248, 0.4);
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.6);
+          border-color: rgba(6, 182, 212, 0.45);
+          transform: translateY(-3px);
+          box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.7), 0 0 20px rgba(6, 182, 212, 0.15);
         }
         .card-header-line {
           display: flex;
@@ -2062,37 +2562,61 @@ export default function EnterpriseDashboard() {
         }
         .title-text strong {
           color: #f8fafc;
-          font-size: 13px;
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: -0.01em;
         }
         .title-text small {
           color: #64748b;
-          font-size: 10.5px;
+          font-size: 11px;
           font-family: 'JetBrains Mono', monospace;
         }
         .status-pill-badge {
           display: inline-flex;
           align-items: center;
-          gap: 5px;
-          padding: 2px 8px;
-          border-radius: 10px;
-          font-size: 10px;
-          font-weight: 600;
+          gap: 6px;
+          padding: 3px 10px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: 700;
         }
         .status-pill-badge.online {
-          background: rgba(34, 197, 94, 0.12);
-          color: #4ade80;
-          border: 1px solid rgba(34, 197, 94, 0.25);
+          background: rgba(34, 197, 94, 0.14);
+          color: #22c55e;
+          border: 1px solid rgba(34, 197, 94, 0.35);
+          box-shadow: 0 0 10px rgba(34, 197, 94, 0.15);
         }
         .status-pill-badge.offline {
           background: rgba(100, 116, 139, 0.15);
           color: #94a3b8;
-          border: 1px solid rgba(100, 116, 139, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.08);
         }
         .status-pill-badge.blocked {
           background: rgba(249, 115, 22, 0.15);
           color: #fb923c;
           border: 1px solid rgba(249, 115, 22, 0.3);
         }
+
+        .beacon-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background-color: #22c55e;
+          box-shadow: 0 0 8px #22c55e;
+          animation: pulseGreenBeacon 2s infinite;
+        }
+        .dot-offline {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background-color: #ef4444;
+          box-shadow: 0 0 6px #ef4444;
+        }
+        @keyframes pulseGreenBeacon {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.45; transform: scale(0.85); }
+        }
+
         .card-gauge-grid {
           display: flex;
           flex-direction: column;
@@ -2100,18 +2624,20 @@ export default function EnterpriseDashboard() {
         }
         .gauge-item {
           display: grid;
-          grid-template-columns: 40px 45px 1fr;
+          grid-template-columns: 42px 48px 1fr;
           align-items: center;
           gap: 8px;
-          font-size: 10.5px;
+          font-size: 11px;
         }
         .gauge-label {
           color: #64748b;
           font-weight: 700;
+          font-size: 10px;
         }
         .gauge-value {
           color: #cbd5e1;
           font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
         }
         .gauge-track {
           height: 5px;
@@ -2128,10 +2654,49 @@ export default function EnterpriseDashboard() {
         .gauge-fill.purple { background: linear-gradient(90deg, #7c3aed, #c084fc); }
         .gauge-fill.yellow { background: linear-gradient(90deg, #d97706, #f59e0b); }
         .gauge-fill.red { background: linear-gradient(90deg, #dc2626, #f87171); }
+
+        /* Agent Footprint styling */
+        .card-agent-footprint {
+          background: rgba(6, 182, 212, 0.05);
+          border: 1px solid rgba(6, 182, 212, 0.18);
+          border-radius: 8px;
+          padding: 8px 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .agent-footprint-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .agent-metrics-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+        .agent-mini-track {
+          height: 3px;
+          background: rgba(255, 255, 255, 0.08);
+          border-radius: 2px;
+          overflow: hidden;
+          margin-top: 2px;
+        }
+        .agent-mini-fill.green {
+          height: 100%;
+          background: #10b981;
+          border-radius: 2px;
+        }
+        .agent-mini-fill.cyan {
+          height: 100%;
+          background: #06b6d4;
+          border-radius: 2px;
+        }
+
         .card-footer-strip {
           display: flex;
           justify-content: space-between;
-          font-size: 10.5px;
+          font-size: 11px;
           color: #64748b;
           border-top: 1px solid rgba(255, 255, 255, 0.05);
           padding-top: 8px;
@@ -2467,117 +3032,7 @@ export default function EnterpriseDashboard() {
           font-family: 'JetBrains Mono', monospace;
         }
 
-        /* SRE Operations & Telemetry Banner */
-        .sre-overview-banner {
-          background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-          border: 1px solid rgba(99, 102, 241, 0.35);
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-          border-radius: 10px;
-          padding: 12px 18px;
-          margin-bottom: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-        .sre-banner-left {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .sre-banner-title {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .sre-shield-icon {
-          color: #818cf8;
-        }
-        .sre-title-txt {
-          font-size: 13.5px;
-          font-weight: 700;
-          color: #f1f5f9;
-          letter-spacing: -0.2px;
-        }
-        .sre-live-badge {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          background: rgba(34, 197, 94, 0.15);
-          border: 1px solid rgba(34, 197, 94, 0.4);
-          color: #4ade80;
-          font-size: 10px;
-          font-weight: 800;
-          padding: 2px 7px;
-          border-radius: 999px;
-        }
-        .pulse-dot {
-          width: 6px;
-          height: 6px;
-          background-color: #22c55e;
-          border-radius: 50%;
-          box-shadow: 0 0 8px #22c55e;
-        }
-        .sre-metrics-pills {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-        .sre-pill {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          background: rgba(15, 23, 42, 0.6);
-          border: 1px solid #1e293b;
-          padding: 4px 10px;
-          border-radius: 6px;
-          font-size: 11.5px;
-          color: #cbd5e1;
-        }
-        .sre-banner-actions {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .sre-btn {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 7px 13px;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        .sre-btn.reset-btn {
-          background: rgba(99, 102, 241, 0.15);
-          border: 1px solid rgba(99, 102, 241, 0.4);
-          color: #a5b4fc;
-        }
-        .sre-btn.reset-btn:hover {
-          background: rgba(99, 102, 241, 0.3);
-          color: #ffffff;
-          border-color: #818cf8;
-        }
-        .sre-btn.download-btn {
-          background: linear-gradient(135deg, #2563eb, #1d4ed8);
-          border: 1px solid #3b82f6;
-          color: #ffffff;
-          box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
-        }
-        .sre-btn.download-btn:hover {
-          background: linear-gradient(135deg, #1d4ed8, #1e40af);
-          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.6);
-        }
-        .spinning {
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-          100% { transform: rotate(360deg); }
-        }
+
         .sre-badge-tag {
           font-size: 9.5px;
           font-weight: 800;

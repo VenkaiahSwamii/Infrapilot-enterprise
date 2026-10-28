@@ -53,10 +53,12 @@ type DiskMonitor struct {
 
 	ApprovedBy string
 
-	totalCleanups   int
-	lastFreedMB     float64
-	lastReason      string
-	lastCleanupTime time.Time
+	totalCleanups       int
+	lastFreedMB         float64
+	lastReason          string
+	lastCleanupTime     time.Time
+	lastNotifyEmailTime time.Time
+	notifyCooldown      time.Duration
 }
 
 type DiskReportStats struct {
@@ -79,8 +81,9 @@ func (d *DiskMonitor) GetStats() DiskReportStats {
 
 func NewDiskMonitor(cfg DiskConfig, sys DiskController) *DiskMonitor {
 	return &DiskMonitor{
-		config: cfg,
-		sys:    sys,
+		config:         cfg,
+		sys:            sys,
+		notifyCooldown: 5 * time.Minute,
 	}
 }
 
@@ -136,11 +139,33 @@ func (d *DiskMonitor) Check() (bool, error) {
 	}
 
 	if !needsRemediation {
+		d.lastNotifyEmailTime = time.Time{}
 		return false, nil
 	}
 
 	if d.config.OnTriggered != nil {
 		d.config.OnTriggered(reason)
+	}
+
+	// SRE Action Policy Check: Mode NOTIFY_EMAIL
+	// Dynamically synchronized from backend via heartbeat with hierarchical resolution:
+	// Specific MountPoint -> Component Alias -> disk -> storage
+	policyMode := GetDiskPolicyMode(d.config.TargetMountPoint)
+
+	if policyMode == "NOTIFY_EMAIL" {
+		if d.lastNotifyEmailTime.IsZero() || now.Sub(d.lastNotifyEmailTime) >= d.notifyCooldown {
+			d.lastNotifyEmailTime = now
+			d.sys.Audit(fmt.Sprintf("[SRE Policy Override: Mode NOTIFY_EMAIL] Disk auto-cleanup suppressed for %s. Reason: %s. Action: Operator notification required.", d.config.TargetMountPoint, reason))
+			d.sys.Escalate(fmt.Sprintf("Disk saturation breach (%s) in NOTIFY_EMAIL mode: Auto-cleanup suppressed. Operator notification required.", reason))
+			d.sys.SendRemoteEvent("DISK_EXHAUSTION", d.config.TargetMountPoint, "Auto-cleanup bypassed by SRE policy (Mode: NOTIFY_EMAIL)", false, "bypassed_notify_email", "PENDING_OPERATOR")
+		}
+		return false, nil
+	}
+
+	if d.config.InteractiveApproval && d.ApprovedBy == "" {
+		d.sys.Audit(fmt.Sprintf("Disk cleanup for %s paused waiting for operator approval (Reason: %s)", d.config.TargetMountPoint, reason))
+		d.sys.SendRemoteEvent("DISK_EXHAUSTION", d.config.TargetMountPoint, "Waiting for interactive approval", false, "waiting_approval", "WAITING_APPROVAL")
+		return false, nil
 	}
 
 	d.sys.Audit(fmt.Sprintf("DISK EXHAUSTION DETECTED: %s", reason))
@@ -151,13 +176,13 @@ func (d *DiskMonitor) Check() (bool, error) {
 	filesToDelete, err := d.sys.FindAllowlistedFiles()
 	if err != nil {
 		d.sys.Escalate(fmt.Sprintf("Failed to list files for cleanup: %v", err))
-		d.sys.SendRemoteEvent("DISK_EXHAUSTION", "/", "Attempted cleanup", false, err.Error(), "FAILED")
+		d.sys.SendRemoteEvent("DISK_EXHAUSTION", d.config.TargetMountPoint, "Attempted cleanup", false, err.Error(), "FAILED")
 		return false, err
 	}
 
 	if len(filesToDelete) == 0 {
 		d.sys.Escalate("Disk is full but no allowlisted files found to delete!")
-		d.sys.SendRemoteEvent("DISK_EXHAUSTION", "/", "Attempted cleanup", false, "no safe files to clean", "FAILED")
+		d.sys.SendRemoteEvent("DISK_EXHAUSTION", d.config.TargetMountPoint, "Attempted cleanup", false, "no safe files to clean", "FAILED")
 		return false, errors.New("no safe files to clean")
 	}
 
@@ -257,16 +282,20 @@ func (d *DiskMonitor) Check() (bool, error) {
 
 		postUsedPercent, _, _, err := d.sys.GetDiskUsage(d.config.TargetMountPoint)
 		if err == nil {
-			if postUsedPercent <= 80.5 {
-				d.sys.Audit(fmt.Sprintf("Verification passed: disk usage is now %.1f%% (<= 80.5%%)", postUsedPercent))
-				d.sys.SendRemoteEvent("DISK_EXHAUSTION", "/", "Cleaned volatile files", true, "", "RESOLVED")
+			targetThreshold := d.config.ReactiveThreshold
+			if targetThreshold <= 0 {
+				targetThreshold = 80.5
+			}
+			if postUsedPercent <= targetThreshold {
+				d.sys.Audit(fmt.Sprintf("Verification passed: disk usage is now %.1f%% (<= %.1f%%)", postUsedPercent, targetThreshold))
+				d.sys.SendRemoteEvent("DISK_EXHAUSTION", d.config.TargetMountPoint, "Cleaned volatile files", true, "", "RESOLVED")
 			} else {
-				d.sys.Escalate(fmt.Sprintf("Verification failed: disk usage is still %.1f%% (> 80.5%%) after cleanup", postUsedPercent))
-				d.sys.SendRemoteEvent("DISK_EXHAUSTION", "/", "Cleaned volatile files", false, "Verification failed, usage >= 80%", "FAILED")
+				d.sys.Escalate(fmt.Sprintf("Verification failed: disk usage is still %.1f%% (> %.1f%%) after cleanup", postUsedPercent, targetThreshold))
+				d.sys.SendRemoteEvent("DISK_EXHAUSTION", d.config.TargetMountPoint, "Cleaned volatile files", false, fmt.Sprintf("Verification failed, usage >= %.1f%%", targetThreshold), "FAILED")
 			}
 		} else {
 			d.sys.Escalate(fmt.Sprintf("Failed to verify post-cleanup disk usage: %v", err))
-			d.sys.SendRemoteEvent("DISK_EXHAUSTION", "/", "Cleaned volatile files", false, err.Error(), "FAILED")
+			d.sys.SendRemoteEvent("DISK_EXHAUSTION", d.config.TargetMountPoint, "Cleaned volatile files", false, err.Error(), "FAILED")
 		}
 
 		if d.config.InteractiveApproval {

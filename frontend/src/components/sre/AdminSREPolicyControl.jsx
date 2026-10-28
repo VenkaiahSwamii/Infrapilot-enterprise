@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Zap, Mail, Check, Shield, Save, Loader2, CheckCircle2 } from 'lucide-react';
+import { Zap, Mail, Check, Shield, Save, Loader2, CheckCircle2, RotateCcw, Edit3 } from 'lucide-react';
 import { apiClient } from '../../api/client.js';
 import { useDashboardStore } from '../../store/dashboardStore.jsx';
 import { useRBAC } from '../../hooks/useRBAC.js';
+import { useNotificationSettings } from '../../store/notificationStore.jsx';
 
 const STORAGE_KEY_PREFIX = 'infrapilot_sre_policy_';
 
@@ -15,6 +16,7 @@ export default function AdminSREPolicyControl({
   onEmailAlert,
 }) {
   const { isOperator } = useRBAC();
+  const { defaultRecipient } = useNotificationSettings();
   let addToast = null;
   try {
     const store = useDashboardStore();
@@ -31,8 +33,8 @@ export default function AdminSREPolicyControl({
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         const parsed = JSON.parse(cached);
-        const email = (!parsed.recipient_email || parsed.recipient_email === 'admin@company.com' || parsed.recipient_email.trim() === '')
-          ? 'infrapilotadmin@gmail.com'
+        const email = (!parsed.recipient_email || parsed.recipient_email === 'infrapilotadmin@gmail.com' || parsed.recipient_email === 'admin@company.com' || parsed.recipient_email.trim() === '')
+          ? ''
           : parsed.recipient_email;
         return {
           ...parsed,
@@ -42,15 +44,19 @@ export default function AdminSREPolicyControl({
     } catch (_) {}
     return {
       mode: 'AUTO_REMEDIATE',
-      recipient_email: 'infrapilotadmin@gmail.com',
+      recipient_email: '',
       enabled: true,
     };
   };
 
   const [policy, setPolicy] = useState(getInitialState);
+  const [isCustomOverride, setIsCustomOverride] = useState(() => {
+    const init = getInitialState().recipient_email;
+    return !!(init && init.trim() !== '' && init !== 'infrapilotadmin@gmail.com' && init !== 'admin@company.com');
+  });
   const [emailInput, setEmailInput] = useState(() => {
-    const initial = getInitialState().recipient_email;
-    return (!initial || initial === 'admin@company.com') ? 'infrapilotadmin@gmail.com' : initial;
+    const init = getInitialState().recipient_email;
+    return (init && init !== 'infrapilotadmin@gmail.com' && init !== 'admin@company.com') ? init : '';
   });
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -75,8 +81,8 @@ export default function AdminSREPolicyControl({
           if (match && isMounted) {
             const loadedMode = match.mode || 'AUTO_REMEDIATE';
             const rawEmail = match.recipient_email;
-            const loadedEmail = (!rawEmail || rawEmail === 'admin@company.com' || rawEmail.trim() === '')
-              ? 'infrapilotadmin@gmail.com'
+            const loadedEmail = (!rawEmail || rawEmail === 'infrapilotadmin@gmail.com' || rawEmail === 'admin@company.com' || rawEmail.trim() === '')
+              ? ''
               : rawEmail;
             const updated = {
               id: match.id,
@@ -85,7 +91,12 @@ export default function AdminSREPolicyControl({
               enabled: match.enabled !== false,
             };
             setPolicy(updated);
-            setEmailInput(loadedEmail);
+            if (loadedEmail) {
+              setEmailInput(loadedEmail);
+              setIsCustomOverride(true);
+            } else {
+              setIsCustomOverride(false);
+            }
             try {
               localStorage.setItem(cacheKey, JSON.stringify(updated));
             } catch (_) {}
@@ -101,10 +112,11 @@ export default function AdminSREPolicyControl({
     };
   }, [category, component, cacheKey]);
 
-  const handleSave = async (updatedMode, updatedEmail, showNotification = true, triggerAction = true) => {
+  const handleSave = async (updatedMode, updatedEmail, forceOverride, showNotification = true, triggerAction = true) => {
     const modeToSave = updatedMode || policy.mode;
+    const overrideActive = forceOverride !== undefined ? forceOverride : isCustomOverride;
     const rawEmail = updatedEmail !== undefined ? updatedEmail : emailInput;
-    const emailToSave = (rawEmail || '').trim() || 'infrapilotadmin@gmail.com';
+    const emailToSave = overrideActive ? (rawEmail || '').trim() : '';
 
     setSaving(true);
     setSavedSuccess(false);
@@ -116,7 +128,12 @@ export default function AdminSREPolicyControl({
       recipient_email: emailToSave,
     };
     setPolicy(updatedPolicy);
-    setEmailInput(emailToSave);
+    if (overrideActive) {
+      setEmailInput(emailToSave);
+      setIsCustomOverride(true);
+    } else {
+      setIsCustomOverride(false);
+    }
 
     try {
       localStorage.setItem(cacheKey, JSON.stringify(updatedPolicy));
@@ -151,11 +168,13 @@ export default function AdminSREPolicyControl({
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2500);
 
+      const targetDest = emailToSave || defaultRecipient || 'system alert email';
+
       if (showNotification && typeof addToast === 'function') {
         if (modeToSave === 'AUTO_REMEDIATE') {
           addToast('success', 'Auto-Remediation Active', `Edge agent will automatically self-heal ${component}.`);
         } else {
-          addToast('info', 'Email Alert Configured', `Notifications for ${component} will be dispatched to ${emailToSave}.`);
+          addToast('info', 'Email Alert Configured', `Notifications for ${component} will be dispatched to ${targetDest}.`);
         }
       }
 
@@ -172,6 +191,9 @@ export default function AdminSREPolicyControl({
 
   const isAuto = policy.mode === 'AUTO_REMEDIATE';
   const isEmail = policy.mode === 'NOTIFY_EMAIL';
+  const effectiveRecipient = (isCustomOverride && emailInput.trim())
+    ? emailInput.trim()
+    : (defaultRecipient || 'Configured Alert Email');
 
   if (compact) {
     return (
@@ -218,12 +240,7 @@ export default function AdminSREPolicyControl({
             disabled={!isOperator || saving}
             title={!isOperator ? 'Operator or Admin role required' : 'Set to Email Notification'}
             style={!isOperator ? { opacity: 0.55, cursor: 'not-allowed' } : {}}
-            onClick={() => {
-              handleSave('NOTIFY_EMAIL');
-              setTimeout(() => {
-                emailInputRef.current?.focus();
-              }, 100);
-            }}
+            onClick={() => handleSave('NOTIFY_EMAIL')}
           >
             <div className="btn-icon-box">
               <Mail size={13} className="btn-icon mail-icon" />
@@ -236,44 +253,76 @@ export default function AdminSREPolicyControl({
         {/* RECIPIENT EMAIL EXPANSION */}
         {isEmail && (
           <div className="compact-email-drawer">
-            <div className="drawer-input-row">
-              <div className="input-with-icon">
-                <Mail size={12} className="input-leading-icon" />
-                <input
-                  ref={emailInputRef}
-                  type="email"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleSave('NOTIFY_EMAIL', emailInput);
-                    }
+            {!isCustomOverride ? (
+              <div className="drawer-inherited-row">
+                <div className="inherited-email-info">
+                  <Mail size={12} className="input-leading-icon" />
+                  <span className="inherited-label">
+                    Routing: <strong className="inherited-address">{effectiveRecipient}</strong>
+                    <span className="inherited-tag">Default</span>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn-toggle-override"
+                  onClick={() => {
+                    setEmailInput(policy.recipient_email || defaultRecipient || '');
+                    setIsCustomOverride(true);
+                    setTimeout(() => emailInputRef.current?.focus(), 80);
                   }}
-                  placeholder="infrapilotadmin@gmail.com"
-                  className="compact-email-field"
-                />
+                  title="Override default recipient for this component"
+                >
+                  <Edit3 size={10} style={{ marginRight: '3px' }} /> Override
+                </button>
               </div>
-              <button
-                type="button"
-                className={`compact-email-save-btn ${savedSuccess ? 'success' : ''}`}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleSave('NOTIFY_EMAIL', emailInput)}
-                disabled={saving}
-              >
-                {saving ? (
-                  <Loader2 size={12} className="spin-icon" />
-                ) : savedSuccess ? (
-                  <>
-                    <Check size={12} /> <span className="btn-label-txt">Saved</span>
-                  </>
-                ) : (
-                  <>
-                    <Save size={12} /> <span className="btn-label-txt">Save</span>
-                  </>
-                )}
-              </button>
-            </div>
+            ) : (
+              <div className="drawer-input-row">
+                <div className="input-with-icon">
+                  <Mail size={12} className="input-leading-icon" />
+                  <input
+                    ref={emailInputRef}
+                    type="email"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSave('NOTIFY_EMAIL', emailInput, true);
+                      }
+                    }}
+                    placeholder={defaultRecipient || 'devops@company.com'}
+                    className="compact-email-field"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className={`compact-email-save-btn ${savedSuccess ? 'success' : ''}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleSave('NOTIFY_EMAIL', emailInput, true)}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <Loader2 size={12} className="spin-icon" />
+                  ) : savedSuccess ? (
+                    <>
+                      <Check size={12} /> <span className="btn-label-txt">Saved</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={12} /> <span className="btn-label-txt">Save</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="compact-email-reset-btn"
+                  onClick={() => handleSave('NOTIFY_EMAIL', '', false)}
+                  title="Revert to inherited default email"
+                >
+                  <RotateCcw size={11} />
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -346,45 +395,76 @@ export default function AdminSREPolicyControl({
 
       {isEmail && (
         <div className="email-config-block">
-          <label className="email-label">
-            <Mail size={13} className="text-cyan-400" /> Target SRE Notification Recipient
-          </label>
-          <div className="email-input-group">
-            <input
-              type="email"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSave('NOTIFY_EMAIL', emailInput);
-                }
-              }}
-              placeholder="infrapilotadmin@gmail.com"
-              className="policy-email-input"
-            />
-            <button
-              type="button"
-              className="btn-save-email"
-              disabled={saving}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => handleSave('NOTIFY_EMAIL', emailInput)}
-            >
-              {saving ? (
-                <>
-                  <Loader2 size={13} className="spin-icon" /> Saving...
-                </>
-              ) : savedSuccess ? (
-                <>
-                  <Check size={13} /> Saved!
-                </>
-              ) : (
-                <>
-                  <Save size={13} /> Save Email
-                </>
-              )}
-            </button>
+          <div className="email-header-flex">
+            <label className="email-label">
+              <Mail size={13} className="text-cyan-400" /> Target SRE Notification Recipient
+            </label>
+            <div className="override-toggle-wrap">
+              <span className="override-hint">
+                {isCustomOverride ? 'Custom override active' : 'Inheriting global alert email'}
+              </span>
+              <button
+                type="button"
+                className={`btn-override-switch ${isCustomOverride ? 'active' : ''}`}
+                onClick={() => {
+                  if (isCustomOverride) {
+                    handleSave('NOTIFY_EMAIL', '', false);
+                  } else {
+                    setEmailInput(policy.recipient_email || defaultRecipient || '');
+                    setIsCustomOverride(true);
+                  }
+                }}
+              >
+                {isCustomOverride ? 'Reset to Default' : 'Override Recipient'}
+              </button>
+            </div>
           </div>
+
+          {!isCustomOverride ? (
+            <div className="inherited-email-banner">
+              <span className="inherited-email-text">
+                Alert notifications for <code>{component}</code> route directly to global recipient:
+                <strong> {effectiveRecipient}</strong>
+              </span>
+            </div>
+          ) : (
+            <div className="email-input-group">
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSave('NOTIFY_EMAIL', emailInput, true);
+                  }
+                }}
+                placeholder={defaultRecipient || 'devops@company.com'}
+                className="policy-email-input"
+              />
+              <button
+                type="button"
+                className="btn-save-email"
+                disabled={saving}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleSave('NOTIFY_EMAIL', emailInput, true)}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 size={13} className="spin-icon" /> Saving...
+                  </>
+                ) : savedSuccess ? (
+                  <>
+                    <Check size={13} /> Saved!
+                  </>
+                ) : (
+                  <>
+                    <Save size={13} /> Save Email
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -568,6 +648,92 @@ const policyStyles = `
       opacity: 1;
       transform: translateY(0);
     }
+  }
+
+  .drawer-inherited-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    background: rgba(56, 189, 248, 0.07);
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    border-radius: 7px;
+    padding: 5px 8px;
+  }
+
+  .inherited-email-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: #94a3b8;
+  }
+
+  .inherited-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .inherited-address {
+    color: #38bdf8;
+    font-weight: 600;
+  }
+
+  .inherited-tag {
+    font-size: 8.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(56, 189, 248, 0.18);
+    color: #7dd3fc;
+    margin-left: 5px;
+  }
+
+  .btn-toggle-override {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 5px;
+    padding: 3px 6px;
+    color: #94a3b8;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .btn-toggle-override:hover {
+    color: #ffffff;
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.15);
+  }
+
+  .compact-email-reset-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #94a3b8;
+    border-radius: 7px;
+    padding: 6px 8px;
+    font-size: 10.5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .compact-email-reset-btn:hover {
+    color: #f8fafc;
+    border-color: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.09);
   }
 
   .drawer-input-row {
@@ -807,6 +973,13 @@ const policyStyles = `
     animation: fadeInSlide 0.2s ease;
   }
 
+  .email-header-flex {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
   .email-label {
     font-size: 11px;
     font-weight: 600;
@@ -814,7 +987,55 @@ const policyStyles = `
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 8px;
+    margin-bottom: 0;
+  }
+
+  .override-toggle-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .override-hint {
+    font-size: 10.5px;
+    color: #64748b;
+  }
+
+  .btn-override-switch {
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #94a3b8;
+    transition: all 0.15s ease;
+  }
+
+  .btn-override-switch:hover {
+    color: #ffffff;
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+  }
+
+  .btn-override-switch.active {
+    background: rgba(56, 189, 248, 0.18);
+    border-color: #38bdf8;
+    color: #38bdf8;
+  }
+
+  .inherited-email-banner {
+    background: #05080f;
+    border: 1px dashed rgba(56, 189, 248, 0.35);
+    border-radius: 7px;
+    padding: 9px 12px;
+    font-size: 11.5px;
+    color: #94a3b8;
+  }
+
+  .inherited-email-text strong {
+    color: #38bdf8;
   }
 
   .email-input-group {

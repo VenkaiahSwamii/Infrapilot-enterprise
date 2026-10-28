@@ -34,6 +34,9 @@ type SaveMetricInput struct {
 	CPUUsage            float64
 	MemoryPercent       float64
 	DiskPercent         float64
+	AgentCPUUsage       float64
+	AgentMemoryMB       float64
+	AgentMemoryUsage    float64
 	DiskTotal           uint64
 	DiskUsed            uint64
 	UploadMbps          float64
@@ -305,6 +308,8 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 		FreeMemory:     input.FreeMemory,
 		DiskTotal:      finalDiskTotal,
 		DiskUsed:       finalDiskUsed,
+		AgentCPUUsage:  input.AgentCPUUsage,
+		AgentMemoryMB:  input.AgentMemoryMB,
 	}
 
 	// Save metric
@@ -314,15 +319,19 @@ func (s *MetricService) SaveMetric(input SaveMetricInput) (*models.Metric, *mode
 
 	// Update machine information
 	updates := map[string]interface{}{
-		"hostname":   metric.Hostname,
-		"ip_address": metric.IPAddress,
-		"os":         metric.OS,
-		"status":      "ONLINE",
-		"online":      true,
-		"retry_count": 0,
-		"last_seen":   metric.CreatedAt,
-		"updated_at":  time.Now().UTC(),
+		"hostname":        metric.Hostname,
+		"ip_address":      metric.IPAddress,
+		"os":              metric.OS,
+		"status":          "ONLINE",
+		"online":          true,
+		"retry_count":     0,
+		"last_seen":       metric.CreatedAt,
+		"updated_at":      time.Now().UTC(),
+		"agent_cpu_usage": input.AgentCPUUsage,
+		"agent_memory_mb": input.AgentMemoryMB,
 	}
+	machine.AgentCPUUsage = input.AgentCPUUsage
+	machine.AgentMemoryMB = input.AgentMemoryMB
 	if input.Kernel != "" {
 		updates["kernel"] = input.Kernel
 		machine.Kernel = input.Kernel
@@ -481,20 +490,30 @@ func (s *MetricService) persistLinuxTelemetry(machine *models.Machine, input Sav
 	}); err != nil {
 		return err
 	}
-	if err := s.metricRepo.CreateLinuxStorage(models.LinuxStorage{
-		ID:              uuid.New(),
-		MachineID:       machine.ID,
-		SampledAt:       sampledAt,
-		FilesystemsJSON: filesystemsJSON,
-		DiskReadBps:     input.DiskReadBps,
-		DiskWriteBps:    input.DiskWriteBps,
-		DiskIOPS:        input.DiskIOPS,
-		SmartStatus:     firstNonEmpty(input.SmartStatus, "unknown"),
-		RAIDStatus:      firstNonEmpty(input.RAIDStatus, "unknown"),
-		LVMStatus:       firstNonEmpty(input.LVMStatus, "unknown"),
-		DiskTemperature: input.DiskTemperature,
-	}); err != nil {
-		return err
+	if len(input.Filesystems) > 0 {
+		var lastSample time.Time
+		_ = database.DB.Model(&models.LinuxStorage{}).
+			Where("machine_id = ?", machine.ID).
+			Order("sampled_at desc").
+			Limit(1).
+			Pluck("sampled_at", &lastSample).Error
+
+		// Only persist storage snapshots if at least 5 seconds have elapsed, preventing replay queue flapping
+		if lastSample.IsZero() || sampledAt.Sub(lastSample) >= 5*time.Second {
+			_ = s.metricRepo.CreateLinuxStorage(models.LinuxStorage{
+				ID:              uuid.New(),
+				MachineID:       machine.ID,
+				SampledAt:       sampledAt,
+				FilesystemsJSON: filesystemsJSON,
+				DiskReadBps:     input.DiskReadBps,
+				DiskWriteBps:    input.DiskWriteBps,
+				DiskIOPS:        input.DiskIOPS,
+				SmartStatus:     firstNonEmpty(input.SmartStatus, "unknown"),
+				RAIDStatus:      firstNonEmpty(input.RAIDStatus, "unknown"),
+				LVMStatus:       firstNonEmpty(input.LVMStatus, "unknown"),
+				DiskTemperature: input.DiskTemperature,
+			})
+		}
 	}
 
 	for _, process := range input.Processes {

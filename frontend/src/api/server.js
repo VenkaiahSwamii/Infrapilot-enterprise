@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './client.js';
+import { apiGet, apiPost, apiDelete } from './client.js';
 
 export function listServers() {
   return apiGet('/servers').then((payload) => {
@@ -58,4 +58,8 @@ export async function rotateServerKey(id) {
 
 export async function purgeOfflineServers() {
   return apiPost('/servers/purge-offline');
+}
+
+export async function deleteServer(id) {
+  return apiDelete(`/servers/${id}`).catch(() => apiDelete(`/machines/${id}`));
 }

@@ -6,11 +6,11 @@
 [server]
 http_port = 8080
 grpc_port = 50051
-backend_url = "http://192.168.1.13:8080"
+backend_url = "http://192.168.1.86:8080"
 connection_timeout = 10
 retry_attempts = 3
 retry_delay = 5
-allowed_origins = ["http://192.168.1.13:5173", "http://192.168.1.13:3000", "http://192.168.1.13:8080", "http://localhost:5173", "http://localhost:3000"]
+allowed_origins = ["http://192.168.1.86:5173", "http://192.168.1.86:5174", "http://192.168.1.86:3000", "http://192.168.1.86:8080", "http://192.168.1.24:5173", "http://192.168.1.24:3000", "http://192.168.1.24:8080", "http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
 
 [server.tls]
 enabled = true
@@ -52,8 +52,8 @@ export_aggregated_metrics = true
 
 # 2. Edge Agent (infrapilot-agent) Configuration
 [agent]
-server_address = "192.168.1.13:50051"
-backend_url = "http://192.168.1.13:8080"
+server_address = "192.168.1.86:50051"
+backend_url = "http://192.168.1.86:8080"
 machine_id = ""
 api_key = ""
 enrollment_token = ""
@@ -109,7 +109,10 @@ accept_list = [
 ]
 
 [agent.latency]
-target_gateway = "8.8.8.8"
+target_gateway = "192.168.1.1"
+default_gateway = "192.168.1.1"
+policy_mode = "NOTIFY_EMAIL"
+alert_threshold_ms = 200.0
 baseline_p95_ms = 40.0
 threshold_multiplier = 3.0
 alert_window_minutes = 5
@@ -118,6 +121,29 @@ accept_list = [
     "http.service",
     "postgresql.service"
 ]
+
+[network_monitoring]
+policy_mode = "NOTIFY_EMAIL"
+default_gateway = "192.168.1.1"
+alert_threshold_ms = 200.0
+
+[[network_monitoring.websites]]
+name = "Frontend Web Portal"
+url = "http://192.168.1.86:3000"
+port = 3000
+threshold_ms = 200.0
+
+[[network_monitoring.websites]]
+name = "Core API Gateway"
+url = "http://192.168.1.86:5000"
+port = 5000
+threshold_ms = 250.0
+
+[[network_monitoring.websites]]
+name = "InfraPilot Central Server"
+url = "http://192.168.1.86:8080/api/v1/healthz"
+port = 8080
+threshold_ms = 150.0
 
 [agent.logging]
 log_level = "info"

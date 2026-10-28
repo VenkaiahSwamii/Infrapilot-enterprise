@@ -150,7 +150,12 @@ func RunAPI() error {
 
 	// Robustly locate InfraPilot-Release, scripts, and installer directories
 	releaseCandidates := []string{
+		".",
 		"..",
+		"./downloads",
+		"../downloads",
+		"./dist",
+		"../dist",
 		"../agent",
 		"./agent",
 		"../agent/dist",
@@ -165,7 +170,6 @@ func RunAPI() error {
 		"./installer",
 		"../scripts",
 		"../installer",
-		".",
 	}
 	activeReleaseDir := "../InfraPilot-Release"
 	for _, cand := range releaseCandidates {
@@ -255,6 +259,14 @@ func RunAPI() error {
 		}
 		if relPath == "infrapilot-agent-windows-amd64.exe" || relPath == "infrapilot-agent.exe" || relPath == "agent.exe" {
 			agentCandidates := []string{
+				"./downloads/" + relPath,
+				"../downloads/" + relPath,
+				"./dist/" + relPath,
+				"../dist/" + relPath,
+				"./downloads/infrapilot-agent-windows-amd64.exe",
+				"../downloads/infrapilot-agent-windows-amd64.exe",
+				"./downloads/infrapilot-agent.exe",
+				"../downloads/infrapilot-agent.exe",
 				"../agent/dist/infrapilot-agent-windows-amd64.exe",
 				"./agent/dist/infrapilot-agent-windows-amd64.exe",
 				"../../agent/dist/infrapilot-agent-windows-amd64.exe",
@@ -391,6 +403,16 @@ spec:
 		}
 		if relPath == "infrapilot-agent-linux-amd64" || relPath == "infrapilot-agent-linux-arm64" || relPath == "infrapilot-agent" {
 			linuxCandidates := []string{
+				"./downloads/" + relPath,
+				"../downloads/" + relPath,
+				"./dist/" + relPath,
+				"../dist/" + relPath,
+				"./downloads/infrapilot-agent-linux-amd64",
+				"../downloads/infrapilot-agent-linux-amd64",
+				"./dist/infrapilot-agent-linux-amd64",
+				"../dist/infrapilot-agent-linux-amd64",
+				"./downloads/infrapilot-agent",
+				"../downloads/infrapilot-agent",
 				"../agent/dist/" + relPath,
 				"./agent/dist/" + relPath,
 				"../../agent/dist/" + relPath,
@@ -511,7 +533,7 @@ spec:
 func registerSubscribers() {
 	logger.Info("Registering event subscribers...")
 
-	EventBus.Subscribe("metric.received", subscribers.SaveMetric)
+	// subscribers.SaveMetric is omitted: telemetry is already persisted synchronously in metricService.SaveMetric
 	EventBus.Subscribe("metric.received", subscribers.SendWebSocket)
 	EventBus.Subscribe("metric.received", subscribers.CheckAlerts)
 	EventBus.Subscribe("metric.received", subscribers.RunAI)

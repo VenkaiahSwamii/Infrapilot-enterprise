@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   FileText,
   Download,
@@ -28,7 +28,7 @@ import {
   TrendingUp,
   RefreshCw
 } from 'lucide-react';
-import { apiPost } from '../../api/client.js';
+import { apiGet, apiPost, apiDelete, apiClient } from '../../api/client.js';
 import { useServerStore } from '../../store/serverStore.jsx';
 
 export default function Reports({ reports, onRefresh }) {
@@ -49,8 +49,31 @@ export default function Reports({ reports, onRefresh }) {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [msg, setMsg] = useState(null);
 
-  // Initial curated reports archive
-  const [localReports, setLocalReports] = useState([]);
+  // Curated reports archive synced with backend
+  const [localReports, setLocalReports] = useState(Array.isArray(reports) ? reports : []);
+
+  const fetchReports = async () => {
+    try {
+      const data = await apiGet('/reports');
+      if (Array.isArray(data)) {
+        setLocalReports(data);
+      }
+    } catch (err) {
+      console.warn('Failed to load reports archive:', err?.message || err);
+    }
+  };
+
+  useEffect(() => {
+    fetchReports();
+    const interval = setInterval(fetchReports, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (Array.isArray(reports) && reports.length > 0) {
+      setLocalReports(reports);
+    }
+  }, [reports]);
 
   // Scheduled recurring reports state
   const [schedules, setSchedules] = useState([]);
@@ -110,42 +133,27 @@ export default function Reports({ reports, onRefresh }) {
     const reportTitle = name.trim() || `${type.toUpperCase()} Report - ${new Date().toLocaleDateString()}`;
 
     try {
-      // Attempt backend endpoint if available
-      try {
-        await apiPost('/reports/generate', {
-          name: reportTitle,
-          type,
-          format,
-          timeRange,
-          scope
-        });
-      } catch (backendErr) {
-        console.warn('Backend reporting API note:', backendErr.message);
+      const res = await apiPost('/reports/generate', {
+        name: reportTitle,
+        type,
+        format,
+        scope: scope === 'all' ? 'Fleet-wide' : scope
+      });
+
+      const newReport = res?.data || res;
+      if (newReport && newReport.id) {
+        setLocalReports((prev) => [newReport, ...prev.filter((r) => r.id !== newReport.id)]);
       }
 
-      // Simulate instantaneous realistic file generation
-      setTimeout(() => {
-        const newRep = {
-          id: `rep-${Date.now().toString(36)}`,
-          name: reportTitle,
-          type,
-          format,
-          size: format === 'pdf' ? '2.1 MB' : format === 'xlsx' ? '920 KB' : '380 KB',
-          generated_by: 'Current Administrator',
-          created_at: new Date().toISOString(),
-          status: 'Ready',
-          scope: scope === 'all' ? 'All Hosts' : scope
-        };
-
-        setLocalReports((prev) => [newRep, ...prev]);
-        setGenerating(false);
-        setMsg({ type: 'success', text: `✓ Report "${reportTitle}" generated successfully!` });
-        setName('');
-        if (onRefresh) onRefresh();
-      }, 1200);
+      setGenerating(false);
+      setMsg({ type: 'success', text: `✓ Report "${reportTitle}" compiled and ready!` });
+      setName('');
+      if (onRefresh) onRefresh();
+      setTimeout(fetchReports, 600);
     } catch (err) {
       setGenerating(false);
-      setMsg({ type: 'error', text: `Report generation failed: ${err.message}` });
+      const errMsg = err.response?.data?.error || err.message;
+      setMsg({ type: 'error', text: `Report generation failed: ${errMsg}` });
     }
   };
 
@@ -153,17 +161,13 @@ export default function Reports({ reports, onRefresh }) {
     e.preventDefault();
     const schTitle = name.trim() || `Automated ${type.toUpperCase()} Schedule`;
     try {
-      try {
-        await apiPost('/reports/schedule', {
-          name: schTitle,
-          type,
-          format,
-          frequency,
-          recipients
-        });
-      } catch (err) {
-        console.warn('Backend schedule note:', err.message);
-      }
+      await apiPost('/reports/schedule', {
+        name: schTitle,
+        type,
+        format,
+        frequency,
+        recipients
+      });
 
       const newSch = {
         id: `sch-${Date.now().toString(36)}`,
@@ -172,7 +176,7 @@ export default function Reports({ reports, onRefresh }) {
         format,
         frequency,
         day: frequency === 'daily' ? 'Daily at 00:00 UTC' : frequency === 'weekly' ? 'Every Monday 00:00 UTC' : '1st of Month',
-        recipients: recipients || 'admin@infrapilot.io',
+        recipients: recipients || 'admin@infrapilot.com',
         enabled: true,
         next_run: 'Scheduled'
       };
@@ -181,6 +185,7 @@ export default function Reports({ reports, onRefresh }) {
       setShowScheduleModal(false);
       setName('');
       setMsg({ type: 'success', text: `✓ Recurring schedule "${schTitle}" activated!` });
+      if (onRefresh) onRefresh();
     } catch (err) {
       setMsg({ type: 'error', text: `Scheduling failed: ${err.message}` });
     }
@@ -192,46 +197,130 @@ export default function Reports({ reports, onRefresh }) {
     );
   };
 
-  const deleteReport = (repId) => {
-    setLocalReports((prev) => prev.filter((r) => r.id !== repId));
+  const deleteReport = async (repId) => {
+    try {
+      if (repId && !repId.startsWith('tmpl-')) {
+        await apiDelete(`/reports/${repId}`);
+      }
+      setLocalReports((prev) => prev.filter((r) => r.id !== repId));
+      setMsg({ type: 'success', text: '✓ Report deleted' });
+      fetchReports();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setLocalReports((prev) => prev.filter((r) => r.id !== repId));
+      fetchReports();
+      if (onRefresh) onRefresh();
+    }
   };
 
   // Filtered Archive Reports
   const filteredReports = useMemo(() => {
     return localReports.filter((r) => {
       const q = searchQuery.toLowerCase().trim();
-      const matchesSearch = !q || r.name.toLowerCase().includes(q) || r.type.toLowerCase().includes(q) || r.generated_by.toLowerCase().includes(q);
-      const matchesFormat = formatFilter === 'all' || r.format === formatFilter;
+      const genBy = typeof r.generated_by === 'string' ? r.generated_by.toLowerCase() : '';
+      const matchesSearch = !q || (r.name && r.name.toLowerCase().includes(q)) || (r.type && r.type.toLowerCase().includes(q)) || genBy.includes(q);
+      const matchesFormat = formatFilter === 'all' || r.format === formatFilter || (formatFilter === 'xlsx' && r.format === 'excel');
       const matchesCategory = categoryFilter === 'all' || r.type === categoryFilter;
       return matchesSearch && matchesFormat && matchesCategory;
     });
   }, [localReports, searchQuery, formatFilter, categoryFilter]);
 
-  // Export File simulation
-  const downloadReportFile = (r) => {
-    const filename = `${r.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${r.format}`;
-    let reportContent = '';
-    if (r.format === 'csv') {
-      const header = 'Hostname,IP_Address,OS,CPU_Percent,Memory_Percent,Disk_Percent,Status\n';
-      const rows = (servers || []).map((s) => `${s.hostname || '--'},${s.ip_address || '--'},${s.os || '--'},${s.cpu_usage != null ? s.cpu_usage.toFixed(1) : 0},${s.memory_usage != null ? s.memory_usage.toFixed(1) : 0},${s.disk_usage != null ? s.disk_usage.toFixed(1) : 0},${s.status || 'OFFLINE'}`).join('\n');
-      reportContent = header + rows;
-    } else if (r.format === 'xlsx') {
-      reportContent = `InfraPilot Enterprise Report Export\nTitle: ${r.name}\nGenerated: ${r.created_at}\nTarget: ${r.scope}\nHosts Total: ${(servers || []).length}\n`;
-    } else {
-      reportContent = `%PDF-1.4\n1 0 obj << /Title (${r.name}) /Author (InfraPilot Enterprise) /Subject (Fleet Monitoring) >> endobj\n2 0 obj << /Type /Catalog /Pages 3 0 R >> endobj\nxref\n0 3\ntrailer << /Root 2 0 R >>\n%%EOF`;
-    }
+  // Real backend file download
+  const downloadReportFile = async (r) => {
+    if (!r) return;
+    setMsg({ type: 'info', text: `Preparing download for "${r.name}"...` });
 
-    const blob = new Blob([reportContent], {
-      type: r.format === 'pdf' ? 'application/pdf' : r.format === 'csv' ? 'text/csv' : 'application/octet-stream'
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const ext = r.format === 'excel' || r.format === 'xlsx' ? 'xlsx' : r.format === 'csv' ? 'csv' : 'pdf';
+    const filename = `${r.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${ext}`;
+
+    try {
+      let reportId = r.id;
+
+      // 1. If it's a template card without ID, compile on backend first
+      if (!reportId || reportId.startsWith('tmpl-')) {
+        setMsg({ type: 'info', text: `Compiling "${r.name}" on server...` });
+        const genRes = await apiPost('/reports/generate', {
+          name: r.name,
+          type: r.type || 'summary',
+          format: r.format || 'pdf',
+          scope: r.scope || 'Fleet-wide'
+        });
+        const generated = genRes?.data || genRes;
+        if (!generated?.id) {
+          throw new Error('Failed to create report record');
+        }
+        reportId = generated.id;
+        fetchReports();
+      }
+
+      // 2. Poll until report is ready (up to 6 seconds)
+      let downloaded = false;
+      for (let i = 0; i < 12; i++) {
+        try {
+          const dlRes = await apiClient.get(`/reports/${reportId}/download`, {
+            responseType: 'blob'
+          });
+
+          if (dlRes && dlRes.data) {
+            // Verify if backend returned a JSON error response packed inside blob
+            if (dlRes.data.type === 'application/json') {
+              const errText = await dlRes.data.text();
+              let parsedErr = 'Server returned an error';
+              try {
+                const parsed = JSON.parse(errText);
+                parsedErr = parsed.error || parsedErr;
+              } catch (_) {}
+              throw new Error(parsedErr);
+            }
+
+            const mimeType =
+              r.format === 'pdf'
+                ? 'application/pdf'
+                : r.format === 'csv'
+                ? 'text/csv'
+                : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+            const blob = new Blob([dlRes.data], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setMsg({ type: 'success', text: `✓ Successfully downloaded "${filename}"` });
+            downloaded = true;
+            fetchReports();
+            if (onRefresh) onRefresh();
+            break;
+          }
+        } catch (fetchErr) {
+          if (fetchErr.response?.status === 400 && i < 11) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            continue;
+          }
+          throw fetchErr;
+        }
+      }
+
+      if (!downloaded) {
+        throw new Error('Report generation timed out. Please try again.');
+      }
+    } catch (err) {
+      console.error('Download error:', err);
+      let errMsg = err.message;
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          errMsg = parsed.error || errMsg;
+        } catch (_) {}
+      } else if (err.response?.data?.error) {
+        errMsg = err.response.data.error;
+      }
+      setMsg({ type: 'error', text: `Download failed: ${errMsg}` });
+    }
   };
 
   return (
@@ -607,7 +696,7 @@ export default function Reports({ reports, onRefresh }) {
                           <div className={`format-icon ${r.format}`}>
                             {r.format === 'pdf' ? (
                               <FileText size={16} />
-                            ) : r.format === 'xlsx' ? (
+                            ) : r.format === 'xlsx' || r.format === 'excel' ? (
                               <FileSpreadsheet size={16} />
                             ) : (
                               <FileCode size={16} />
@@ -615,7 +704,7 @@ export default function Reports({ reports, onRefresh }) {
                           </div>
                           <div className="rep-name-info">
                             <strong>{r.name}</strong>
-                            <small>{r.generated_by}</small>
+                            <small>{r.generated_by ? String(r.generated_by).slice(0, 8) + '...' : 'Admin'}</small>
                           </div>
                         </div>
                       </td>
@@ -625,21 +714,21 @@ export default function Reports({ reports, onRefresh }) {
                       </td>
 
                       <td>
-                        <span className={`format-pill ${r.format}`}>.{r.format}</span>
+                        <span className={`format-pill ${r.format}`}>.{r.format === 'excel' ? 'xlsx' : r.format}</span>
                       </td>
 
                       <td>
-                        <span className="size-text">{r.size || '1.4 MB'}</span>
+                        <span className="size-text">{r.file_size || r.size || '2.4 KB'}</span>
                       </td>
 
                       <td>
-                        <span className="scope-badge">{r.scope || 'Global Fleet'}</span>
+                        <span className="scope-badge">{r.scope || 'Fleet-wide'}</span>
                       </td>
 
                       <td>
                         <div className="time-cell">
                           <Clock size={12} color="#64748b" />
-                          <span>{new Date(r.created_at).toLocaleString()}</span>
+                          <span>{new Date(r.created_at || r.generated_at).toLocaleString()}</span>
                         </div>
                       </td>
 

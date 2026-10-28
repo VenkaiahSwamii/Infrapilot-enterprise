@@ -6,7 +6,7 @@ export default function AIChat() {
   const [messages, setMessages] = useState([
     {
       sender: 'ai',
-      text: 'Hello! I am your InfraPilot AI Chat Assistant. Ask me anything about system health, Kubernetes pods, Docker containers, slow database performance, or incident explanations.',
+      text: 'Hello! I am your InfraPilot AI Copilot. Ask me where your agents are running, inspect live CPU & memory metrics, check active alerts, or monitor containers.',
       citations: [],
       timestamp: new Date().toLocaleTimeString()
     }
@@ -232,7 +232,7 @@ export default function AIChat() {
         backgroundColor: 'transparent'
       }}>
         <button
-          onClick={() => handleSuggestion('Why is Production-01 slow?')}
+          onClick={() => handleSuggestion('Where are my agents running?')}
           style={{
             backgroundColor: '#1e293b',
             color: '#94a3b8',
@@ -244,10 +244,10 @@ export default function AIChat() {
             transition: 'background 0.2s'
           }}
         >
-          Why is Production-01 slow?
+          Where are my agents running?
         </button>
         <button
-          onClick={() => handleSuggestion('Show unhealthy servers')}
+          onClick={() => handleSuggestion('Show CPU and memory usage')}
           style={{
             backgroundColor: '#1e293b',
             color: '#94a3b8',
@@ -258,10 +258,10 @@ export default function AIChat() {
             cursor: 'pointer'
           }}
         >
-          Show unhealthy servers
+          Show CPU & memory usage
         </button>
         <button
-          onClick={() => handleSuggestion('Which Docker containers restarted today?')}
+          onClick={() => handleSuggestion('Are there any active alerts?')}
           style={{
             backgroundColor: '#1e293b',
             color: '#94a3b8',
@@ -272,10 +272,10 @@ export default function AIChat() {
             cursor: 'pointer'
           }}
         >
-          Which Docker containers restarted today?
+          Are there any active alerts?
         </button>
         <button
-          onClick={() => handleSuggestion('Explain CrashLoopBackOff alert')}
+          onClick={() => handleSuggestion('Show Docker container status')}
           style={{
             backgroundColor: '#1e293b',
             color: '#94a3b8',
@@ -286,7 +286,7 @@ export default function AIChat() {
             cursor: 'pointer'
           }}
         >
-          Explain CrashLoopBackOff alert
+          Show Docker container status
         </button>
       </div>
 

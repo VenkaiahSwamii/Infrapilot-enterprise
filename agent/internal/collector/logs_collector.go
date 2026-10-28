@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
 )
@@ -83,9 +82,9 @@ func getLiveMachineStats() MachineHardwareStats {
 
 	path := "/"
 	if runtime.GOOS == "windows" {
-		path = "C:"
+		path = "C:\\"
 	}
-	if dUsage, err := disk.Usage(path); err == nil {
+	if dUsage, err := GetDiskUsage(path); err == nil {
 		stats.DiskUsedGB = float64(dUsage.Used) / (1024 * 1024 * 1024)
 		stats.DiskTotalGB = float64(dUsage.Total) / (1024 * 1024 * 1024)
 		stats.DiskPercent = dUsage.UsedPercent

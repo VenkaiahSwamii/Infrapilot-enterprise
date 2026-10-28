@@ -49,8 +49,11 @@ type MetricUpdatedPayload struct {
 	MemoryUsed   uint64    `json:"memory_used,omitempty"`
 	DiskTotal    uint64    `json:"disk_total,omitempty"`
 	DiskUsed     uint64    `json:"disk_used,omitempty"`
-	CPUCores     int       `json:"cpu_cores,omitempty"`
-	Time         time.Time `json:"time"`
+	CPUCores      int         `json:"cpu_cores,omitempty"`
+	AgentCPUUsage float64     `json:"agent_cpu_usage,omitempty"`
+	AgentMemoryMB float64     `json:"agent_memory_mb,omitempty"`
+	Filesystems   interface{} `json:"filesystems,omitempty"`
+	Time          time.Time   `json:"time"`
 }
 
 // ServerStatusPayload defines the strongly-typed payload for server.online / server.offline events

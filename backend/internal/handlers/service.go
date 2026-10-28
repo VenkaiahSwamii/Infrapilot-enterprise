@@ -30,17 +30,28 @@ func GetMachineServices(c *gin.Context) {
 	if machineID == "" {
 		machineID = c.Query("machine_id")
 	}
+	cleanID := strings.TrimSpace(strings.Split(machineID, "_")[0])
 
 	var machineUUID uuid.UUID
 	var err error
-	if machineID != "" {
-		if machineUUID, err = uuid.Parse(machineID); err != nil {
+	if cleanID != "" {
+		if machineUUID, err = uuid.Parse(cleanID); err != nil {
 			var machine models.Machine
-			if database.DB.Where("id::text LIKE ? OR hostname = ?", machineID+"%", machineID).First(&machine).Error == nil {
+			if database.DB.Where("hostname = ? OR id = ?", cleanID, cleanID).First(&machine).Error == nil {
 				machineUUID = machine.ID
 			}
 		}
 	}
+
+	var machine models.Machine
+	if machineUUID != uuid.Nil {
+		_ = database.DB.First(&machine, "id = ?", machineUUID)
+	} else if database.DB != nil {
+		if err := database.DB.Order("updated_at DESC").First(&machine).Error; err == nil {
+			machineUUID = machine.ID
+		}
+	}
+	isWindows := strings.Contains(strings.ToLower(machine.OS), "win") || strings.Contains(strings.ToLower(machine.Platform), "win")
 
 	var servicesList []models.LinuxService
 	query := database.DB.Model(&models.LinuxService{})
@@ -48,16 +59,10 @@ func GetMachineServices(c *gin.Context) {
 		query = query.Where("machine_id = ?", machineUUID)
 	}
 
-	if err := query.Order("name ASC").Find(&servicesList).Error; err != nil {
+	if err := query.Order("name ASC").Limit(100).Find(&servicesList).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query services"})
 		return
 	}
-
-	var machine models.Machine
-	if machineUUID != uuid.Nil {
-		_ = database.DB.First(&machine, "id = ?", machineUUID)
-	}
-	isWindows := strings.Contains(strings.ToLower(machine.OS), "win") || strings.Contains(strings.ToLower(machine.Platform), "win")
 
 	type ServiceItem struct {
 		Name         string `json:"name"`
@@ -73,14 +78,7 @@ func GetMachineServices(c *gin.Context) {
 		if !isWindows && !strings.Contains(canonicalName, ".") {
 			canonicalName = cleanName + ".service"
 		}
-		var auditCount int64
-		if database.DB != nil {
-			database.DB.Model(&models.AuditLog{}).Where("machine_id = ? AND (LOWER(action) LIKE ? OR LOWER(action) LIKE ?)", s.MachineID, "%restart service "+strings.ToLower(s.Name)+"%", "%restart service "+strings.ToLower(cleanName)+"%").Count(&auditCount)
-		}
 		finalRestarts := s.RestartCount
-		if int(auditCount) > finalRestarts {
-			finalRestarts = int(auditCount)
-		}
 
 		if existing, found := responseMap[cleanName]; found {
 			if finalRestarts > existing.RestartCount {
@@ -106,64 +104,51 @@ func GetMachineServices(c *gin.Context) {
 		response = append(response, item)
 	}
 
-	if len(response) == 0 {
-		if isWindows {
-			response = []ServiceItem{
-				{Name: "Spooler", Status: "Running"},
-				{Name: "EventLog", Status: "Running"},
-				{Name: "WinDefend", Status: "Running"},
-				{Name: "wuauserv", Status: "Running"},
-				{Name: "infrapilot-agent", Status: "Running"},
-				{Name: "W32Time", Status: "Running"},
-				{Name: "Dhcp", Status: "Running"},
-				{Name: "Dnscache", Status: "Running"},
-			}
-		} else {
-			response = []ServiceItem{
-				{Name: "ssh.service", Status: "Running"},
-				{Name: "infrapilot-agent.service", Status: "Running"},
-				{Name: "systemd-journald.service", Status: "Running"},
-				{Name: "cron.service", Status: "Running"},
-			}
-		}
-	}
-
 	c.JSON(http.StatusOK, response)
 }
 
-// ResetServiceHealth handles POST /api/v1/services/reset
+// ResetServiceHealth handles POST /api/v1/services/reset, /services/reset-flap, and /servers/:id/services/reset-flap
 func ResetServiceHealth(c *gin.Context) {
 	var req ServiceActionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+	_ = c.ShouldBindJSON(&req)
 
 	target := req.Target
 	if target == "" {
 		target = req.Service
 	}
 	if target == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target service name is required"})
-		return
+		target = "ALL"
 	}
 
 	machineID := req.MachineID
 	if machineID == "" {
 		machineID = req.ServerID
 	}
+	if machineID == "" {
+		machineID = c.Param("id")
+	}
+	machineID = strings.TrimSpace(strings.Split(machineID, "_")[0])
 
-	// Reset flap counter
+	// Reset flap counter in memory
 	services.ResetFlapCounter(machineID, target)
 
 	// Update service status in DB if available
 	if database.DB != nil {
-		database.DB.Model(&models.LinuxService{}).
-			Where("name = ? OR name = ?", target, strings.TrimSuffix(target, ".service")).
-			Updates(map[string]interface{}{
-				"status":     "Running",
-				"updated_at": time.Now(),
-			})
+		if strings.EqualFold(target, "ALL") {
+			database.DB.Model(&models.LinuxService{}).
+				Where("machine_id = ?", machineID).
+				Updates(map[string]interface{}{
+					"status":     "Running",
+					"updated_at": time.Now(),
+				})
+		} else {
+			database.DB.Model(&models.LinuxService{}).
+				Where("(name = ? OR name = ?) AND (machine_id = ? OR ? = '')", target, strings.TrimSuffix(target, ".service"), machineID, machineID).
+				Updates(map[string]interface{}{
+					"status":     "Running",
+					"updated_at": time.Now(),
+				})
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -192,9 +177,9 @@ func handleServiceAction(c *gin.Context, action string) {
 		return
 	}
 
-	machineTarget := req.MachineID
+	machineTarget := strings.TrimSpace(strings.Split(req.MachineID, "_")[0])
 	if machineTarget == "" {
-		machineTarget = req.ServerID
+		machineTarget = strings.TrimSpace(strings.Split(req.ServerID, "_")[0])
 	}
 
 	targetSvc := req.Service
@@ -206,7 +191,7 @@ func handleServiceAction(c *gin.Context, action string) {
 	var err error
 	if machineUUID, err = uuid.Parse(machineTarget); err != nil {
 		var machine models.Machine
-		if database.DB.Where("id::text LIKE ? OR hostname = ?", machineTarget+"%", machineTarget).First(&machine).Error == nil {
+		if database.DB.Where("hostname = ? OR id = ?", machineTarget, machineTarget).First(&machine).Error == nil {
 			machineUUID = machine.ID
 		} else {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid machine ID"})
@@ -230,8 +215,9 @@ func handleServiceAction(c *gin.Context, action string) {
 		isNotifyMode := strings.Contains(pMode, "NOTIFY") || strings.Contains(pMode, "EMAIL") || strings.Contains(pMode, "MAIL")
 		if errPolicy == nil && isNotifyMode {
 			recipient := srePolicy.RecipientEmail
-			if recipient == "" {
-				recipient = "infrapilotadmin@gmail.com"
+			if recipient == "" || recipient == "infrapilotadmin@gmail.com" {
+				smtpCfg := services.GetResolvedSMTPConfig()
+				recipient = smtpCfg.DefaultRecipient
 			}
 
 			// Dispatch email alert instead of restarting service

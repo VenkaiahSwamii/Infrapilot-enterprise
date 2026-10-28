@@ -360,6 +360,8 @@ func BroadcastAlertPayload(alert models.LinuxAlert, hostname string, isNewOrReso
 		"category":             alert.Category,
 		"component":            alert.Component,
 		"source":               alert.Source,
+		"origin":               alert.Origin,
+		"event_data":           alert.EventData,
 		"severity":             alert.Severity,
 		"priority":             alert.Priority,
 		"status":               alert.Status,

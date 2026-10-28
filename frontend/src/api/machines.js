@@ -102,3 +102,12 @@ export function toggleMonitoredService(serverId, serviceName) {
   return apiPatch(`/servers/${serverId}/services/monitored/${encodeURIComponent(serviceName)}/toggle`);
 }
 
+export function resetServiceFlap(machineId, serviceName = 'ALL') {
+  return apiPost('/services/reset-flap', {
+    machine_id: machineId,
+    server_id: machineId,
+    target: serviceName,
+    service: serviceName
+  }).catch(() => apiPost(`/servers/${machineId}/services/reset-flap`, { target: serviceName }));
+}
+

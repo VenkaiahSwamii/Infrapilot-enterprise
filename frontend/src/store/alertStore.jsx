@@ -27,6 +27,8 @@ export function AlertStoreProvider({ children }) {
     total_resolved: 0,
     avg_mttr_min: 4.2,
     health_score: 100,
+    event_alerts: 0,
+    rule_alerts: 0,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -42,7 +44,7 @@ export function AlertStoreProvider({ children }) {
     }
   }, []);
 
-  const fetchAlerts = useCallback(async (params = { status: 'all', limit: 200 }) => {
+  const fetchAlerts = useCallback(async (params = { status: 'all', limit: 300 }) => {
     try {
       setLoading(true);
       setError(null);

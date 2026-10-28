@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"infrapilot/backend/internal/alerts"
 	"infrapilot/backend/internal/database"
 	"infrapilot/backend/internal/models"
 	"infrapilot/backend/internal/services"
@@ -38,6 +39,7 @@ func ListAlerts(c *gin.Context) {
 	categoryFilter := c.Query("category")
 	machineIDFilter := c.Query("machine_id")
 	searchFilter := c.Query("search")
+	sourceFilter := strings.ToLower(strings.TrimSpace(c.Query("source")))
 	limitStr := c.DefaultQuery("limit", "100")
 	offsetStr := c.DefaultQuery("offset", "0")
 
@@ -86,8 +88,19 @@ func ListAlerts(c *gin.Context) {
 		query = query.Where("LOWER(title) LIKE ? OR LOWER(message) LIKE ? OR LOWER(description) LIKE ? OR LOWER(category) LIKE ? OR LOWER(component) LIKE ?", s, s, s, s, s)
 	}
 
+	if sourceFilter == "event" || sourceFilter == "events" {
+		query = query.Where("LOWER(source) = 'event' OR origin = 'event'")
+	} else if sourceFilter == "rule" || sourceFilter == "rules" || sourceFilter == "metric" || sourceFilter == "metrics" {
+		query = query.Where("((LOWER(source) != 'event' AND origin != 'event') OR source IS NULL)")
+	}
+
+	orderClause := "created_at desc"
+	if strings.ToLower(statusFilter) == "all" || statusFilter == "" {
+		orderClause = "CASE WHEN LOWER(status) IN ('open', 'active') THEN 0 WHEN LOWER(status) = 'acknowledged' THEN 1 ELSE 2 END, created_at desc"
+	}
+
 	var alerts []models.LinuxAlert
-	if err := query.Order("created_at desc").Limit(limit).Offset(offset).Find(&alerts).Error; err != nil {
+	if err := query.Order(orderClause).Limit(limit).Offset(offset).Find(&alerts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load alerts"})
 		return
 	}
@@ -176,6 +189,8 @@ func PerformAlertCleanup() int64 {
 		)
 		if a.RuleID != uuid.Nil {
 			key = fmt.Sprintf("%s:rule:%s", a.MachineID.String(), a.RuleID.String())
+		} else if strings.EqualFold(a.Source, "EVENT") || a.Origin == "event" {
+			key = fmt.Sprintf("%s:event:%s:%s", a.MachineID.String(), strings.ToLower(a.Category), strings.ToLower(a.Component))
 		}
 
 		if _, exists := seen[key]; exists {
@@ -254,6 +269,11 @@ func GetAlertStats(c *gin.Context) {
 	database.DB.Model(&models.LinuxAlert{}).Where("LOWER(status) = 'acknowledged'").Count(&acknowledged)
 	database.DB.Model(&models.LinuxAlert{}).Where("LOWER(status) = 'silenced'").Count(&silenced)
 
+	var eventAlertsCount int64
+	var ruleAlertsCount int64
+	database.DB.Model(&models.LinuxAlert{}).Where("LOWER(status) IN ('open', 'active') AND (LOWER(source) = 'event' OR origin = 'event')").Count(&eventAlertsCount)
+	database.DB.Model(&models.LinuxAlert{}).Where("LOWER(status) IN ('open', 'active') AND (LOWER(source) != 'event' AND origin != 'event')").Count(&ruleAlertsCount)
+
 	todayStart := time.Now().Truncate(24 * time.Hour)
 	database.DB.Model(&models.LinuxAlert{}).Where("LOWER(status) = 'resolved' AND (resolved_at >= ? OR updated_at >= ?)", todayStart, todayStart).Count(&resolvedToday)
 	database.DB.Model(&models.LinuxAlert{}).Where("LOWER(status) = 'resolved'").Count(&totalResolved)
@@ -296,6 +316,52 @@ func GetAlertStats(c *gin.Context) {
 		"total_resolved":  totalResolved,
 		"avg_mttr_min":    avgMTTR,
 		"health_score":    healthScore,
+		"event_alerts":    eventAlertsCount,
+		"rule_alerts":     ruleAlertsCount,
+	})
+}
+
+// IngestEventHTTP handles direct POST /events/ingest or POST /api/v1/events/ingest
+func IngestEventHTTP(c *gin.Context) {
+	var req struct {
+		MachineID   string                 `json:"machine_id"`
+		EventType   string                 `json:"event_type" binding:"required"`
+		Entity      string                 `json:"entity"`
+		Severity    string                 `json:"severity"`
+		Message     string                 `json:"message" binding:"required"`
+		ActionTaken string                 `json:"action_taken"`
+		ErrorMsg    string                 `json:"error_msg"`
+		Phase       string                 `json:"phase"`
+		RawPayload  map[string]interface{} `json:"raw_payload"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	mUUID, _ := uuid.Parse(req.MachineID)
+	alert, err := alerts.RouteInfrastructureEvent(alerts.InfrastructureEvent{
+		MachineID:   mUUID,
+		EventType:   req.EventType,
+		Entity:      req.Entity,
+		Severity:    req.Severity,
+		Message:     req.Message,
+		ActionTaken: req.ActionTaken,
+		ErrorMsg:    req.ErrorMsg,
+		Phase:       req.Phase,
+		Timestamp:   time.Now(),
+		RawPayload:  req.RawPayload,
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Event routed successfully",
+		"alert":   alert,
 	})
 }
 

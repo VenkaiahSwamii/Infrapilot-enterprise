@@ -31,5 +31,14 @@ func (h *ConfigHandler) GetPublicConfig(c *gin.Context) {
 		"success":     true,
 		"backend_url": backendURL,
 		"server_port": cfg.ServerPort,
+		"services": gin.H{
+			"linux":       cfg.Agent.Services.Linux,
+			"windows":     cfg.Agent.Services.Windows,
+			"accept_list": cfg.Agent.Services.AcceptList,
+		},
+		"network": gin.H{
+			"default_gateway": cfg.Agent.Network.DefaultGateway,
+			"websites":        cfg.Agent.Network.Websites,
+		},
 	})
 }

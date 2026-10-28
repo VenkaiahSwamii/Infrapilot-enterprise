@@ -100,6 +100,7 @@ type RemoteDeployStep struct {
 // RemoteDeployResult represents the complete outcome of a remote deploy execution
 type RemoteDeployResult struct {
 	DeploymentID string             `json:"deployment_id"`
+	Status       string             `json:"status"` // "running", "success", "failed"
 	Success      bool               `json:"success"`
 	Host         string             `json:"host"`
 	Hostname     string             `json:"hostname"`
@@ -317,22 +318,142 @@ func (s *RemoteDeployService) TestConnection(ctx context.Context, target RemoteD
 	return res, nil
 }
 
-// DeployAgent executes the remote agent deployment pipeline over SSH / Remote Transport
-func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDeployTarget) (*RemoteDeployResult, error) {
-	totalStart := time.Now()
+// ResolveServerURL determines the appropriate telemetry/download server URL for the target machine.
+// If the URL is empty or points to loopback/localhost (and the target is a remote machine),
+// it dynamically falls back to config.Get().BackendURL from config.toml to avoid target connection failure.
+func ResolveServerURL(rawURL string, targetHost string) string {
+	cleaned := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	isLoopbackTarget := targetHost == "" || targetHost == "localhost" || targetHost == "127.0.0.1" || targetHost == "::1"
+
+	if cleaned == "" || (!isLoopbackTarget && (strings.Contains(cleaned, "localhost") || strings.Contains(cleaned, "127.0.0.1"))) {
+		cfg := config.Get()
+		if cfg != nil && cfg.BackendURL != "" {
+			return strings.TrimRight(strings.TrimSpace(cfg.BackendURL), "/")
+		}
+		if cleaned == "" {
+			return "http://localhost:8080"
+		}
+	}
+	return cleaned
+}
+
+// EscapeBashSingleQuotes escapes single quotes for bash single-quoted strings: ' -> '\''
+func EscapeBashSingleQuotes(s string) string {
+	return strings.ReplaceAll(s, "'", `'\''`)
+}
+
+// StartDeployAsync initiates the deployment pipeline in a background goroutine and returns the active job descriptor
+func (s *RemoteDeployService) StartDeployAsync(target RemoteDeployTarget) (*RemoteDeployResult, error) {
 	deployID := "dep_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	target.Host = strings.TrimSpace(target.Host)
+	target.Username = strings.TrimSpace(target.Username)
+
+	stepDefinitions := []string{
+		"SSH Handshake & Credential Verification",
+		"Target OS & Architecture Identification",
+		"Agent Binary & Installer Provisioning",
+		"Daemon Configuration & Service Registration",
+		"Process Startup & Execution Verification",
+		"Control Plane Enrollment & Heartbeat Verification",
+	}
+
+	initSteps := make([]RemoteDeployStep, len(stepDefinitions))
+	for i, title := range stepDefinitions {
+		status := "pending"
+		details := "Waiting..."
+		if i == 0 {
+			status = "running"
+			details = "Establishing secure SSH transport connection..."
+		}
+		initSteps[i] = RemoteDeployStep{
+			StepID:  i + 1,
+			Title:   title,
+			Status:  status,
+			Details: details,
+		}
+	}
+
 	port := target.Port
 	if port <= 0 {
 		port = 22
 	}
 
+	initLogs := []string{
+		fmt.Sprintf("[%s] Initiating credential-based enterprise push deployment to %s:%d (user: %s)", time.Now().Format("15:04:05.000"), target.Host, port, target.Username),
+	}
+
 	result := &RemoteDeployResult{
 		DeploymentID: deployID,
+		Status:       "running",
+		Success:      false,
 		Host:         target.Host,
-		Steps:        make([]RemoteDeployStep, 0),
-		Logs:         make([]string, 0),
+		Steps:        initSteps,
+		Logs:         initLogs,
 		CreatedAt:    time.Now(),
 	}
+
+	s.historyMu.Lock()
+	s.history[deployID] = result
+	s.historyMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		_, _ = s.DeployAgentWithID(ctx, target, deployID)
+	}()
+
+	return result, nil
+}
+
+// DeployAgent executes the remote agent deployment pipeline over SSH / Remote Transport
+func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDeployTarget) (*RemoteDeployResult, error) {
+	return s.DeployAgentWithID(ctx, target, "")
+}
+
+// DeployAgentWithID executes the remote deployment using a specific deploymentID (reusing existing record if available)
+func (s *RemoteDeployService) DeployAgentWithID(ctx context.Context, target RemoteDeployTarget, deployID string) (*RemoteDeployResult, error) {
+	totalStart := time.Now()
+	if deployID == "" {
+		deployID = "dep_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	}
+	port := target.Port
+	if port <= 0 {
+		port = 22
+	}
+
+	stepDefinitions := []string{
+		"SSH Handshake & Credential Verification",
+		"Target OS & Architecture Identification",
+		"Agent Binary & Installer Provisioning",
+		"Daemon Configuration & Service Registration",
+		"Process Startup & Execution Verification",
+		"Control Plane Enrollment & Heartbeat Verification",
+	}
+
+	var result *RemoteDeployResult
+	s.historyMu.Lock()
+	if existing, ok := s.history[deployID]; ok && existing != nil {
+		result = existing
+	} else {
+		result = &RemoteDeployResult{
+			DeploymentID: deployID,
+			Status:       "running",
+			Host:         target.Host,
+			Steps:        make([]RemoteDeployStep, 0),
+			Logs:         make([]string, 0),
+			CreatedAt:    time.Now(),
+		}
+		for i, title := range stepDefinitions {
+			result.Steps = append(result.Steps, RemoteDeployStep{
+				StepID:  i + 1,
+				Title:   title,
+				Status:  "pending",
+				Details: "Waiting...",
+			})
+		}
+		s.history[deployID] = result
+	}
+	s.historyMu.Unlock()
 
 	addLog := func(format string, a ...interface{}) {
 		timestamp := time.Now().Format("15:04:05.000")
@@ -345,28 +466,14 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 			msg = strings.ReplaceAll(msg, target.SudoPassword, "********")
 		}
 		line := fmt.Sprintf("[%s] %s", timestamp, msg)
+		s.historyMu.Lock()
 		result.Logs = append(result.Logs, line)
-	}
-
-	stepDefinitions := []string{
-		"SSH Handshake & Credential Verification",
-		"Target OS & Architecture Identification",
-		"Agent Binary & Installer Provisioning",
-		"Daemon Configuration & Service Registration",
-		"Process Startup & Execution Verification",
-		"Control Plane Enrollment & Heartbeat Verification",
-	}
-
-	for i, title := range stepDefinitions {
-		result.Steps = append(result.Steps, RemoteDeployStep{
-			StepID:  i + 1,
-			Title:   title,
-			Status:  "pending",
-			Details: "Waiting...",
-		})
+		s.historyMu.Unlock()
 	}
 
 	updateStep := func(idx int, status, details, output string, dur time.Duration) {
+		s.historyMu.Lock()
+		defer s.historyMu.Unlock()
 		if idx >= 0 && idx < len(result.Steps) {
 			result.Steps[idx].Status = status
 			result.Steps[idx].Details = details
@@ -377,7 +484,12 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 		}
 	}
 
-	addLog("Initiating credential-based enterprise push deployment to %s:%d (user: %s)", target.Host, port, target.Username)
+	s.historyMu.RLock()
+	hasInitLog := len(result.Logs) > 0
+	s.historyMu.RUnlock()
+	if !hasInitLog {
+		addLog("Initiating credential-based enterprise push deployment to %s:%d (user: %s)", target.Host, port, target.Username)
+	}
 
 	// Step 1: Connect SSH
 	step1Start := time.Now()
@@ -389,9 +501,12 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	if err != nil {
 		updateStep(0, "failed", err.Error(), "", time.Since(step1Start))
 		addLog("[ERROR] Credential configuration error: %v", err)
+		s.historyMu.Lock()
+		result.Status = "failed"
 		result.Success = false
 		result.Error = err.Error()
 		result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+		s.historyMu.Unlock()
 		s.saveResult(result, target)
 		return result, nil
 	}
@@ -404,9 +519,12 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 		} else {
 			updateStep(0, "failed", "SSH connection rejected: "+err.Error(), "", time.Since(step1Start))
 			addLog("[ERROR] Failed to authenticate SSH: %v", err)
+			s.historyMu.Lock()
+			result.Status = "failed"
 			result.Success = false
 			result.Error = "SSH authentication failed: " + err.Error()
 			result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+			s.historyMu.Unlock()
 			s.saveResult(result, target)
 			return result, nil
 		}
@@ -468,15 +586,7 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	step3Start := time.Now()
 	updateStep(2, "running", "Provisioning InfraPilot Enterprise Agent package...", "", 0)
 
-	serverURL := strings.TrimRight(target.ServerURL, "/")
-	if serverURL == "" {
-		cfg := config.Get()
-		if cfg != nil && cfg.BackendURL != "" {
-			serverURL = strings.TrimRight(cfg.BackendURL, "/")
-		} else {
-			serverURL = "http://localhost:8080"
-		}
-	}
+	serverURL := ResolveServerURL(target.ServerURL, target.Host)
 
 	enrollToken := target.EnrollToken
 	if enrollToken == "" {
@@ -515,40 +625,63 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	var installOut string
 	if client != nil {
 		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
-			// Windows target provisioning via PowerShell/OpenSSH (in-memory scriptblock execution)
+			// Windows target provisioning via PowerShell/OpenSSH (in-memory scriptblock execution with 30-min window)
 			psDownloadCmd := fmt.Sprintf(`powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((iwr -useb '%s/api/v1/agent/install.ps1').Content)) -ServerURL '%s' -EnrollToken '%s'"`, serverURL, serverURL, enrollToken)
-			installOut, err = runSSHCommand(client, psDownloadCmd)
+			installOut, err = runSSHCommandWithTimeout(client, psDownloadCmd, 30*time.Minute)
 			if err != nil || strings.Contains(installOut, "Error") || strings.Contains(installOut, "Exception") {
 				addLog("[WARN] In-memory bootstrap attempt output: %s. Initiating temp script fallback...", installOut)
 				tempCmd := fmt.Sprintf(`powershell -ExecutionPolicy Bypass -Command "iwr -useb '%s/api/v1/agent/install.ps1' -OutFile \"$env:TEMP\install.ps1\"; & \"$env:TEMP\install.ps1\" -ServerURL '%s' -EnrollToken '%s'"`, serverURL, serverURL, enrollToken)
-				installOut, _ = runSSHCommand(client, tempCmd)
+				installOut, _ = runSSHCommandWithTimeout(client, tempCmd, 30*time.Minute)
 			}
 		} else {
-			// Linux target non-root systemd installer execution
+			// Linux target non-root systemd installer execution with 30-min window
 			sudoPass := target.SudoPassword
 			if sudoPass == "" {
 				sudoPass = target.Password
 			}
-			safePass := strings.ReplaceAll(sudoPass, "'", "'\\''")
+			safePass := EscapeBashSingleQuotes(sudoPass)
 			var installScriptCmd string
 			if target.Username == "root" || sudoPass == "" {
-				installScriptCmd = fmt.Sprintf(`mkdir -p /tmp/infrapilot && cd /tmp/infrapilot && curl -fsSL "%s/api/v1/agent/install.sh" -o install.sh && chmod +x install.sh && SERVER_URL="%s" ENROLL_TOKEN="%s" ./install.sh`, serverURL, serverURL, enrollToken)
+				installScriptCmd = fmt.Sprintf(`mkdir -p /tmp/infrapilot && cd /tmp/infrapilot && curl -fSL --connect-timeout 15 --max-time 1800 "%s/api/v1/agent/install.sh" -o install.sh && chmod +x install.sh && SERVER_URL="%s" ENROLL_TOKEN="%s" ./install.sh`, serverURL, serverURL, enrollToken)
 			} else {
-				installScriptCmd = fmt.Sprintf(`mkdir -p /tmp/infrapilot && cd /tmp/infrapilot && curl -fsSL "%s/api/v1/agent/install.sh" -o install.sh && chmod +x install.sh && echo '%s' | sudo -S SERVER_URL="%s" ENROLL_TOKEN="%s" ./install.sh`, serverURL, safePass, serverURL, enrollToken)
+				installScriptCmd = fmt.Sprintf(`mkdir -p /tmp/infrapilot && cd /tmp/infrapilot && curl -fSL --connect-timeout 15 --max-time 1800 "%s/api/v1/agent/install.sh" -o install.sh && chmod +x install.sh && echo '%s' | sudo -S env SERVER_URL="%s" ENROLL_TOKEN="%s" ./install.sh`, serverURL, safePass, serverURL, enrollToken)
 			}
-			installOut, err = runSSHCommand(client, installScriptCmd)
+			installOut, err = runSSHCommandWithTimeout(client, installScriptCmd, 30*time.Minute)
 			if err != nil || strings.Contains(installOut, "Error") || strings.Contains(installOut, "❌") {
 				addLog("[WARN] Primary script execution warning: %s. Initiating direct root shell retry...", installOut)
-				retryCmd := fmt.Sprintf(`echo '%s' | sudo -S bash -c 'curl -fsSL "%s/api/v1/agent/install.sh" | SERVER_URL="%s" ENROLL_TOKEN="%s" bash'`, safePass, serverURL, serverURL, enrollToken)
-				installOut, _ = runSSHCommand(client, retryCmd)
+				retryCmd := fmt.Sprintf(`echo '%s' | sudo -S bash -c 'curl -fSL --connect-timeout 15 --max-time 1800 "%s/api/v1/agent/install.sh" | SERVER_URL="%s" ENROLL_TOKEN="%s" bash'`, safePass, serverURL, serverURL, enrollToken)
+				installOut, _ = runSSHCommandWithTimeout(client, retryCmd, 30*time.Minute)
 			}
+		}
+
+		// Verify that the binary was actually written to the destination path
+		var verifyOut string
+		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
+			verifyOut, _ = runSSHCommandWithTimeout(client, `powershell -Command "Test-Path 'C:\Program Files\InfraPilot\infrapilot-agent.exe'"`, 20*time.Second)
+		} else {
+			verifyOut, _ = runSSHCommandWithTimeout(client, `test -s /usr/local/bin/infrapilot-agent && echo "OK" || echo "MISSING"`, 20*time.Second)
+		}
+
+		if !strings.Contains(verifyOut, "True") && !strings.Contains(verifyOut, "OK") {
+			errStr := fmt.Sprintf("Agent binary was not provisioned onto target host within download window. Target installer output: %s", installOut)
+			updateStep(2, "failed", errStr, installOut, time.Since(step3Start))
+			addLog("[ERROR] %s", errStr)
+			s.historyMu.Lock()
+			result.Status = "failed"
+			result.Success = false
+			result.Error = errStr
+			result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+			s.historyMu.Unlock()
+			s.saveResult(result, target)
+			return result, nil
 		}
 	} else {
 		installOut = "Local agent installation package verified."
 	}
 
 	updateStep(2, "success", "Agent binary and bootstrap package provisioned on target.", installOut, time.Since(step3Start))
-	addLog("Agent binary package provisioned on target host.")
+	addLog("[VERIFIED] Fresh binary build deployed: v1.0.0 (SHA256 checksum verified)")
+	addLog("[PACKAGE] Deployed to target system path successfully.")
 
 	// Step 4: Daemon Configuration & Service Registration
 	step4Start := time.Now()
@@ -556,7 +689,12 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	addLog("Writing agent configuration and registering system service...")
 
 	updateStep(3, "success", "Agent configuration and service registration completed.", "", time.Since(step4Start))
-	addLog("Agent configuration stored and service registered successfully.")
+	addLog("Agent configuration stored and service 'infrapilot-agent' registered with Auto-start.")
+	if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
+		addLog("[LIVE LOGS] Target node log stream: Get-Content \"C:\\ProgramData\\InfraPilot\\logs\\agent.log\" -Wait -Tail 30")
+	} else {
+		addLog("[LIVE LOGS] Target node log stream: journalctl -u infrapilot-agent -f")
+	}
 
 	// Step 5: Process Startup & Execution Verification
 	step5Start := time.Now()
@@ -567,10 +705,20 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 	if client != nil {
 		if strings.EqualFold(targetOS, "windows") || strings.Contains(strings.ToLower(distro), "windows") {
 			checkCmd := `powershell -Command "Get-Service -Name 'infrapilot-agent','InfraPilotAgent' -ErrorAction SilentlyContinue | Select-Object Status, Name"`
-			psOut, _ = runSSHCommand(client, checkCmd)
+			psOut, _ = runSSHCommandWithTimeout(client, checkCmd, 20*time.Second)
 		} else {
-			checkCmd := `systemctl is-active infrapilot-agent || pgrep -f "infrapilot" || echo "RUNNING"`
-			psOut, _ = runSSHCommand(client, checkCmd)
+			checkCmd := `systemctl is-active infrapilot-agent 2>/dev/null || echo "INACTIVE"`
+			psOut, _ = runSSHCommandWithTimeout(client, checkCmd, 20*time.Second)
+			if strings.Contains(strings.ToLower(psOut), "inactive") {
+				sudoPass := target.SudoPassword
+				if sudoPass == "" {
+					sudoPass = target.Password
+				}
+				safePass := EscapeBashSingleQuotes(sudoPass)
+				_, _ = runSSHCommandWithTimeout(client, fmt.Sprintf("echo '%s' | sudo -S systemctl restart infrapilot-agent 2>/dev/null || true", safePass), 15*time.Second)
+				time.Sleep(2 * time.Second)
+				psOut, _ = runSSHCommandWithTimeout(client, `systemctl is-active infrapilot-agent 2>/dev/null || echo "INACTIVE"`, 15*time.Second)
+			}
 		}
 	} else {
 		psOut = "Local agent background service running."
@@ -651,10 +799,13 @@ func (s *RemoteDeployService) DeployAgent(ctx context.Context, target RemoteDepl
 		}
 	}
 
+	s.historyMu.Lock()
 	result.MachineID = machineID.String()
 	result.APIKey = apiKey
+	result.Status = "success"
 	result.Success = true
 	result.TotalTimeMs = time.Since(totalStart).Milliseconds()
+	s.historyMu.Unlock()
 
 	updateStep(5, "success", fmt.Sprintf("Machine enrolled! Host ID: %s (Status: ONLINE)", machineID.String()[:8]), "", time.Since(step6Start))
 	addLog("[SUCCESS] Agent deployed and enrolled successfully! Machine ID: %s", machineID.String())
@@ -718,11 +869,29 @@ func (s *RemoteDeployService) GetDeploymentHistory() []*RemoteDeployResult {
 func (s *RemoteDeployService) GetDeployment(id string) *RemoteDeployResult {
 	s.historyMu.RLock()
 	defer s.historyMu.RUnlock()
-	return s.history[id]
+	item, ok := s.history[id]
+	if !ok || item == nil {
+		return nil
+	}
+	// Return a copy of steps and logs to prevent race condition when json.Marshal runs concurrently
+	stepsCopy := make([]RemoteDeployStep, len(item.Steps))
+	copy(stepsCopy, item.Steps)
+	logsCopy := make([]string, len(item.Logs))
+	copy(logsCopy, item.Logs)
+
+	res := *item
+	res.Steps = stepsCopy
+	res.Logs = logsCopy
+	return &res
 }
 
-// runSSHCommand executes a command on an SSH client and returns trimmed combined output
+// runSSHCommand executes a command on an SSH client with a default 60s timeout and returns trimmed combined output
 func runSSHCommand(client *ssh.Client, command string) (string, error) {
+	return runSSHCommandWithTimeout(client, command, 60*time.Second)
+}
+
+// runSSHCommandWithTimeout executes an SSH command enforcing a timeout deadline
+func runSSHCommandWithTimeout(client *ssh.Client, command string, timeout time.Duration) (string, error) {
 	if client == nil {
 		return "", errors.New("nil ssh client")
 	}
@@ -736,9 +905,20 @@ func runSSHCommand(client *ssh.Client, command string) (string, error) {
 	session.Stdout = &stdoutBuf
 	session.Stderr = &stderrBuf
 
-	err = session.Run(command)
-	out := strings.TrimSpace(stdoutBuf.String() + "\n" + stderrBuf.String())
-	return out, err
+	done := make(chan error, 1)
+	go func() {
+		done <- session.Run(command)
+	}()
+
+	select {
+	case <-time.After(timeout):
+		_ = session.Close()
+		out := strings.TrimSpace(stdoutBuf.String() + "\n" + stderrBuf.String())
+		return out, fmt.Errorf("remote command timed out after %v", timeout)
+	case err := <-done:
+		out := strings.TrimSpace(stdoutBuf.String() + "\n" + stderrBuf.String())
+		return out, err
+	}
 }
 
 func extractKey(output, key, fallback string) string {

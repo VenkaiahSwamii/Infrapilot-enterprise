@@ -102,13 +102,28 @@ type Config struct {
 
 // AgentServicesConfig holds platform default service lists
 type AgentServicesConfig struct {
-	Linux   []string `yaml:"linux" toml:"linux"`
-	Windows []string `yaml:"windows" toml:"windows"`
+	Linux      []string `yaml:"linux" toml:"linux"`
+	Windows    []string `yaml:"windows" toml:"windows"`
+	AcceptList []string `yaml:"accept_list" toml:"accept_list"`
+}
+
+type WebsiteTOMLConfig struct {
+	Name             string  `yaml:"name" toml:"name"`
+	URL              string  `yaml:"url" toml:"url"`
+	Port             int     `yaml:"port" toml:"port"`
+	TimeoutMs        int     `yaml:"timeout_ms" toml:"timeout_ms"`
+	AlertThresholdMs float64 `yaml:"alert_threshold_ms" toml:"alert_threshold_ms"`
+}
+
+type AgentNetworkTOMLConfig struct {
+	DefaultGateway string              `yaml:"default_gateway" toml:"default_gateway"`
+	Websites       []WebsiteTOMLConfig `yaml:"websites" toml:"websites"`
 }
 
 // AgentConfig holds agent-specific settings loaded by backend
 type AgentConfig struct {
-	Services AgentServicesConfig `yaml:"services" toml:"services"`
+	Services AgentServicesConfig    `yaml:"services" toml:"services"`
+	Network  AgentNetworkTOMLConfig `yaml:"network" toml:"network"`
 }
 
 // SMTPConfig controls dynamic email and SMTP delivery parameters
@@ -292,10 +307,23 @@ func Load() {
 				} `toml:"alerts"`
 				Agent struct {
 					Services struct {
-						Linux   []string `toml:"linux"`
-						Windows []string `toml:"windows"`
+						Linux      []string `toml:"linux"`
+						Windows    []string `toml:"windows"`
+						AcceptList []string `toml:"accept_list"`
 					} `toml:"services"`
+					Network struct {
+						DefaultGateway string              `toml:"default_gateway"`
+						Websites       []WebsiteTOMLConfig `toml:"websites"`
+					} `toml:"network"`
+					Latency struct {
+						DefaultGateway string `toml:"default_gateway"`
+						TargetGateway  string `toml:"target_gateway"`
+					} `toml:"latency"`
 				} `toml:"agent"`
+				NetworkMonitoring struct {
+					DefaultGateway string              `toml:"default_gateway"`
+					Websites       []WebsiteTOMLConfig `toml:"websites"`
+				} `toml:"network_monitoring"`
 			}
 			if err := toml.Unmarshal(data, &tomlCfg); err == nil {
 				if len(tomlCfg.Agent.Services.Linux) > 0 {
@@ -303,6 +331,23 @@ func Load() {
 				}
 				if len(tomlCfg.Agent.Services.Windows) > 0 {
 					globalConfig.Agent.Services.Windows = tomlCfg.Agent.Services.Windows
+				}
+				if len(tomlCfg.Agent.Services.AcceptList) > 0 {
+					globalConfig.Agent.Services.AcceptList = tomlCfg.Agent.Services.AcceptList
+				}
+				if tomlCfg.Agent.Network.DefaultGateway != "" {
+					globalConfig.Agent.Network.DefaultGateway = tomlCfg.Agent.Network.DefaultGateway
+				} else if tomlCfg.NetworkMonitoring.DefaultGateway != "" {
+					globalConfig.Agent.Network.DefaultGateway = tomlCfg.NetworkMonitoring.DefaultGateway
+				} else if tomlCfg.Agent.Latency.DefaultGateway != "" {
+					globalConfig.Agent.Network.DefaultGateway = tomlCfg.Agent.Latency.DefaultGateway
+				} else if tomlCfg.Agent.Latency.TargetGateway != "" {
+					globalConfig.Agent.Network.DefaultGateway = tomlCfg.Agent.Latency.TargetGateway
+				}
+				if len(tomlCfg.Agent.Network.Websites) > 0 {
+					globalConfig.Agent.Network.Websites = tomlCfg.Agent.Network.Websites
+				} else if len(tomlCfg.NetworkMonitoring.Websites) > 0 {
+					globalConfig.Agent.Network.Websites = tomlCfg.NetworkMonitoring.Websites
 				}
 				if tomlCfg.Server.BackendURL != "" {
 					globalConfig.BackendURL = tomlCfg.Server.BackendURL

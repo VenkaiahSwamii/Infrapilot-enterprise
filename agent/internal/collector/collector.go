@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"infrapilot/agent/internal/config"
 	"infrapilot/agent/internal/metrics"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -22,6 +24,34 @@ import (
 	gnet "github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
 )
+
+func getAgentProcessStats() (float64, float64, float64) {
+	pid := int32(os.Getpid())
+	p, err := process.NewProcess(pid)
+	var cpuPct float64
+	var memMB float64
+	var memPct float64
+	if err == nil {
+		if cp, err := p.CPUPercent(); err == nil {
+			cpuPct = cp
+		}
+		if memInfo, err := p.MemoryInfo(); err == nil && memInfo != nil {
+			memMB = float64(memInfo.RSS) / (1024 * 1024)
+		}
+		if mp, err := p.MemoryPercent(); err == nil {
+			memPct = float64(mp)
+		}
+	}
+	if memMB <= 0 {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		memMB = float64(m.Sys) / (1024 * 1024)
+	}
+	if cpuPct <= 0 {
+		cpuPct = 0.1
+	}
+	return cpuPct, memMB, memPct
+}
 
 func getCpuTemperature() float64 {
 	// Fluctuating mock temp values (38.0°C to 48.0°C) for rich charts visualization
@@ -80,9 +110,9 @@ func GetMetrics() (*metrics.Metrics, error) {
 
 	diskPath := "/"
 	if runtime.GOOS == "windows" {
-		diskPath = "C:"
+		diskPath = "C:\\"
 	}
-	diskInfo, _ := disk.Usage(diskPath)
+	diskInfo, _ := GetDiskUsage(diskPath)
 
 	netInfo, _ := gnet.IOCounters(false)
 	loadInfo, _ := load.Avg()
@@ -122,6 +152,7 @@ func GetMetrics() (*metrics.Metrics, error) {
 	}
 
 	upload, download, _ := GetNetworkSpeed()
+	latMs, lossPct := ProbeNetworkLatency()
 	filesystems := collectFilesystems()
 	processes := collectProcesses()
 	interfaces := collectNetworkInterfaces()
@@ -161,6 +192,8 @@ func GetMetrics() (*metrics.Metrics, error) {
 		cpuModelName = cpuInfos[0].ModelName
 	}
 
+	agentCPU, agentMemMB, agentMemPct := getAgentProcessStats()
+
 	return &metrics.Metrics{
 		Hostname:            info.Hostname,
 		IPAddress:           ip,
@@ -191,9 +224,14 @@ func GetMetrics() (*metrics.Metrics, error) {
 		BytesReceived:       bytesRecv,
 		UploadMbps:          upload,
 		DownloadMbps:        download,
+		LatencyMs:           latMs,
+		PacketLoss:          lossPct,
 		Load1:               loadInfo.Load1,
 		Load5:               loadInfo.Load5,
 		Load15:              loadInfo.Load15,
+		AgentCPUUsage:       agentCPU,
+		AgentMemoryMB:       agentMemMB,
+		AgentMemoryUsage:    agentMemPct,
 		Filesystems:         filesystems,
 		Processes:           processes,
 		Services:            collectServices(),
@@ -270,7 +308,7 @@ func collectFilesystems() []metrics.FilesystemMetric {
 		}
 		seenMounts[partition.Mountpoint] = true
 
-		usage, err := disk.Usage(partition.Mountpoint)
+		usage, err := GetDiskUsage(partition.Mountpoint)
 		if err != nil || usage.Total == 0 {
 			continue
 		}
@@ -362,7 +400,8 @@ func UpdateDynamicMonitoredServices(services []string) {
 	dynamicServices = services
 }
 
-// GetMonitoredServicesList returns the active monitored services
+// GetMonitoredServicesList returns the active monitored services, prioritizing dynamic server policies,
+// then falling back directly to config.toml
 func GetMonitoredServicesList() []string {
 	dynamicServicesMu.RLock()
 	defer dynamicServicesMu.RUnlock()
@@ -371,15 +410,14 @@ func GetMonitoredServicesList() []string {
 		copy(cp, dynamicServices)
 		return cp
 	}
-	return nil
+	return config.Get().GetMonitoredServices()
 }
 
 func collectServices() []metrics.ServiceMetric {
 	if runtime.GOOS == "linux" {
-		servicesToCheck := []string{"ssh", "cron", "systemd-journald", "nginx", "postgresql", "docker", "redis", "infrapilot-agent"}
-		custom := GetMonitoredServicesList()
-		if len(custom) > 0 {
-			servicesToCheck = custom
+		servicesToCheck := GetMonitoredServicesList()
+		if len(servicesToCheck) == 0 {
+			servicesToCheck = config.Get().GetMonitoredServices()
 		}
 
 		result := make([]metrics.ServiceMetric, 0, len(servicesToCheck))
@@ -458,19 +496,18 @@ func collectServices() []metrics.ServiceMetric {
 		}
 	}
 
-	targetWinServices := map[string]bool{
-		"spooler": true, "windefend": true, "eventlog": true, "wuauserv": true,
-		"w32time": true, "dhcp": true, "dnscache": true, "infrapilot-agent": true,
+	targetWinServices := make(map[string]bool)
+	winToCheck := GetMonitoredServicesList()
+	if len(winToCheck) == 0 {
+		winToCheck = config.Get().GetMonitoredServices()
 	}
-
-	custom := GetMonitoredServicesList()
-	if len(custom) > 0 {
-		targetWinServices = make(map[string]bool)
-		for _, cs := range custom {
-			targetWinServices[strings.ToLower(strings.TrimSpace(cs))] = true
+	for _, cs := range winToCheck {
+		clean := strings.ToLower(strings.TrimSpace(cs))
+		if clean != "" {
+			targetWinServices[clean] = true
 		}
-		targetWinServices["infrapilot-agent"] = true
 	}
+	targetWinServices["infrapilot-agent"] = true
 
 	result := make([]metrics.ServiceMetric, 0, len(winServices))
 	for _, ws := range winServices {

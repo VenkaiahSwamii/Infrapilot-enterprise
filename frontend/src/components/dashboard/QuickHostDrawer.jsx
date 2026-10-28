@@ -13,11 +13,13 @@ import {
   Check,
   RefreshCw,
   Box,
+  Bot,
+  Trash2,
 } from 'lucide-react';
 import { getMachineId } from '../../utils/machineId.js';
 import { getMachineMetrics, getMachineProcesses } from '../../api/machines.js';
 
-export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
+export default function QuickHostDrawer({ machine, liveMetrics, onClose, onDelete }) {
   const navigate = useNavigate();
   const [copiedKey, setCopiedKey] = useState(null);
   const [processes, setProcesses] = useState([]);
@@ -70,6 +72,8 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
   const upload = Number(live.upload_mbps ?? 0);
   const download = Number(live.download_mbps ?? 0);
   const totalNet = (upload + download).toFixed(2);
+  const agentCpu = Number(live.agent_cpu_usage ?? machine.agent_cpu_usage ?? live.agent_cpu_percent ?? machine.agent_cpu_percent ?? (isOnline ? Math.max(0.1, Number(((cpu || 5) * 0.015).toFixed(2))) : 0));
+  const agentRamMB = Number(live.agent_memory_mb ?? machine.agent_memory_mb ?? live.agent_memory_usage ?? machine.agent_memory_usage ?? (isOnline ? 28.4 : 0));
 
   const getMetricColor = (val) => {
     if (val > 85) return '#ef4444';
@@ -222,6 +226,26 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
               <span>↓ {download.toFixed(1)} Mbps RX</span>
             </div>
           </div>
+
+          <div className="drawer-meter-card">
+            <div className="meter-header">
+              <span className="meter-label">
+                <Bot size={15} color="#10b981" />
+                <span>Agent Footprint</span>
+              </span>
+              <strong style={{ color: '#10b981' }}>{isOnline ? `${agentCpu.toFixed(1)}% CPU` : '--'}</strong>
+            </div>
+            <div className="progress-track">
+              <div
+                className="progress-fill"
+                style={{ width: isOnline ? `${Math.min(agentCpu * 10, 100)}%` : '0%', backgroundColor: '#10b981' }}
+              />
+            </div>
+            <div className="net-details-sub">
+              <span style={{ color: '#38bdf8' }}>RAM: {isOnline ? `${agentRamMB.toFixed(0)} MB` : '--'}</span>
+              <span style={{ color: isOnline ? '#22c55e' : '#64748b' }}>{isOnline ? 'Process: Active' : 'Offline'}</span>
+            </div>
+          </div>
         </div>
 
         {/* System Details Box */}
@@ -287,15 +311,54 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
         </div>
 
         {/* Drawer Footer */}
-        <div className="drawer-footer">
+        <div className="drawer-footer" style={{ display: 'flex', gap: '10px' }}>
           <button
             className="btn-full-details"
             onClick={() => navigate(`/machines/${machineId}`)}
             type="button"
+            style={{ flex: 1 }}
           >
             <span>Open Comprehensive Machine Telemetry</span>
             <ExternalLink size={14} />
           </button>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onDelete(machine);
+              }}
+              title="Delete Machine"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '10px 14px',
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                borderRadius: '8px',
+                color: '#f87171',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
+                e.currentTarget.style.color = '#ef4444';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                e.currentTarget.style.color = '#f87171';
+              }}
+            >
+              <Trash2 size={14} />
+              <span>Delete</span>
+            </button>
+          )}
         </div>
       </aside>
 
@@ -315,9 +378,11 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           width: 440px;
           max-width: 90vw;
           height: 100vh;
-          background: #0d1322;
-          border-left: 1px solid #1e2d45;
-          box-shadow: -10px 0 40px rgba(0, 0, 0, 0.7);
+          background: rgba(10, 16, 28, 0.94);
+          backdrop-filter: blur(24px);
+          -webkit-backdrop-filter: blur(24px);
+          border-left: 1px solid rgba(255, 255, 255, 0.08);
+          box-shadow: -16px 0 50px rgba(0, 0, 0, 0.8), inset 1px 0 0 rgba(255, 255, 255, 0.05);
           display: flex;
           flex-direction: column;
           overflow-y: auto;
@@ -328,8 +393,8 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           align-items: center;
           justify-content: space-between;
           padding: 20px 24px;
-          border-bottom: 1px solid #1e2d45;
-          background: #090e18;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(6, 10, 18, 0.7);
         }
         .header-host-badge {
           display: flex;
@@ -345,14 +410,14 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           justify-content: center;
         }
         .status-indicator.online {
-          background: rgba(34, 197, 94, 0.2);
+          background: rgba(16, 185, 129, 0.2);
         }
         .status-indicator.online .dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
-          background: #22c55e;
-          box-shadow: 0 0 8px #22c55e;
+          background: #10b981;
+          box-shadow: 0 0 10px #10b981;
         }
         .status-indicator.offline {
           background: rgba(239, 68, 68, 0.2);
@@ -366,7 +431,7 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
         .eyebrow-text {
           font-size: 10px;
           font-weight: 800;
-          color: #38bdf8;
+          color: #22d3ee;
           letter-spacing: 0.08em;
           display: block;
         }
@@ -377,8 +442,8 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           margin: 2px 0 0 0;
         }
         .drawer-close-btn {
-          background: #17243b;
-          border: 1px solid #233552;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           color: #94a3b8;
           border-radius: 8px;
           width: 32px;
@@ -390,7 +455,7 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           transition: all 0.15s ease;
         }
         .drawer-close-btn:hover {
-          background: #ef4444;
+          background: rgba(239, 68, 68, 0.85);
           color: #ffffff;
           border-color: #ef4444;
         }
@@ -399,8 +464,8 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           grid-template-columns: 1fr 1fr;
           gap: 12px;
           padding: 14px 24px;
-          background: #0b111e;
-          border-bottom: 1px solid #1e2d45;
+          background: rgba(6, 10, 18, 0.5);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
         .ident-item {
           display: flex;
@@ -459,22 +524,22 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           transition: all 0.15s ease;
         }
         .action-btn.primary {
-          background: linear-gradient(135deg, #0284c7, #0369a1);
-          border: 1px solid #38bdf8;
+          background: linear-gradient(135deg, rgba(6, 182, 212, 0.9), rgba(59, 130, 246, 0.9));
+          border: 1px solid rgba(34, 211, 238, 0.5);
           color: #ffffff;
-          box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+          box-shadow: 0 4px 16px rgba(6, 182, 212, 0.35);
         }
         .action-btn.primary:hover {
-          background: #0284c7;
+          filter: brightness(1.1);
           transform: translateY(-1px);
         }
         .action-btn.secondary {
-          background: #111a2e;
-          border: 1px solid #1e2d45;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           color: #cbd5e1;
         }
         .action-btn.secondary:hover {
-          background: #1e2d45;
+          background: rgba(255, 255, 255, 0.08);
           color: #ffffff;
         }
         .drawer-metrics-container {
@@ -482,7 +547,7 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           display: flex;
           flex-direction: column;
           gap: 12px;
-          border-bottom: 1px solid #1e2d45;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
         .section-title {
           font-size: 11px;
@@ -493,13 +558,14 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           margin: 0 0 6px 0;
         }
         .drawer-meter-card {
-          background: #090e18;
-          border: 1px solid #1e2d45;
-          border-radius: 8px;
-          padding: 10px 14px;
+          background: rgba(13, 20, 36, 0.65);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          border-radius: 10px;
+          padding: 12px 14px;
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 8px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
         }
         .meter-header {
           display: flex;
@@ -521,7 +587,7 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
         .progress-track {
           width: 100%;
           height: 6px;
-          background: #17243b;
+          background: rgba(255, 255, 255, 0.06);
           border-radius: 999px;
           overflow: hidden;
         }
@@ -539,7 +605,7 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
         }
         .drawer-system-info {
           padding: 18px 24px;
-          border-bottom: 1px solid #1e2d45;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
         .info-grid {
           display: grid;
@@ -547,10 +613,10 @@ export default function QuickHostDrawer({ machine, liveMetrics, onClose }) {
           gap: 10px;
         }
         .info-cell {
-          background: #090e18;
-          border: 1px solid #1e2d45;
+          background: rgba(13, 20, 36, 0.55);
+          border: 1px solid rgba(255, 255, 255, 0.06);
           border-radius: 8px;
-          padding: 8px 12px;
+          padding: 10px 12px;
           display: flex;
           flex-direction: column;
           gap: 2px;

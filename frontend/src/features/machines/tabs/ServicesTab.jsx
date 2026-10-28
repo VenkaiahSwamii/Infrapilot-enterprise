@@ -17,7 +17,9 @@ import {
   Activity,
   Plus,
   Trash2,
-  Sparkles
+  Sparkles,
+  ShieldAlert,
+  Shield
 } from 'lucide-react';
 import { 
   getMachineServicesScoped, 
@@ -25,18 +27,21 @@ import {
   getMachineServiceLogs,
   getMonitoredServices,
   addMonitoredService,
-  removeMonitoredService
+  removeMonitoredService,
+  resetServiceFlap
 } from '../../../api/machines.js';
 import { useDashboardStore } from '../../../store/dashboardStore.jsx';
 import { getMachineId } from '../../../utils/machineId.js';
 
 export default function ServicesTab({ machine }) {
-  const machineId = getMachineId(machine);
+  const rawId = machine?.id || machine?.ID || getMachineId(machine);
+  const cleanId = String(rawId || '').split('_')[0];
+  const machineId = cleanId;
   const hostname = machine?.hostname || machineId || 'Server Node';
   const { addToast } = useDashboardStore();
 
   const [services, setServices] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'RUNNING' | 'STOPPED' | 'FAILED'
@@ -55,6 +60,32 @@ export default function ServicesTab({ machine }) {
   const [newDisplayName, setNewDisplayName] = useState('');
   const [newAlertLevel, setNewAlertLevel] = useState('CRITICAL');
   const [isSubmittingService, setIsSubmittingService] = useState(false);
+  const [isResettingFlap, setIsResettingFlap] = useState(false);
+
+  const handleResetFlap = async (serviceTarget = 'ALL') => {
+    setIsResettingFlap(true);
+    try {
+      await resetServiceFlap(machineId, serviceTarget);
+      if (addToast) {
+        addToast(
+          'success',
+          'Flap Protection Reset',
+          serviceTarget === 'ALL'
+            ? 'All service flap counters cleared and circuit breakers re-armed.'
+            : `Flap protection counter reset for ${serviceTarget}.`
+        );
+      }
+      fetchServices(true);
+      fetchMonitoredCustom();
+    } catch (err) {
+      console.error('Reset flap error:', err);
+      if (addToast) {
+        addToast('error', 'Reset Failed', 'Failed to reset service flap counters.');
+      }
+    } finally {
+      setIsResettingFlap(false);
+    }
+  };
 
   const fetchMonitoredCustom = async () => {
     if (!machineId) return;
@@ -113,9 +144,9 @@ export default function ServicesTab({ machine }) {
     try {
       const data = await getMachineServicesScoped(machineId);
       let list = [];
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && data.length > 0) {
         list = data;
-      } else if (data?.services && Array.isArray(data.services)) {
+      } else if (Array.isArray(data?.services) && data.services.length > 0) {
         list = data.services;
       }
       setServices(list);
@@ -393,8 +424,30 @@ export default function ServicesTab({ machine }) {
           ))}
         </div>
 
-        {/* Actions: Add Service & Sync */}
+        {/* Actions: Add Service, Reset Flap & Sync */}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            onClick={() => handleResetFlap('ALL')}
+            disabled={isResettingFlap}
+            title="Reset flapping counters & re-arm auto-remediation circuit breakers for this node"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              color: '#f59e0b',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              borderRadius: '6px',
+              cursor: isResettingFlap ? 'not-allowed' : 'pointer',
+              fontSize: '12px',
+              fontWeight: 600
+            }}
+          >
+            <RotateCcw size={12} className={isResettingFlap ? 'spin' : ''} />
+            {isResettingFlap ? 'Resetting...' : 'Reset Flap'}
+          </button>
+
           <button
             onClick={() => setIsAddModalOpen(true)}
             style={{
@@ -450,8 +503,14 @@ export default function ServicesTab({ machine }) {
         ) : filteredServices.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: '#64748b' }}>
             <Server size={36} style={{ opacity: 0.3, marginBottom: '10px' }} />
-            <div style={{ fontWeight: 600, color: '#f1f5f9' }}>No Services Matching Filter</div>
-            <p style={{ fontSize: '12px', margin: '4px 0 0 0' }}>Try adjusting your search query or filter tags.</p>
+            <div style={{ fontWeight: 600, color: '#f1f5f9' }}>
+              {services.length === 0 ? 'No Active Services Reported' : 'No Services Matching Filter'}
+            </div>
+            <p style={{ fontSize: '12px', margin: '4px 0 0 0' }}>
+              {services.length === 0
+                ? 'No service telemetry has been reported for this host yet. Ensure infrapilot-agent is active.'
+                : 'Try adjusting your search query or filter tags.'}
+            </p>
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
@@ -520,14 +579,47 @@ export default function ServicesTab({ machine }) {
                       </span>
                     </td>
 
-                    {/* Restarts */}
+                    {/* Restarts / Flap Status */}
                     <td style={{ padding: '12px 16px' }}>
-                      <span style={{
-                        fontWeight: 600,
-                        color: restarts > 3 ? '#ef4444' : restarts > 0 ? '#f59e0b' : '#94a3b8'
-                      }}>
-                        {restarts} {restarts === 1 ? 'restart' : 'restarts'}
-                      </span>
+                      {restarts >= 3 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                            color: '#ef4444',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            width: 'fit-content'
+                          }}>
+                            <ShieldAlert size={11} /> FLAP_SUSPENDED ({restarts}/3)
+                          </span>
+                          <span style={{ fontSize: '10px', color: '#f87171' }}>Circuit Breaker Tripped</span>
+                        </div>
+                      ) : restarts > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontWeight: 700,
+                            color: '#f59e0b',
+                            fontSize: '12px'
+                          }}>
+                            <RotateCcw size={11} /> {restarts} / 3 Restarts
+                          </span>
+                          <span style={{ fontSize: '10px', color: '#94a3b8' }}>10m Auto-Cooldown Active</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#94a3b8', fontSize: '12px' }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#22c55e' }} />
+                          <span>0 restarts (Stable)</span>
+                        </div>
+                      )}
                     </td>
 
                     {/* Health Check */}

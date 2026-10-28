@@ -23,10 +23,9 @@ import { executeRemoteAgentUninstall } from '../../api/remoteDeploy.js';
 import { getMachineId } from '../../utils/machineId.js';
 
 export default function UninstallAgentModal({ isOpen, onClose, agent, onUninstalled }) {
-  if (!isOpen || !agent) return null;
-
-  const agentId = agent.id || agent.ID || agent.machine_id || getMachineId(agent);
-  const detectedHost = agent.ip_address || agent.ipAddress || agent.IPAddress || agent.hostname || '';
+  const safeAgent = agent || {};
+  const agentId = safeAgent.id || safeAgent.ID || safeAgent.machine_id || getMachineId(safeAgent);
+  const detectedHost = safeAgent.ip_address || safeAgent.ipAddress || safeAgent.IPAddress || safeAgent.hostname || '';
 
   // Mode selection: 'ssh' (Auto SSH push) or 'manual' (One-liner copy)
   const [activeTab, setActiveTab] = useState('ssh'); // 'ssh' | 'manual'
@@ -62,16 +61,18 @@ export default function UninstallAgentModal({ isOpen, onClose, agent, onUninstal
     if (detectedHost) {
       setHost(detectedHost);
     }
-    if (agent.hostname && agent.hostname.toLowerCase().includes('luffy')) {
+    if (safeAgent.hostname && safeAgent.hostname.toLowerCase().includes('luffy')) {
       setUsername('luffy');
     }
-  }, [agent, detectedHost]);
+  }, [safeAgent, detectedHost]);
 
   useEffect(() => {
     if (logsEndRef.current && showLogs) {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [result?.logs, showLogs]);
+
+  if (!isOpen || !agent) return null;
 
   const handleCopy = (text, os) => {
     navigator.clipboard.writeText(text);
@@ -319,7 +320,7 @@ export default function UninstallAgentModal({ isOpen, onClose, agent, onUninstal
                           <input
                             type="text"
                             className="uam-input"
-                            placeholder="e.g. 192.168.1.136"
+                            placeholder="e.g. 192.168.1.24"
                             value={host}
                             onChange={(e) => setHost(e.target.value)}
                             disabled={uninstalling}

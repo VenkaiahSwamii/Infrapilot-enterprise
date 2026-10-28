@@ -433,9 +433,49 @@ func (h *ServerHandler) ServerHeartbeat(c *gin.Context) {
 		monitoredServices = h.monitoredSvc.GetActiveServiceNamesForServer(server.ID, server.OS)
 	}
 
+	servicePolicies := make(map[string]string)
+	if database.DB != nil {
+		var activePolicies []models.SREActionPolicy
+		if err := database.DB.Where("enabled = ?", true).Find(&activePolicies).Error; err == nil {
+			// 1. Process category-level defaults first
+			for _, p := range activePolicies {
+				cat := strings.ToLower(strings.TrimSpace(p.Category))
+				mode := strings.ToUpper(strings.TrimSpace(p.Mode))
+				if cat != "" && mode != "" {
+					servicePolicies[cat] = mode
+					if cat == "storage" {
+						servicePolicies["disk"] = mode
+					}
+				}
+			}
+
+			// 2. Process component-level specific overrides (takes precedence over category)
+			for _, p := range activePolicies {
+				comp := strings.ToLower(strings.TrimSpace(p.Component))
+				mode := strings.ToUpper(strings.TrimSpace(p.Mode))
+				if comp == "" || mode == "" {
+					continue
+				}
+				servicePolicies[comp] = mode
+				servicePolicies[strings.TrimSuffix(comp, ".service")] = mode
+				servicePolicies[comp+".service"] = mode
+
+				// Map specific storage components to known mount points
+				if comp == "root_disk" {
+					servicePolicies["/"] = mode
+					servicePolicies["c:"] = mode
+					servicePolicies["c"] = mode
+				} else if comp == "var_log_disk" {
+					servicePolicies["/var/log"] = mode
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":             "success",
 		"monitored_services": monitoredServices,
+		"service_policies":   servicePolicies,
 	})
 }
 

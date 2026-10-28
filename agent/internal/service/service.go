@@ -23,7 +23,7 @@ func (p *Program) Stop(s service.Service) error {
 // NewService creates a new Service instance for Windows service management.
 func NewService() (service.Service, error) {
 	svcConfig := &service.Config{
-		Name:        "InfraPilotAgent",
+		Name:        "infrapilot-agent",
 		DisplayName: "InfraPilot Monitoring Agent",
 		Description: "InfraPilot Enterprise Monitoring Agent Service.",
 	}

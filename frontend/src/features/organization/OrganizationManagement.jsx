@@ -124,7 +124,6 @@ export default function OrganizationManagement() {
     { id: 'overview', label: 'Organization Overview', icon: Building2 },
     { id: 'users', label: 'Users & Team', icon: UsersIcon },
     { id: 'roles', label: 'Role Permissions', icon: ShieldCheck },
-    { id: 'settings', label: 'White-Label Settings', icon: Palette },
     { id: 'quotas', label: 'Resource Quotas', icon: Gauge },
     { id: 'audit', label: 'Tenant Audit Logs', icon: ShieldAlert },
   ];

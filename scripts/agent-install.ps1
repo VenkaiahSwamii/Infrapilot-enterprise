@@ -3,9 +3,28 @@
 # Installs agent as a native Windows Service (InfraPilotAgent)
 # ==============================================================================
 param(
-    [string]$ServerURL = "http://192.168.1.13:8080",
+    [string]$ServerURL = "",
     [string]$EnrollToken = ""
 )
+
+if (-not $ServerURL) {
+    if ($env:SERVER_URL) {
+        $ServerURL = $env:SERVER_URL
+    } elseif (Test-Path ".\config.toml") {
+        $cfgMatch = Select-String -Path ".\config.toml" -Pattern 'backend_url\s*=\s*"([^"]+)"'
+        if ($cfgMatch -and $cfgMatch.Matches.Count -gt 0) {
+            $ServerURL = $cfgMatch.Matches[0].Groups[1].Value
+        }
+    } elseif (Test-Path "..\config.toml") {
+        $cfgMatch = Select-String -Path "..\config.toml" -Pattern 'backend_url\s*=\s*"([^"]+)"'
+        if ($cfgMatch -and $cfgMatch.Matches.Count -gt 0) {
+            $ServerURL = $cfgMatch.Matches[0].Groups[1].Value
+        }
+    }
+}
+if (-not $ServerURL) {
+    $ServerURL = "http://localhost:8080"
+}
 
 $ErrorActionPreference = "Stop"
 
@@ -20,13 +39,24 @@ $BinaryPath = "$InstallDir\infrapilot-agent.exe"
 $ConfigPath = "$InstallDir\config.toml"
 $CertPath = "$CertsDir\ca.crt"
 
-# 1. Create Target Directories
+# 1. Create Target Directories (Program Files for binaries, ProgramData for runtime logs)
+$ProgramDataDir = $env:ProgramData
+if (-not $ProgramDataDir) {
+    $ProgramDataDir = "C:\ProgramData"
+}
+$ProgramDataLogs = "$ProgramDataDir\InfraPilot\logs"
+
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 }
+if (-not (Test-Path "$InstallDir\logs")) {
+    New-Item -ItemType Directory -Force -Path "$InstallDir\logs" | Out-Null
+}
+if (-not (Test-Path $ProgramDataLogs)) {
+    New-Item -ItemType Directory -Force -Path $ProgramDataLogs | Out-Null
+}
 if (-not (Test-Path $CertsDir)) {
     New-Item -ItemType Directory -Force -Path $CertsDir | Out-Null
-    
 }
 
 # 2. Stop existing service and processes to prevent file-locking during binary update
@@ -38,17 +68,18 @@ if ($ExistingService) {
     Start-Sleep -Seconds 1
 }
 Stop-Process -Name "infrapilot-agent" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$InstallDir\logs\agent.log" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 
 # 3. Download Windows Agent Binary
 Write-Host "[+] Downloading InfraPilot Agent binary from $ServerURL..." -ForegroundColor Green
 $BinaryURL = "$ServerURL/downloads/infrapilot-agent-windows-amd64.exe"
 try {
-    Invoke-WebRequest -Uri $BinaryURL -OutFile $BinaryPath -UseBasicParsing
+    Invoke-WebRequest -Uri $BinaryURL -OutFile $BinaryPath -UseBasicParsing -TimeoutSec 1800
 } catch {
     $FallbackURL = "$ServerURL/downloads/infrapilot-agent.exe"
     try {
-        Invoke-WebRequest -Uri $FallbackURL -OutFile $BinaryPath -UseBasicParsing
+        Invoke-WebRequest -Uri $FallbackURL -OutFile $BinaryPath -UseBasicParsing -TimeoutSec 1800
     } catch {
         $LocalCandidates = @(".\infrapilot-agent-windows-amd64.exe", ".\infrapilot-agent.exe", "..\infrapilot-agent.exe", ".\agent\agent.exe", ".\dist\infrapilot-agent-windows-amd64.exe")
         foreach ($cand in $LocalCandidates) {
@@ -63,38 +94,36 @@ try {
 # 4. Download CA Certificate
 Write-Host "[+] Fetching CA Certificate for encrypted TLS communication..." -ForegroundColor Green
 try {
-    Invoke-WebRequest -Uri "$ServerURL/downloads/ca.crt" -OutFile $CertPath -UseBasicParsing
+    Invoke-WebRequest -Uri "$ServerURL/downloads/ca.crt" -OutFile $CertPath -UseBasicParsing -TimeoutSec 30
 } catch {
     "" | Out-File -FilePath $CertPath -Encoding ascii
 }
 
-# 5. Write Configuration File
-Write-Host "[+] Writing agent configuration ($ConfigPath)..." -ForegroundColor Green
-$Hostname = $env:COMPUTERNAME
-$ConfigContent = @"
-backend_url = "$ServerURL"
-enrollment_token = "$EnrollToken"
-registered_hostname = "$Hostname"
-interval = 5
+# 5. Fetch Agent Configuration from Central Server
+Write-Host "[+] Fetching configuration from $ServerURL/downloads/config.toml..." -ForegroundColor Green
+$DownloadedConfig = $false
+try {
+    Invoke-WebRequest -Uri "$ServerURL/downloads/config.toml" -OutFile $ConfigPath -UseBasicParsing -TimeoutSec 30
+    $DownloadedConfig = $true
+} catch {
+    Write-Host "[!] Could not download config.toml from server, checking local repository..." -ForegroundColor Yellow
+    if (Test-Path ".\config.toml") {
+        Copy-Item ".\config.toml" $ConfigPath -Force
+        $DownloadedConfig = $true
+    } elseif (Test-Path "..\config.toml") {
+        Copy-Item "..\config.toml" $ConfigPath -Force
+        $DownloadedConfig = $true
+    }
+}
 
-[logging]
-log_level = "info"
-log_format = "text"
-
-[collectors]
-system = true
-processes = true
-docker = true
-kubernetes = true
-logs = true
-security = true
-
-[tls]
-ca_cert = "$($CertPath -replace '\\', '/')"
-enabled = true
-"@
-
-Set-Content -Path $ConfigPath -Value $ConfigContent -Encoding UTF8
+if ($DownloadedConfig -and (Test-Path $ConfigPath)) {
+    $cfgRaw = Get-Content -Path $ConfigPath -Raw
+    $cfgRaw = $cfgRaw -replace 'backend_url\s*=\s*"[^"]*"', "backend_url = `"$ServerURL`""
+    if ($EnrollToken -ne "") {
+        $cfgRaw = $cfgRaw -replace 'enrollment_token\s*=\s*"[^"]*"', "enrollment_token = `"$EnrollToken`""
+    }
+    Set-Content -Path $ConfigPath -Value $cfgRaw -Encoding UTF8
+}
 
 # Remove stale config.json to allow fresh token enrollment
 $JsonConfig = "$InstallDir\config.json"
@@ -132,7 +161,9 @@ if (-not $ServiceStarted) {
 
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host "   ✅ InfraPilot Windows Agent Successfully Installed!  " -ForegroundColor Green
-Write-Host "   Service:  $ServiceName                               " -ForegroundColor Green
-Write-Host "   Path:     $BinaryPath                                " -ForegroundColor Green
-Write-Host "   Config:   $ConfigPath                                " -ForegroundColor Green
+Write-Host "   Service:   $ServiceName                               " -ForegroundColor Green
+Write-Host "   Binary:    $BinaryPath                                " -ForegroundColor Green
+Write-Host "   Config:    $ConfigPath                                " -ForegroundColor Green
+Write-Host "   Logs:      $ProgramDataLogs\agent.log                 " -ForegroundColor Green
+Write-Host "   Live Logs: Get-Content `"$ProgramDataLogs\agent.log`" -Wait -Tail 30" -ForegroundColor Yellow
 Write-Host "========================================================" -ForegroundColor Cyan

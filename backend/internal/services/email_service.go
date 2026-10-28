@@ -146,20 +146,22 @@ func GetResolvedSMTPConfig() ResolvedSMTPConfig {
 				WHERE id = 1
 			`).Scan(&enabled, &dbHost, &dbPort, &dbUser, &dbPass, &dbFrom, &dbRecipient)
 
-			if rowErr == nil && dbHost != "" {
-				res.Enabled = enabled
-				res.Host = dbHost
-				if dbPort > 0 {
-					res.Port = dbPort
-				}
-				if dbUser != "" {
-					res.User = dbUser
-				}
-				if dbPass != "" {
-					res.Password = dbPass
-				}
-				if dbFrom != "" {
-					res.From = dbFrom
+			if rowErr == nil {
+				if dbHost != "" {
+					res.Enabled = enabled
+					res.Host = dbHost
+					if dbPort > 0 {
+						res.Port = dbPort
+					}
+					if dbUser != "" {
+						res.User = dbUser
+					}
+					if dbPass != "" {
+						res.Password = dbPass
+					}
+					if dbFrom != "" {
+						res.From = dbFrom
+					}
 				}
 				if dbRecipient != "" {
 					res.DefaultRecipient = dbRecipient
@@ -415,6 +417,37 @@ func (s *EmailService) SendPolicyAlertEmail(policy *models.SREActionPolicy, aler
 		alert.MetricValue,
 		alert.Threshold,
 		alert.Message,
+		time.Now().Format(time.RFC1123),
+	)
+
+	return s.SendRawEmail(recipient, subject, body)
+}
+
+// SendManualResolutionEmail sends a correlated resolution email when an operator manually fixes and restarts a service in NOTIFY_EMAIL mode.
+func (s *EmailService) SendManualResolutionEmail(alert *models.LinuxAlert, hostname, serviceName string, restartCount int, recipient string) error {
+	smtpCfg := GetResolvedSMTPConfig()
+	if recipient == "" {
+		recipient = smtpCfg.DefaultRecipient
+	}
+
+	subject := fmt.Sprintf("🟢 [RESOLVED] Service '%s' Restored by Operator on %s", serviceName, hostname)
+	body := fmt.Sprintf(
+		"Hello Administrator,\n\n"+
+			"The incident for service '%s' has been marked RESOLVED.\n"+
+			"--------------------------------------------------\n"+
+			"Service / Unit: %s\n"+
+			"Host / Machine: %s\n"+
+			"Action: Operator Manual Restart Detected & Verified Healthy\n"+
+			"Updated 24h Restart Count: %d\n"+
+			"Resolution Status: HEALTHY / RUNNING\n"+
+			"Resolution Time: %s\n"+
+			"--------------------------------------------------\n\n"+
+			"Telemetry and health monitors have returned to normal operating baseline.\n\n"+
+			"-- InfraPilot SRE Engine",
+		serviceName,
+		serviceName,
+		hostname,
+		restartCount,
 		time.Now().Format(time.RFC1123),
 	)
 

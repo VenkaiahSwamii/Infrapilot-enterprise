@@ -1,7 +1,11 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"infrapilot/backend/internal/reports"
 
@@ -46,9 +50,48 @@ func (h *ReportsHandler) GenerateReport(c *gin.Context) {
 		return
 	}
 
+	// Normalize format
+	req.Format = strings.ToLower(strings.TrimSpace(req.Format))
+	if req.Format == "xlsx" {
+		req.Format = "excel"
+	}
+
+	// Normalize type
+	rawType := strings.ToLower(strings.TrimSpace(string(req.Type)))
+	rawType = strings.ReplaceAll(rawType, " ", "_")
+	req.Type = reports.ReportType(rawType)
+
 	report, err := h.generator.Generate(userID, req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate report: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, report)
+}
+
+// GetReport godoc
+// @Summary Get report details
+// @Description Get a report by its ID
+// @Tags Reports
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Report ID"
+// @Success 200 {object} models.Report
+// @Failure 400 {object} gin.H
+// @Failure 404 {object} gin.H
+// @Router /reports/{id} [get]
+func (h *ReportsHandler) GetReport(c *gin.Context) {
+	reportID := c.Param("id")
+	id, err := uuid.Parse(reportID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid report ID format"})
+		return
+	}
+
+	report, err := h.generator.Repo.FindByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "report not found"})
 		return
 	}
 
@@ -72,9 +115,12 @@ func (h *ReportsHandler) ListReports(c *gin.Context) {
 	}
 
 	reportList, err := h.generator.Repo.FindByUser(userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch reports"})
-		return
+	if err != nil || len(reportList) == 0 {
+		reportList, err = h.generator.Repo.FindAll()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch reports"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, reportList)
@@ -88,23 +134,47 @@ func (h *ReportsHandler) ListReports(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path string true "Report ID"
 // @Success 200 {file} binary
+// @Failure 400 {object} gin.H
 // @Failure 404 {object} gin.H
 // @Router /reports/{id}/download [get]
 func (h *ReportsHandler) DownloadReport(c *gin.Context) {
 	reportID := c.Param("id")
+	id, err := uuid.Parse(reportID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid report ID format"})
+		return
+	}
 
-	report, err := h.generator.Repo.FindByID(mustParseUUID(reportID))
+	report, err := h.generator.Repo.FindByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "report not found"})
 		return
 	}
 
 	if report.Status != reports.ReportStatusCompleted {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "report is not ready for download"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("report is not ready for download (status: %s)", report.Status)})
 		return
 	}
 
-	c.File(report.FilePath)
+	// Resolve file path on disk
+	filePath := report.FilePath
+	if filePath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "report file path is empty"})
+		return
+	}
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// Fallback to BaseDir with file base name
+		fallback := filepath.Join(h.generator.BaseDir, filepath.Base(filePath))
+		if _, err := os.Stat(fallback); err == nil {
+			filePath = fallback
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "report file not found on disk"})
+			return
+		}
+	}
+
+	c.FileAttachment(filePath, filepath.Base(filePath))
 }
 
 // DeleteReport godoc
@@ -114,20 +184,30 @@ func (h *ReportsHandler) DownloadReport(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path string true "Report ID"
 // @Success 204
+// @Failure 400 {object} gin.H
 // @Failure 404 {object} gin.H
 // @Router /reports/{id} [delete]
 func (h *ReportsHandler) DeleteReport(c *gin.Context) {
 	reportID := c.Param("id")
+	id, err := uuid.Parse(reportID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid report ID format"})
+		return
+	}
 
-	report, err := h.generator.Repo.FindByID(mustParseUUID(reportID))
+	report, err := h.generator.Repo.FindByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "report not found"})
 		return
 	}
 
-	// Cleanup file
+	// Cleanup physical file on disk
 	if report.FilePath != "" {
-		h.generator.PDF.Cleanup(report.FilePath)
+		filePath := report.FilePath
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			filePath = filepath.Join(h.generator.BaseDir, filepath.Base(report.FilePath))
+		}
+		_ = os.Remove(filePath)
 	}
 
 	// Delete from database
@@ -164,11 +244,17 @@ func (h *ReportsHandler) ScheduleReport(c *gin.Context) {
 		return
 	}
 
+	req.Format = strings.ToLower(req.Format)
+	if req.Format == "xlsx" {
+		req.Format = "excel"
+	}
+
 	report, err := h.generator.Generate(userID, reports.GenerateReportRequest{
 		Name:       req.Name,
 		Type:       req.Type,
 		Format:     req.Format,
 		Schedule:   req.Schedule,
+		Scope:      req.Scope,
 		DateFrom:   req.DateFrom,
 		DateTo:     req.DateTo,
 		MachineIDs: req.MachineIDs,
@@ -180,12 +266,4 @@ func (h *ReportsHandler) ScheduleReport(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, report)
-}
-
-func mustParseUUID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil
-	}
-	return id
 }

@@ -18,6 +18,18 @@ Write-Host "[3/3] Starting InfraPilot Agent (Go)..." -ForegroundColor Yellow
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$RootDir\agent'; go run cmd/agent/main.go"
 
 Write-Host ""
+$BackendURL = "http://localhost:8080"
+if (Test-Path "$RootDir\config.toml") {
+    $cfgMatch = Select-String -Path "$RootDir\config.toml" -Pattern 'backend_url\s*=\s*"([^"]+)"'
+    if ($cfgMatch -and $cfgMatch.Matches.Count -gt 0) {
+        $BackendURL = $cfgMatch.Matches[0].Groups[1].Value
+    }
+}
+$FrontendURL = "http://localhost:5173"
+if ($BackendURL -match "://([^:/]+)") {
+    $FrontendURL = "http://" + $Matches[1] + ":5173"
+}
+
 Write-Host "✅ All processes launched in separate terminal windows." -ForegroundColor Green
-Write-Host "• Frontend: http://192.168.1.13:5173" -ForegroundColor LightGray
-Write-Host "• Backend:  http://192.168.1.13:8080" -ForegroundColor LightGray
+Write-Host "• Frontend: $FrontendURL" -ForegroundColor LightGray
+Write-Host "• Backend:  $BackendURL" -ForegroundColor LightGray

@@ -1,6 +1,9 @@
 package routes
 
 import (
+	"context"
+	"time"
+
 	"infrapilot/backend/internal/ai"
 	"infrapilot/backend/internal/analytics"
 	"infrapilot/backend/internal/apm"
@@ -16,6 +19,7 @@ import (
 	"infrapilot/backend/internal/repository"
 	"infrapilot/backend/internal/search"
 	"infrapilot/backend/internal/services"
+	"infrapilot/backend/internal/sre"
 	"infrapilot/backend/internal/network"
 	"infrapilot/backend/internal/synthetic"
 	"infrapilot/backend/internal/tracing"
@@ -107,6 +111,11 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 	remoteDeployHandler := handlers.NewRemoteDeployHandler(remoteDeployService)
 	configHandler := handlers.NewConfigHandler()
 
+	sreClient := sre.NewClient("")
+	sreSyncWorker := sre.NewTopologySyncWorker(serverRepo, sreClient)
+	sreHandler := handlers.NewSREHandler(sreClient, sreSyncWorker)
+	go sreSyncWorker.Start(context.Background(), 15*time.Second)
+
 	api := r.Group("/api/v1")
 	api.Use(apm.APMMiddleware(apmService))
 	{
@@ -179,6 +188,7 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			})
 		})
 
+		api.POST("/platform/email-alert", handlers.PlatformEmailAlert)
 		api.GET("/healthz", handlers.SystemHealth)
 		api.GET("/health", handlers.SystemHealth)
 		api.GET("/ready", handlers.SystemHealth)
@@ -544,6 +554,18 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.POST("/sre/policies", adminOnly, handlers.SaveSREActionPolicy)
 			protected.PUT("/sre/policies/:id", adminOnly, handlers.UpdateSREActionPolicy)
 			protected.DELETE("/sre/policies/:id", adminOnly, handlers.DeleteSREActionPolicy)
+
+			// Zero-AI Deterministic SRE Diagnostic Engine Bridge (Sprint SRE)
+			sreGroup := protected.Group("/sre")
+			{
+				sreGroup.POST("/query", sreHandler.Query)
+				sreGroup.GET("/topology", sreHandler.GetTopology)
+				sreGroup.POST("/time-travel", sreHandler.TimeTravel)
+				sreGroup.POST("/slo/evaluate", sreHandler.EvaluateSLO)
+				sreGroup.POST("/drift/compare", sreHandler.CompareDrift)
+				sreGroup.POST("/postmortem/generate", sreHandler.GeneratePostMortem)
+				sreGroup.POST("/sync", sreHandler.TriggerSync)
+			}
 			protected.GET("/linux/servers", handlers.ListLinuxServers)
 			protected.GET("/linux/servers/:id", handlers.GetLinuxServer)
 			protected.GET("/linux/servers/:id/metrics", handlers.GetLinuxMetrics)
@@ -561,6 +583,9 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			protected.GET("/machines/:id/actions", handlers.GetRemediationJobs)
 			protected.GET("/services/logs", handlers.GetServiceLogs)
 			protected.POST("/services/reset", operatorAndAdmin, handlers.ResetServiceHealth)
+			protected.POST("/services/reset-flap", operatorAndAdmin, handlers.ResetServiceHealth)
+			protected.POST("/servers/:id/services/reset-flap", operatorAndAdmin, handlers.ResetServiceHealth)
+			protected.POST("/machines/:id/services/reset-flap", operatorAndAdmin, handlers.ResetServiceHealth)
 			protected.POST("/services/start", operatorAndAdmin, handlers.ServiceStart)
 			protected.POST("/services/stop", operatorAndAdmin, handlers.ServiceStop)
 			protected.POST("/services/restart", operatorAndAdmin, handlers.ServiceRestart)
@@ -626,6 +651,7 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 			// Sprint 30 Enterprise Reporting & Analytics
 			protected.POST("/reports/generate", handlers.NewReportsHandler().GenerateReport)
 			protected.GET("/reports", handlers.NewReportsHandler().ListReports)
+			protected.GET("/reports/:id", handlers.NewReportsHandler().GetReport)
 			protected.GET("/reports/:id/download", handlers.NewReportsHandler().DownloadReport)
 			protected.DELETE("/reports/:id", handlers.NewReportsHandler().DeleteReport)
 			protected.POST("/reports/schedule", handlers.NewReportsHandler().ScheduleReport)
@@ -824,6 +850,8 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 		api.GET("/commands/pending", handlers.GetPendingCommands)
 		api.POST("/commands/result", handlers.PostCommandResult)
 		api.POST("/agent/commands/result", handlers.PostCommandResult)
+		api.POST("/events/ingest", handlers.IngestEventHTTP)
+		api.POST("/alerts/events", handlers.IngestEventHTTP)
 
 
 		// Sprint 6.6: Terminal Command public routes
@@ -909,6 +937,5 @@ func Setup(r *gin.Engine, hub *websocket.Hub, eventBus *events.EventBus) {
 		api.DELETE("/orgs/:orgId/alert-rules/:ruleId", handlers.NewAlertRuleHandler().DeleteRule)
 		api.PATCH("/orgs/:orgId/alert-rules/:ruleId/toggle", handlers.NewAlertRuleHandler().ToggleRule)
 		api.POST("/orgs/:orgId/alert-rules/presets", handlers.NewAlertRuleHandler().SeedPresets)
-
 	}
 }

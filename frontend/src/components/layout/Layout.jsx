@@ -7,6 +7,7 @@ import { useDashboardStore } from '../../store/dashboardStore.jsx';
 import { getProfile } from '../../api/auth.js';
 import { X, CheckCircle, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import ErrorBoundary from '../common/ErrorBoundary.jsx';
+import SREFloatingWidget from '../../features/sre/SREFloatingWidget.jsx';
 
 const UserProfileContext = createContext(null);
 
@@ -161,6 +162,9 @@ export default function Layout() {
             </ErrorBoundary>
           </main>
         </div>
+
+        {/* Global SRE Diagnostic Copilot Floating Widget */}
+        <SREFloatingWidget />
 
         {/* Dynamic Toast Notifications */}
         <div className="toast-container">

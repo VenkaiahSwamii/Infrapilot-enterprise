@@ -6,6 +6,7 @@ export const API_BASE =
 
 export const apiClient = axios.create({
   baseURL: API_BASE,
+  timeout: 30000,
 });
 
 // Add token automatically

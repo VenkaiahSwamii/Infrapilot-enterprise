@@ -1,8 +1,9 @@
 import Settings from '../features/organization/Settings.jsx';
 
-export default function SettingsPage() {
+export default function SettingsPage({ initialTab }) {
   return (
     <Settings
+      initialTab={initialTab}
       settings={{
         company_name: '',
         logo_url: '',

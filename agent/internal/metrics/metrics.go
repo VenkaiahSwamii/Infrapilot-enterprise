@@ -46,6 +46,9 @@ type Metrics struct {
 	Load1        float64 `json:"load_1"`
 	Load5        float64 `json:"load_5"`
 	Load15       float64 `json:"load_15"`
+	AgentCPUUsage    float64 `json:"agent_cpu_usage"`
+	AgentMemoryMB    float64 `json:"agent_memory_mb"`
+	AgentMemoryUsage float64 `json:"agent_memory_usage"`
 
 	Filesystems       []FilesystemMetric       `json:"filesystems"`
 	Processes         []ProcessMetric          `json:"processes"`

@@ -279,20 +279,25 @@ export default function MachineDetailPage() {
     <div className="machine-detail-root">
       {/* Top Header Actions Row */}
       <div className="header-top-row">
-        <button className="back-btn" onClick={() => navigate('/infrastructure')} type="button">
-          <ArrowLeft size={14} /> Back to Machines
-        </button>
+        <div className="breadcrumb-nav">
+          <button className="breadcrumb-back-btn" onClick={() => navigate('/infrastructure')} type="button" title="Back to Machines">
+            <ArrowLeft size={14} />
+          </button>
+          <span className="breadcrumb-link" onClick={() => navigate('/infrastructure')}>Machines</span>
+          <span className="breadcrumb-separator">/</span>
+          <span className="breadcrumb-current">{resolvedMachine?.hostname || machineId}</span>
+        </div>
 
         <div className="top-right-actions">
-          <button className="btn-action-ghost" onClick={handleRefresh} type="button">
+          <button className="btn-action-glass" onClick={handleRefresh} type="button">
             <RefreshCw size={13} /> Refresh
           </button>
-          <button className="btn-action-blue" onClick={handleRestartAgent} type="button">
+          <button className="btn-action-cyan" onClick={handleRestartAgent} type="button">
             <RotateCcw size={13} /> Restart Agent
           </button>
           <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
             <button
-              className={`btn-action-ghost icon-only ${showMoreMenu ? 'active' : ''}`}
+              className={`btn-action-glass icon-only ${showMoreMenu ? 'active' : ''}`}
               type="button"
               onClick={() => setShowMoreMenu(!showMoreMenu)}
               title="More Actions"
@@ -399,20 +404,21 @@ export default function MachineDetailPage() {
         <div className="host-title-left">
           <h1 className="host-name">{resolvedMachine?.hostname || machineId}</h1>
           {isBlocked ? (
-            <span className="status-badge stopped" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.35)', fontWeight: 700, gap: '4px', display: 'inline-flex', alignItems: 'center' }}>
+            <span className="phase2-status-pill stopped">
               <Lock size={12} color="#ef4444" /> STOPPED
             </span>
           ) : (
-            <span className={`status-badge ${isOnline ? 'online' : 'offline'}`}>
-              <span className="dot" /> {isOnline ? 'ONLINE' : 'OFFLINE'}
+            <span className={`phase2-status-pill ${isOnline ? 'online' : 'offline'}`}>
+              <span className={isOnline ? 'beacon-dot' : 'beacon-dot-red'} />
+              {isOnline ? 'ONLINE' : 'OFFLINE'}
             </span>
           )}
         </div>
 
         <div className="host-status-right">
-          <div className={`live-connected-pill ${isOnline ? 'connected' : 'disconnected'}`}>
-            <span className={isOnline ? 'green-pulse' : 'red-pulse'} />
-            <span>{isOnline ? 'CONNECTED' : 'DISCONNECTED'}</span>
+          <div className="live-telemetry-badge">
+            <span className={isOnline ? 'beacon-dot' : 'beacon-dot-red'} />
+            <span className="telemetry-label">LIVE TELEMETRY STREAM</span>
           </div>
           <span className="last-seen-label">
             Last seen: {liveMetric?.created_at ? new Date(liveMetric.created_at).toLocaleString('en-GB') : resolvedMachine?.last_seen ? new Date(resolvedMachine.last_seen).toLocaleString('en-GB') : '--'}
@@ -422,38 +428,38 @@ export default function MachineDetailPage() {
 
       {/* Metadata Ribbon Box (5 items) */}
       <div className="metadata-ribbon-grid">
-        <div className="ribbon-box">
+        <div className="glass-panel ribbon-card spotlight-card">
           <span className="lbl">Machine ID</span>
-          <span className="val mono">{resolvedMachine?.id || machineId || '--'}</span>
+          <span className="val mono" title={resolvedMachine?.id || machineId}>{resolvedMachine?.id || machineId || '--'}</span>
         </div>
 
-        <div className="ribbon-box">
+        <div className="glass-panel ribbon-card spotlight-card">
           <span className="lbl">IP Address</span>
-          <span className="val">{resolvedMachine?.ip_address || '--'}</span>
+          <span className="val cyan-text">{resolvedMachine?.ip_address || '--'}</span>
         </div>
 
-        <div className="ribbon-box">
+        <div className="glass-panel ribbon-card spotlight-card">
           <span className="lbl">OS</span>
           <span className="val">{resolvedMachine?.os || '--'}</span>
         </div>
 
-        <div className="ribbon-box flex-wide">
+        <div className="glass-panel ribbon-card spotlight-card flex-wide">
           <span className="lbl">Platform</span>
           <span className="val">{resolvedMachine?.platform || resolvedMachine?.operating_system || resolvedMachine?.os || '--'}</span>
         </div>
 
-        <div className="ribbon-box">
+        <div className="glass-panel ribbon-card spotlight-card">
           <span className="lbl">Architecture</span>
           <span className="val">{resolvedMachine?.architecture || '--'}</span>
         </div>
       </div>
 
-      {/* Tab Navigation Line */}
-      <div className="tab-line-bar">
+      {/* Tab Navigation Capsule Rail */}
+      <div className="glass-panel tab-capsule-rail">
         {TABS.map((tab) => (
           <button
             key={tab.id}
-            className={`tab-btn-line ${activeTab === tab.id ? 'active' : ''}`}
+            className={`tab-capsule-btn ${activeTab === tab.id ? 'active' : ''}`}
             onClick={() => setActiveTab(tab.id)}
             type="button"
           >
@@ -496,13 +502,13 @@ export default function MachineDetailPage() {
 
       <style>{`
         .machine-detail-root {
-          padding: 16px 24px 48px 24px;
-          background-color: #080c14;
+          padding: 20px 28px 56px 28px;
+          background-color: #070b14;
           min-height: calc(100vh - 64px);
           color: #f8fafc;
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 18px;
           position: relative;
         }
 
@@ -511,65 +517,117 @@ export default function MachineDetailPage() {
           justify-content: space-between;
           align-items: center;
         }
-        .back-btn {
+
+        .breadcrumb-nav {
           display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          background-color: #101726;
-          border: 1px solid #1c283d;
-          color: #cbd5e1;
-          font-size: 12.5px;
-          padding: 5px 12px;
-          border-radius: 6px;
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-        .back-btn:hover {
-          background-color: #1c283d;
-          color: #ffffff;
-        }
-        .top-right-actions {
-          display: flex;
           align-items: center;
           gap: 8px;
         }
-        .btn-action-ghost {
+        .breadcrumb-back-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          color: #cbd5e1;
+          cursor: pointer;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .breadcrumb-back-btn:hover {
+          background: rgba(6, 182, 212, 0.12);
+          border-color: rgba(6, 182, 212, 0.35);
+          color: #38bdf8;
+          box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+          transform: translateX(-2px);
+        }
+        .breadcrumb-link {
+          font-size: 13px;
+          font-weight: 500;
+          color: #94a3b8;
+          cursor: pointer;
+          transition: color 0.15s ease;
+        }
+        .breadcrumb-link:hover {
+          color: #38bdf8;
+        }
+        .breadcrumb-separator {
+          color: #475569;
+          font-size: 13px;
+        }
+        .breadcrumb-current {
+          font-size: 13px;
+          font-weight: 700;
+          color: #ffffff;
+          letter-spacing: -0.01em;
+        }
+
+        .top-right-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .btn-action-glass {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          background-color: #101726;
-          border: 1px solid #1c283d;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.09);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
           color: #cbd5e1;
           font-size: 12px;
-          padding: 6px 12px;
-          border-radius: 6px;
+          font-weight: 600;
+          padding: 7px 14px;
+          border-radius: 8px;
           cursor: pointer;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .btn-action-ghost:hover {
-          background-color: #1c283d;
+        .btn-action-glass:hover {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.18);
           color: #ffffff;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
         }
-        .btn-action-ghost.icon-only {
-          padding: 6px 8px;
+        .btn-action-glass.icon-only {
+          padding: 7px 10px;
         }
-        .btn-action-blue {
+        .btn-action-glass.active {
+          border-color: rgba(6, 182, 212, 0.45);
+          background: rgba(6, 182, 212, 0.12);
+        }
+
+        .btn-action-cyan {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          background-color: rgba(59, 130, 246, 0.1);
-          border: 1px solid #3b82f6;
+          background: linear-gradient(135deg, rgba(6, 182, 212, 0.16), rgba(14, 165, 233, 0.1));
+          border: 1px solid rgba(6, 182, 212, 0.35);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
           color: #38bdf8;
           font-size: 12px;
           font-weight: 600;
-          padding: 6px 14px;
-          border-radius: 6px;
+          padding: 7px 16px;
+          border-radius: 8px;
           cursor: pointer;
+          box-shadow: 0 0 16px rgba(6, 182, 212, 0.12);
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .btn-action-cyan:hover {
+          background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(14, 165, 233, 0.18));
+          border-color: rgba(6, 182, 212, 0.55);
+          color: #ffffff;
+          box-shadow: 0 0 24px rgba(6, 182, 212, 0.28);
+          transform: translateY(-1px);
         }
 
         .host-title-bar {
           display: flex;
           justify-content: space-between;
-          align-items: flex-start;
+          align-items: center;
         }
         .host-title-left {
           display: flex;
@@ -579,68 +637,79 @@ export default function MachineDetailPage() {
         .host-name {
           font-size: 26px;
           font-weight: 800;
+          letter-spacing: -0.02em;
           color: #ffffff;
           margin: 0;
           line-height: 1.1;
         }
-        .status-badge {
+
+        .phase2-status-pill {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 3px 10px;
-          border-radius: 12px;
+          padding: 4px 12px;
+          border-radius: 9999px;
           font-size: 11px;
           font-weight: 800;
           letter-spacing: 0.05em;
         }
-        .status-badge.online {
+        .phase2-status-pill.online {
           background-color: rgba(34, 197, 94, 0.12);
           color: #22c55e;
-          border: 1px solid rgba(34, 197, 94, 0.3);
+          border: 1px solid rgba(34, 197, 94, 0.35);
+          box-shadow: 0 0 12px rgba(34, 197, 94, 0.15);
         }
-        .status-badge.offline {
+        .phase2-status-pill.offline {
           background-color: rgba(239, 68, 68, 0.12);
           color: #ef4444;
-          border: 1px solid rgba(239, 68, 68, 0.3);
+          border: 1px solid rgba(239, 68, 68, 0.35);
         }
-        .dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background-color: currentColor;
-        }
-        .host-status-right {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-          gap: 3px;
-        }
-        .live-connected-pill {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 12px;
-          font-weight: 800;
-        }
-        .live-connected-pill.connected {
-          color: #22c55e;
-        }
-        .live-connected-pill.disconnected {
+        .phase2-status-pill.stopped {
+          background-color: rgba(239, 68, 68, 0.15);
           color: #ef4444;
+          border: 1px solid rgba(239, 68, 68, 0.4);
         }
-        .green-pulse {
+
+        .beacon-dot {
           width: 7px;
           height: 7px;
           border-radius: 50%;
           background-color: #22c55e;
-          box-shadow: 0 0 6px #22c55e;
+          box-shadow: 0 0 8px #22c55e;
+          animation: pulseGreenBeacon 2s infinite;
         }
-        .red-pulse {
+        .beacon-dot-red {
           width: 7px;
           height: 7px;
           border-radius: 50%;
           background-color: #ef4444;
-          box-shadow: 0 0 6px #ef4444;
+          box-shadow: 0 0 8px #ef4444;
+        }
+        @keyframes pulseGreenBeacon {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.45; transform: scale(0.85); }
+        }
+
+        .host-status-right {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 4px;
+        }
+        .live-telemetry-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(16, 24, 39, 0.65);
+          border: 1px solid rgba(34, 197, 94, 0.25);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border-radius: 20px;
+          padding: 4px 12px;
+          font-size: 11px;
+          font-weight: 700;
+          color: #22c55e;
+          letter-spacing: 0.04em;
         }
         .last-seen-label {
           font-size: 11.5px;
@@ -648,72 +717,72 @@ export default function MachineDetailPage() {
         }
 
         .metadata-ribbon-grid {
-          display: flex;
-          align-items: center;
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
           gap: 12px;
-          flex-wrap: wrap;
         }
-        .ribbon-box {
-          background-color: #101726;
-          border: 1px solid #1c283d;
-          border-radius: 8px;
-          padding: 8px 14px;
+        .ribbon-card {
+          padding: 10px 16px;
           display: flex;
           flex-direction: column;
+          gap: 2px;
         }
-        .ribbon-box.flex-wide {
-          flex: 1.5;
-        }
-        .ribbon-box .lbl {
+        .ribbon-card .lbl {
           font-size: 10.5px;
+          font-weight: 600;
           color: #64748b;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
         }
-        .ribbon-box .val {
-          font-size: 12.5px;
+        .ribbon-card .val {
+          font-size: 13px;
           color: #f1f5f9;
           font-weight: 600;
           margin-top: 1px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
-        .ribbon-box .val.mono {
-          font-family: monospace;
-          color: #cbd5e1;
-        }
-
-        .tab-line-bar {
-          display: flex;
-          align-items: center;
-          gap: 24px;
-          border-bottom: 1px solid #1c283d;
-          padding-bottom: 2px;
-          overflow-x: auto;
-        }
-        .tab-btn-line {
-          background: transparent;
-          border: none;
-          color: #94a3b8;
-          font-size: 13.5px;
-          font-weight: 500;
-          padding: 8px 0;
-          cursor: pointer;
-          position: relative;
-          transition: color 0.15s ease;
-        }
-        .tab-btn-line:hover {
-          color: #f1f5f9;
-        }
-        .tab-btn-line.active {
-          color: #06b6d4;
+        .ribbon-card .val.cyan-text {
+          color: #38bdf8;
           font-weight: 700;
         }
-        .tab-btn-line.active::after {
-          content: '';
-          position: absolute;
-          bottom: -2px;
-          left: 0;
-          width: 100%;
-          height: 2px;
-          background-color: #06b6d4;
-          border-radius: 2px;
+        .ribbon-card .val.mono {
+          font-family: monospace;
+          color: #94a3b8;
+          font-size: 12px;
+        }
+
+        .tab-capsule-rail {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px;
+          border-radius: 12px;
+          overflow-x: auto;
+        }
+        .tab-capsule-btn {
+          border-radius: 8px;
+          padding: 7px 16px;
+          font-size: 13px;
+          font-weight: 600;
+          border: 1px solid transparent;
+          background: transparent;
+          color: #94a3b8;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .tab-capsule-btn:hover {
+          color: #f8fafc;
+          background: rgba(255, 255, 255, 0.04);
+        }
+        .tab-capsule-btn.active {
+          color: #38bdf8;
+          background: rgba(6, 182, 212, 0.14);
+          border-color: rgba(6, 182, 212, 0.35);
+          box-shadow: 0 0 16px rgba(6, 182, 212, 0.12);
+          text-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
         }
 
         .tab-content-wrapper {
@@ -731,15 +800,17 @@ export default function MachineDetailPage() {
         .bottom-status-bar {
           position: fixed;
           bottom: 0;
-          left: 220px;
+          left: 240px;
           right: 0;
-          height: 32px;
-          background-color: #080c14;
-          border-top: 1px solid #161e2e;
+          height: 34px;
+          background: rgba(8, 12, 20, 0.88);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border-top: 1px solid rgba(255, 255, 255, 0.07);
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 24px;
+          padding: 0 28px;
           font-size: 11px;
           color: #64748b;
           z-index: 80;

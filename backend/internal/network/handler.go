@@ -270,8 +270,11 @@ func (h *Handler) RemediateLatency(c *gin.Context) {
 	// 1. Non-Disruptive OS DNS Cache Flush
 	if runtime.GOOS == "windows" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", "ipconfig /flushdns")
-		_ = cmd.Run()
+		cmd := exec.CommandContext(ctx, "ipconfig", "/flushdns")
+		if err := cmd.Run(); err != nil {
+			cmd2 := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", "ipconfig /flushdns")
+			_ = cmd2.Run()
+		}
 		cancel()
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -329,6 +332,17 @@ func (h *Handler) RemediateLatency(c *gin.Context) {
 		_ = database.DB.Create(&job)
 
 		utils.LogAudit("SRELatencyRemediation", mID, job.Output, "Success")
+	}
+
+	if h.service != nil && h.service.hub != nil {
+		h.service.hub.BroadcastJSON(map[string]interface{}{
+			"type":            "latency_remediated",
+			"target":          targetName,
+			"latency_ms":      postLatencyMs,
+			"packet_loss_pct": postPacketLoss,
+			"status":          "HEALTHY",
+			"timestamp":       time.Now().Format("15:04:05"),
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{

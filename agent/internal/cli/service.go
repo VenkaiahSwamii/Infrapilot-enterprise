@@ -20,7 +20,7 @@ var installCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 
 		svcConfig := &service.Config{
-			Name:        "InfraPilotAgent",
+			Name:        "infrapilot-agent",
 			DisplayName: "InfraPilot Monitoring Agent",
 			Description: "Enterprise Infrastructure Monitoring Agent",
 		}
@@ -46,7 +46,7 @@ var uninstallCmd = &cobra.Command{
 	Use: "uninstall",
 	RunE: func(cmd *cobra.Command, args []string) error {
 
-		svcConfig := &service.Config{Name: "InfraPilotAgent"}
+		svcConfig := &service.Config{Name: "infrapilot-agent"}
 
 		s, _ := service.New(&agentservice.Program{}, svcConfig)
 
@@ -58,7 +58,7 @@ var startServiceCmd = &cobra.Command{
 	Use: "start",
 	RunE: func(cmd *cobra.Command, args []string) error {
 
-		svcConfig := &service.Config{Name: "InfraPilotAgent"}
+		svcConfig := &service.Config{Name: "infrapilot-agent"}
 
 		s, _ := service.New(&agentservice.Program{}, svcConfig)
 
@@ -70,7 +70,7 @@ var stopServiceCmd = &cobra.Command{
 	Use: "stop",
 	RunE: func(cmd *cobra.Command, args []string) error {
 
-		svcConfig := &service.Config{Name: "InfraPilotAgent"}
+		svcConfig := &service.Config{Name: "infrapilot-agent"}
 
 		s, _ := service.New(&agentservice.Program{}, svcConfig)
 

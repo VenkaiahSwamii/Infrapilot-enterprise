@@ -124,11 +124,47 @@ export default function KubernetesTab({ machine }) {
         setClusters(availableClusters);
       }
 
-      if (overviewRes.status === 'fulfilled' && overviewRes.value) {
-        setOverview(overviewRes.value);
+      const overviewData = overviewRes.status === 'fulfilled' ? overviewRes.value : null;
+      if (overviewData) {
+        setOverview(overviewData);
       }
 
-      const activeCId = selectedClusterId !== 'all' ? selectedClusterId : (availableClusters[0]?.id || 'default');
+      // If viewing a specific machine and that machine has NO Kubernetes installed
+      if (machineId) {
+        const isInstalled = Boolean(overviewData && overviewData.kubernetes_installed === true);
+        if (!isInstalled) {
+          setPods([]);
+          setDeployments([]);
+          setNodes([]);
+          setServices([]);
+          setNamespaces([]);
+          setStorage([]);
+          setEvents([]);
+          setTimeSeriesData([]);
+          setLoading(false);
+          setRefreshing(false);
+          return;
+        }
+      } else {
+        // Global /kubernetes page: if no clusters exist at all in the fleet, clear workloads
+        if (availableClusters.length === 0) {
+          setPods([]);
+          setDeployments([]);
+          setNodes([]);
+          setServices([]);
+          setNamespaces([]);
+          setStorage([]);
+          setEvents([]);
+          setTimeSeriesData([]);
+          setLoading(false);
+          setRefreshing(false);
+          return;
+        }
+      }
+
+      const activeCId = selectedClusterId !== 'all' 
+        ? selectedClusterId 
+        : (overviewData?.cluster_id || availableClusters[0]?.id || 'default');
 
       const [podsRes, depsRes, nodesRes, svcsRes, nsRes, storageRes, eventsRes] = await Promise.allSettled([
         getKubernetesPods(activeCId),
@@ -663,7 +699,11 @@ export default function KubernetesTab({ machine }) {
       }}>
         {/* Cluster Status Card */}
         {(() => {
-          const isClusterActive = (overview?.kubernetes_installed !== false && (overview?.cluster_status === 'Healthy' || overview?.cluster_status === 'Active' || nodes.length > 0 || clusters.length > 0));
+          const isClusterActive = Boolean(
+            machineId 
+              ? (overview?.kubernetes_installed === true && (overview?.cluster_status === 'Healthy' || overview?.cluster_status === 'Active' || nodes.length > 0))
+              : (clusters.length > 0 && (nodes.length > 0 || overview?.cluster_status === 'Healthy' || overview?.cluster_status === 'Active'))
+          );
           return (
             <div style={{
               backgroundColor: '#0d1220',
@@ -715,7 +755,7 @@ export default function KubernetesTab({ machine }) {
                 <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', fontFamily: 'monospace' }}>
                   {isClusterActive 
                     ? (overview?.kubernetes_version ? `Kubernetes ${overview.kubernetes_version} • HA Control Plane` : 'Kubernetes Connected')
-                    : 'Kubernetes agent or cluster not detected'}
+                    : (machineId ? 'No Kubernetes agent or cluster detected on this machine' : 'No Kubernetes cluster connected in fleet')}
                 </div>
               </div>
             </div>
@@ -961,7 +1001,9 @@ export default function KubernetesTab({ machine }) {
         <div style={{ backgroundColor: '#0d1220', border: '1px solid var(--border-soft)', borderRadius: '12px', overflow: 'hidden' }}>
           {filteredPods.length === 0 ? (
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--muted)' }}>
-              No Kubernetes pods match current filters.
+              {machineId && overview?.kubernetes_installed === false
+                ? 'No Kubernetes cluster or workloads detected on this machine.'
+                : 'No Kubernetes pods match current filters.'}
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>

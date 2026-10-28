@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -45,6 +46,9 @@ type MetricsRequest struct {
 	MemoryUsage         float64                          `json:"memory_usage"`
 	DiskPercent         float64                          `json:"disk_percent"`
 	DiskUsage           float64                          `json:"disk_usage"`
+	AgentCPUUsage       float64                          `json:"agent_cpu_usage"`
+	AgentMemoryMB       float64                          `json:"agent_memory_mb"`
+	AgentMemoryUsage    float64                          `json:"agent_memory_usage"`
 	DiskTotal           uint64                           `json:"disk_total"`
 	DiskUsed            uint64                           `json:"disk_used"`
 	UploadMbps          float64                          `json:"upload_mbps"`
@@ -272,6 +276,9 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		MachineID:           machine.ID,
 		APIKey:              apiKey,
 		CPUUsage:            req.CPUUsage,
+		AgentCPUUsage:       req.AgentCPUUsage,
+		AgentMemoryMB:       req.AgentMemoryMB,
+		AgentMemoryUsage:    req.AgentMemoryUsage,
 		MemoryPercent:       memPct,
 		DiskPercent:         diskPct,
 		DiskTotal:           req.DiskTotal,
@@ -400,6 +407,21 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		log.Printf("[Alert Engine] Evaluation error for machine %s: %v", persistedMachine.Hostname, err)
 	}
 
+	// Ingest Docker lifecycle & failure events
+	for _, dEvt := range input.DockerEvents {
+		_, _ = alerts.IngestDockerLifecycleEvent(persistedMachine.ID, dEvt)
+	}
+
+	// Ingest Kubernetes cluster failure events
+	if input.K8sEventsJSON != "" && input.K8sEventsJSON != "[]" {
+		var kEvents []models.KubernetesEvent
+		if err := json.Unmarshal([]byte(input.K8sEventsJSON), &kEvents); err == nil {
+			for _, kEvt := range kEvents {
+				_, _ = alerts.IngestKubernetesEvent(persistedMachine.ID, kEvt)
+			}
+		}
+	}
+
 	fmt.Printf("Persisted metrics from %s: CPU: %.1f%%, RAM: %.1f%%, Disk: %.1f%%\n",
 		persistedMachine.Hostname, input.CPUUsage, input.MemoryPercent, input.DiskPercent)
 
@@ -444,8 +466,11 @@ func (h *MetricHandler) ReceiveMetrics(c *gin.Context) {
 		MemoryUsed:   func() uint64 { if input.TotalMemory > input.FreeMemory { return input.TotalMemory - input.FreeMemory }; return 0 }(),
 		DiskTotal:    metric.DiskTotal,
 		DiskUsed:     metric.DiskUsed,
-		CPUCores:     input.CPUCores,
-		Time:         metric.CreatedAt,
+		CPUCores:      input.CPUCores,
+		AgentCPUUsage: input.AgentCPUUsage,
+		AgentMemoryMB: input.AgentMemoryMB,
+		Filesystems:   input.Filesystems,
+		Time:          metric.CreatedAt,
 	}
 
 	h.hub.BroadcastJSON(dashboardPayload)

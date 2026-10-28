@@ -38,6 +38,9 @@ type Server struct {
 
 	HealthScore float64 `gorm:"default:100" json:"health_score"`
 
+	AgentCPUUsage float64 `json:"agent_cpu_usage"`
+	AgentMemoryMB float64 `json:"agent_memory_mb"`
+
 	LastSeen time.Time `json:"last_seen"`
 
 	RetryCount int `gorm:"default:0" json:"retry_count"`

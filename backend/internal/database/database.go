@@ -50,6 +50,9 @@ func Connect() {
 				"error", err,
 			)
 		}
+		if sqlDB, errSql := db.DB(); errSql == nil {
+			sqlDB.SetMaxOpenConns(1)
+		}
 		logger.Info("Successfully connected to local SQLite database (infrapilot.db)")
 	}
 
@@ -489,14 +492,6 @@ func updateSREActionPoliciesRecipient(db *gorm.DB) {
 	if db == nil {
 		return
 	}
-	if db.Migrator().HasTable("sre_action_policies") {
-		_ = db.Exec(`
-			UPDATE sre_action_policies 
-			SET recipient_email = 'infrapilotadmin@gmail.com' 
-			WHERE recipient_email IS NULL 
-			   OR recipient_email = '' 
-			   OR recipient_email = 'admin@company.com';
-		`).Error
-	}
+	// Allow empty recipient_email to dynamically inherit from notification_settings.default_recipient
 }
 

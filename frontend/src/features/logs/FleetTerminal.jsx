@@ -112,6 +112,7 @@ export default function FleetTerminal({ machine, machineName }) {
   const [selectedNodeId, setSelectedNodeId] = useState(initialMachineId || 'ALL');
 
   const effectiveMachineId = selectedNodeId && selectedNodeId !== 'ALL' ? selectedNodeId : '';
+  const machineId = effectiveMachineId || initialMachineId || '';
   const activeServerObj = servers?.find((s) => String(s.id).toLowerCase() === String(effectiveMachineId).toLowerCase()) || activeMachine;
   const hostLabel = machineName || activeServerObj?.hostname || activeServerObj?.name || (effectiveMachineId ? 'Selected Node' : 'ALL NODES');
   const rawHost = activeServerObj?.hostname || activeServerObj?.name || 'node';

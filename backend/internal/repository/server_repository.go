@@ -142,7 +142,7 @@ func (r *ServerRepository) GetServerByIDOrHostname(identifier string) (*models.S
 		}
 	}
 
-	q := database.DB.Where("LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR id::text LIKE ? OR ip_address = ?", cleanID, cleanID, cleanID+"%", cleanID)
+	q := database.DB.Where("LOWER(hostname) = LOWER(?) OR LOWER(name) = LOWER(?) OR CAST(id AS TEXT) LIKE ? OR ip_address = ?", cleanID, cleanID, cleanID+"%", cleanID)
 	if targetOS != "" {
 		q = q.Where("LOWER(os) = LOWER(?)", targetOS)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"infrapilot/agent/internal/client"
 	"infrapilot/agent/internal/collector"
+	"infrapilot/agent/internal/sremonitor"
 	"infrapilot/agent/internal/state"
 )
 
@@ -18,8 +19,9 @@ type Request struct {
 }
 
 type Response struct {
-	Status            string   `json:"status"`
-	MonitoredServices []string `json:"monitored_services"`
+	Status            string            `json:"status"`
+	MonitoredServices []string          `json:"monitored_services"`
+	ServicePolicies   map[string]string `json:"service_policies"`
 }
 
 func Send(backendURL, machineID, apiKey string) error {
@@ -47,8 +49,13 @@ func Send(backendURL, machineID, apiKey string) error {
 
 	if len(respBytes) > 0 {
 		var resp Response
-		if jsonErr := json.Unmarshal(respBytes, &resp); jsonErr == nil && len(resp.MonitoredServices) > 0 {
-			collector.UpdateDynamicMonitoredServices(resp.MonitoredServices)
+		if jsonErr := json.Unmarshal(respBytes, &resp); jsonErr == nil {
+			if len(resp.MonitoredServices) > 0 {
+				collector.UpdateDynamicMonitoredServices(resp.MonitoredServices)
+			}
+			if len(resp.ServicePolicies) > 0 {
+				sremonitor.UpdateDynamicServicePolicies(resp.ServicePolicies)
+			}
 		}
 	}
 

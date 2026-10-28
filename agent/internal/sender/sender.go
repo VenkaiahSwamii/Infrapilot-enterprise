@@ -4,11 +4,18 @@ import (
 	"encoding/json"
 	"log"
 	"strings"
+	"sync"
+	"time"
 
 	"infrapilot/agent/internal/cache"
 	"infrapilot/agent/internal/client"
 	"infrapilot/agent/internal/config"
 	"infrapilot/agent/internal/state"
+)
+
+var (
+	replayMu    sync.Mutex
+	isReplaying bool
 )
 
 // SendMetrics transmits metrics payload via HTTP POST. If offline, it queues them.
@@ -36,9 +43,14 @@ func SendMetrics(backendURL string, machineID string, apiKey string, metrics int
 	state.Connected = true
 	log.Println("[Sender] Metrics uploaded successfully.")
 
-	// If successfully sent, replay cached offline metrics in background
+	// If successfully sent, replay cached offline metrics in background (safely once)
 	if cache.QueueSize() > 0 {
-		go ReplayCachedMetrics(backendURL, machineID)
+		replayMu.Lock()
+		if !isReplaying {
+			isReplaying = true
+			go ReplayCachedMetrics(backendURL, machineID)
+		}
+		replayMu.Unlock()
 	}
 
 	return nil
@@ -72,6 +84,12 @@ func SendLogs(backendURL string, logsPayload interface{}) error {
 
 // ReplayCachedMetrics uploads previously queued metrics when agent was offline
 func ReplayCachedMetrics(backendURL string, machineID string) {
+	defer func() {
+		replayMu.Lock()
+		isReplaying = false
+		replayMu.Unlock()
+	}()
+
 	log.Printf("[Sender] Replaying %d cached offline telemetry payloads...", cache.QueueSize())
 	for {
 		item, ok := cache.PopMetric()
@@ -101,5 +119,6 @@ func ReplayCachedMetrics(backendURL string, machineID string) {
 		}
 
 		log.Println("[Sender] Successfully uploaded cached telemetry payload.")
+		time.Sleep(1 * time.Second) // Gentle replay pacing so server isn't flooded
 	}
 }

@@ -63,11 +63,7 @@ func (s *MonitoredServiceService) GetActiveServiceNamesForServer(serverID uuid.U
 		}
 	}
 
-	// Hard defaults if config is empty
-	if strings.Contains(strings.ToLower(osType), "windows") {
-		return []string{"Spooler", "WinDefend", "EventLog", "wuauserv", "W32Time"}
-	}
-	return []string{"ssh.service", "cron.service", "systemd-journald.service"}
+	return []string{}
 }
 
 // AddMonitoredService adds a new service to monitor for a server

@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"infrapilot/backend/internal/config"
@@ -151,6 +153,87 @@ func SendDiagnosticTestEmail(c *gin.Context) {
 		"success": true,
 		"message": fmt.Sprintf("Diagnostic test email delivered successfully to %s", req.Recipient),
 		"details": diagResult,
+	})
+}
+
+type PlatformEmailAlertReq struct {
+	Service   string `json:"service"`
+	Host      string `json:"host"`
+	Recipient string `json:"recipient"`
+	Category  string `json:"category"`
+	Message   string `json:"message"`
+}
+
+// PlatformEmailAlert sends a direct SRE policy email alert
+func PlatformEmailAlert(c *gin.Context) {
+	var req PlatformEmailAlertReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	recipient := strings.TrimSpace(req.Recipient)
+	if recipient == "" || recipient == "infrapilotadmin@gmail.com" {
+		smtpCfg := services.GetResolvedSMTPConfig()
+		recipient = smtpCfg.DefaultRecipient
+		if recipient == "" {
+			recipient = config.Get().Alerts.AdminEmail
+		}
+	}
+
+	category := req.Category
+	if category == "" {
+		lowSvc := strings.ToLower(req.Service)
+		if strings.Contains(lowSvc, "disk") || strings.Contains(lowSvc, "/") || strings.Contains(lowSvc, "storage") {
+			category = "Storage"
+		} else if strings.Contains(lowSvc, "gate") || strings.Contains(lowSvc, "dns") || strings.Contains(lowSvc, "latency") {
+			category = "Network"
+		} else {
+			category = "Service"
+		}
+	}
+
+	host := req.Host
+	if host == "" {
+		host = "Local Node"
+	}
+
+	msg := req.Message
+	if msg == "" {
+		msg = fmt.Sprintf("SRE alert triggered for %s on node %s. Remediation policy mode is NOTIFY_EMAIL.", req.Service, host)
+	}
+
+	alert := models.LinuxAlert{
+		ID:        uuid.New(),
+		Category:  category,
+		Component: req.Service,
+		Severity:  "WARNING",
+		Title:     fmt.Sprintf("%s Alert: %s requires operator attention on %s", category, req.Service, host),
+		Message:   msg,
+		Status:    "Active",
+		CreatedAt: time.Now(),
+	}
+
+	emailSvc := services.NewEmailService()
+	policy := models.SREActionPolicy{
+		RecipientEmail: recipient,
+		Mode:           "NOTIFY_EMAIL",
+	}
+
+	err := emailSvc.SendPolicyAlertEmail(&policy, alert, host)
+	if err != nil {
+		log.Printf("[PlatformEmailAlert] SMTP delivery error: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "failed",
+			"error":   err.Error(),
+			"message": fmt.Sprintf("Failed to deliver alert email: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "sent",
+		"message": fmt.Sprintf("Email notification successfully delivered to %s", recipient),
 	})
 }
 

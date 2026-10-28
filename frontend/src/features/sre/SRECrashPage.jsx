@@ -22,10 +22,12 @@ import { getMachineId } from '../../utils/machineId.js';
 import { useServerStore } from '../../store/serverStore.jsx';
 import ServerSelectDropdown from '../../components/common/ServerSelectDropdown.jsx';
 import AdminSREPolicyControl from '../../components/sre/AdminSREPolicyControl.jsx';
+import { useNotificationSettings } from '../../store/notificationStore.jsx';
 
 export default function SRECrashPage() {
+  const { defaultRecipient } = useNotificationSettings();
   const [machines, setMachines] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -37,24 +39,26 @@ export default function SRECrashPage() {
   const [serviceLogs, setServiceLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
 
-  const { selectedServer } = useServerStore();
-  const [liveServices, setLiveServices] = useState([]);
-  const primaryMachine = selectedServer || machines[0] || {};
+  const { selectedServer, servers: storeServers } = useServerStore();
+  const primaryMachine = selectedServer || machines[0] || (storeServers && storeServers[0]) || {};
   const rawHostname = primaryMachine.hostname || primaryMachine.RegisteredHostname || primaryMachine.name || 'System';
   const activeHostname = typeof rawHostname === 'string' ? rawHostname : String(rawHostname?.name || rawHostname || 'System');
-  const machineId = primaryMachine ? (primaryMachine.id || primaryMachine.ID || getMachineId(primaryMachine)) : '';
+  const rawMachineId = primaryMachine.id || primaryMachine.ID || getMachineId(primaryMachine) || '';
+  const cleanMachineId = String(rawMachineId).split('_')[0];
+  const machineId = cleanMachineId;
 
   const isWindowsHost = useMemo(() => {
     const os = String(primaryMachine.os || primaryMachine.OS || primaryMachine.platform || '').toLowerCase();
-    return os.includes('win');
+    return os.includes('win') || (!os && navigator.userAgent.toLowerCase().includes('windows'));
   }, [primaryMachine]);
 
+  const [liveServices, setLiveServices] = useState([]);
+
   const fetchServicesData = async () => {
-    setLoading(true);
     try {
       const [machRes, svcRes] = await Promise.all([
         apiClient.get('/machines').catch(() => null),
-        apiClient.get(machineId ? `/services?machine_id=${machineId}` : '/services').catch(() => null),
+        apiClient.get(cleanMachineId ? `/services?machine_id=${cleanMachineId}` : '/services').catch(() => null),
       ]);
 
       if (machRes && (Array.isArray(machRes.data) || machRes.data?.machines)) {
@@ -64,20 +68,23 @@ export default function SRECrashPage() {
 
       const isNonRunning = (st) => ['stopped', 'failed', 'inactive', 'dead', 'exited', 'tripped'].includes(String(st || '').toLowerCase());
 
-      if (svcRes && Array.isArray(svcRes.data) && svcRes.data.length > 0) {
-        const mapped = svcRes.data.map((s, idx) => ({
-          id: `svc-${idx}`,
-          name: s.name ? (s.name.includes('.') ? s.name : `${s.name}.service`) : `service-${idx}`,
-          type: String(s.name || '').toLowerCase().includes('ssh') ? 'DAEMON / SYSTEMD' : String(s.name || '').toLowerCase().includes('journal') ? 'DAEMON / LOGGING' : 'DAEMON / SYSTEM',
-          status: isNonRunning(s.status) ? 'STOPPED' : 'HEALTHY',
-          restarts: typeof s.restart_count === 'number' ? s.restart_count : (typeof s.restarts === 'number' ? s.restarts : 0),
-          restart_count: typeof s.restart_count === 'number' ? s.restart_count : (typeof s.restarts === 'number' ? s.restarts : 0),
-          description: `Managed service runtime daemon for ${s.name || 'system'}.`,
-        }));
-        setLiveServices(mapped);
-      } else {
-        setLiveServices([]);
+      let rawServices = [];
+      if (Array.isArray(svcRes?.data) && svcRes.data.length > 0) {
+        rawServices = svcRes.data;
+      } else if (Array.isArray(svcRes?.data?.services) && svcRes.data.services.length > 0) {
+        rawServices = svcRes.data.services;
       }
+
+      const mapped = rawServices.map((s, idx) => ({
+        id: `svc-${idx}`,
+        name: s.name ? (isWindowsHost || s.name.includes('.') ? s.name : `${s.name}.service`) : `service-${idx}`,
+        type: String(s.name || '').toLowerCase().includes('ssh') ? 'DAEMON / SYSTEMD' : String(s.name || '').toLowerCase().includes('journal') ? 'DAEMON / LOGGING' : 'DAEMON / SYSTEM',
+        status: isNonRunning(s.status) ? 'STOPPED' : 'HEALTHY',
+        restarts: typeof s.restart_count === 'number' ? s.restart_count : (typeof s.restarts === 'number' ? s.restarts : 0),
+        restart_count: typeof s.restart_count === 'number' ? s.restart_count : (typeof s.restarts === 'number' ? s.restarts : 0),
+        description: `Managed service runtime daemon for ${s.name || 'system'}.`,
+      }));
+      setLiveServices(mapped);
     } catch (err) {
       console.error('Failed to load crash service data', err);
     } finally {
@@ -90,16 +97,17 @@ export default function SRECrashPage() {
     fetchServicesData();
     const interval = setInterval(fetchServicesData, 5000);
     return () => clearInterval(interval);
-  }, [machineId]);
+  }, [cleanMachineId]);
 
   const handleResetFlap = async () => {
     setIsResetting(true);
     try {
-      if (machineId) {
-        await apiClient.post('/services/action', {
-          machine_id: String(machineId),
-          service: 'ssh',
-          target: 'restart'
+      if (cleanMachineId) {
+        await apiClient.post('/services/reset-flap', {
+          machine_id: String(cleanMachineId),
+          server_id: String(cleanMachineId),
+          target: 'ALL',
+          service: 'ALL'
         }).catch(() => null);
       }
     } catch {}
@@ -114,7 +122,7 @@ export default function SRECrashPage() {
     setLoadingLogs(true);
     setServiceLogs([]);
     try {
-      const res = await apiClient.get(`/services/logs?service=${encodeURIComponent(svc.name)}&machine_id=${machineId}`).catch(() => null);
+      const res = await apiClient.get(`/services/logs?service=${encodeURIComponent(svc.name)}&machine_id=${cleanMachineId}`).catch(() => null);
       if (res && res.data && Array.isArray(res.data.logs)) {
         setServiceLogs(res.data.logs);
       } else {
@@ -136,9 +144,9 @@ export default function SRECrashPage() {
     try {
       let returnedCount = null;
       let isBypassed = false;
-      if (machineId) {
+      if (cleanMachineId) {
         const res = await apiClient.post('/services/restart', {
-          machine_id: String(machineId),
+          machine_id: String(cleanMachineId),
           service: svc.name,
         }).catch(() => null);
         if (res && res.data) {
@@ -167,7 +175,8 @@ export default function SRECrashPage() {
       );
 
       if (isBypassed) {
-        alert(`📧 SRE Policy Override (Mode: NOTIFY_EMAIL): Service "${svc.name}" was NOT restarted. Email alert dispatched to infrapilotadmin@gmail.com.`);
+        const destMsg = defaultRecipient ? ` to ${defaultRecipient}` : '';
+        alert(`📧 SRE Policy Override (Mode: NOTIFY_EMAIL): Service "${svc.name}" was NOT restarted. Email alert dispatched${destMsg}.`);
       } else {
         alert(`⚡ Auto Remediate Executed: Service "${svc.name}" restarted successfully. Restart count incremented.`);
       }
@@ -177,66 +186,53 @@ export default function SRECrashPage() {
   };
 
   const handleSendEmailAlert = async (svc) => {
+    const targetEmail = defaultRecipient || '';
     try {
       await apiClient.post('/platform/email-alert', {
         service: svc.name,
         host: activeHostname,
-        recipient: 'infrapilotadmin@gmail.com',
+        recipient: targetEmail,
       }).catch(() => null);
-      alert(`📧 Email Alert Sent: Notification dispatched to infrapilotadmin@gmail.com for "${svc.name}". Service was NOT restarted and restart count remains unchanged.`);
+      const destMsg = targetEmail ? ` to ${targetEmail}` : '';
+      alert(`📧 Email Alert Sent: Notification dispatched${destMsg} for "${svc.name}". Service was NOT restarted and restart count remains unchanged.`);
     } catch {
       alert(`📧 Email Alert Dispatched for "${svc.name}".`);
     }
   };
 
-  // Master service list categorized by Target Host OS (linux vs windows)
-  const CONFIG_TOML_SERVICES = [
-    { id: 'svc-ssh', name: 'ssh.service', matchKey: 'ssh', type: 'DAEMON / SYSTEMD', os: 'linux', description: 'OpenSSH server daemon for secure remote shell access.' },
-    { id: 'svc-cron', name: 'cron.service', matchKey: 'cron', type: 'DAEMON / CRON', os: 'linux', description: 'System periodic job scheduler daemon.' },
-    { id: 'svc-journald', name: 'systemd-journald.service', matchKey: 'journal', type: 'DAEMON / LOGGING', os: 'linux', description: 'System event & kernel logging daemon.' },
-    { id: 'svc-nginx', name: 'nginx.service', matchKey: 'nginx', type: 'DAEMON / WEB', os: 'linux', description: 'Nginx High-Performance Web & Reverse Proxy Server.' },
-    { id: 'svc-postgres', name: 'postgresql.service', matchKey: 'postgres', type: 'DAEMON / DATABASE', os: 'linux', description: 'PostgreSQL Relational Database Management System.' },
-    { id: 'win-spooler', name: 'Spooler', matchKey: 'spooler', type: 'WINDOWS / SERVICE', os: 'windows', description: 'Print Spooler service managing printing queues.' },
-    { id: 'win-defend', name: 'WinDefend', matchKey: 'windefend', type: 'WINDOWS / SECURITY', os: 'windows', description: 'Microsoft Defender Antivirus Service.' },
-    { id: 'win-eventlog', name: 'EventLog', matchKey: 'eventlog', type: 'WINDOWS / LOGGING', os: 'windows', description: 'Windows Event Log system event recorder.' },
-    { id: 'win-wuauserv', name: 'wuauserv', matchKey: 'wuauserv', type: 'WINDOWS / UPDATE', os: 'windows', description: 'Windows Update service daemon.' },
-    { id: 'win-w32time', name: 'W32Time', matchKey: 'w32time', type: 'WINDOWS / TIME', os: 'windows', description: 'Windows Time Synchronization Service.' },
-  ];
+  const getServiceType = (name, isWin) => {
+    const n = String(name || '').toLowerCase();
+    if (isWin) return 'WINDOWS / SERVICE';
+    if (n.includes('ssh')) return 'DAEMON / SYSTEMD';
+    if (n.includes('cron')) return 'DAEMON / CRON';
+    if (n.includes('journal')) return 'DAEMON / LOGGING';
+    if (n.includes('nginx') || n.includes('http') || n.includes('apache')) return 'DAEMON / WEB';
+    if (n.includes('sql') || n.includes('postgres') || n.includes('db') || n.includes('redis') || n.includes('mongo')) return 'DAEMON / DATABASE';
+    return isWin ? 'WINDOWS / SERVICE' : 'DAEMON / SYSTEM';
+  };
+
+  const getServiceDescription = (name, isWin) => {
+    return isWin
+      ? `Windows service (${name}) managed via config.toml.`
+      : `Linux system daemon (${name}) managed via config.toml.`;
+  };
 
   const servicesList = useMemo(() => {
     const isNonRunning = (st) => ['stopped', 'failed', 'inactive', 'dead', 'exited', 'tripped'].includes(String(st || '').toLowerCase());
 
-    const targetOsServices = CONFIG_TOML_SERVICES.filter((cfgSvc) =>
-      isWindowsHost ? cfgSvc.os === 'windows' : cfgSvc.os === 'linux'
-    );
+    const baseList = liveServices || [];
 
-    // Only monitor core system daemons or services explicitly reported by agent
-    const activeServices = targetOsServices.filter((cfgSvc) => {
-      if (!liveServices || liveServices.length === 0) return true;
-      if (['ssh', 'cron', 'journal', 'spooler', 'eventlog', 'windefend'].includes(cfgSvc.matchKey)) return true;
-      return liveServices.some((ls) => {
-        const nameLower = String(ls.name || '').toLowerCase();
-        return nameLower.includes(cfgSvc.matchKey) || nameLower === cfgSvc.name.toLowerCase();
-      });
-    });
-
-    return activeServices.map((cfgSvc) => {
-      const matches = liveServices.filter((ls) => {
-        const nameLower = String(ls.name || '').toLowerCase();
-        return nameLower.includes(cfgSvc.matchKey) || nameLower === cfgSvc.name.toLowerCase();
-      });
-
-      let actualRestarts = 0;
-      let displayStatus = 'HEALTHY';
-
-      if (matches.length > 0) {
-        actualRestarts = Math.max(...matches.map((m) => m.restarts ?? m.restart_count ?? 0), 0);
-        const anyStopped = matches.some((m) => isNonRunning(m.status));
-        displayStatus = anyStopped ? 'STOPPED' : 'HEALTHY';
-      }
-
+    return baseList.map((ls, idx) => {
+      const nameClean = String(ls.name || '').trim();
+      const actualRestarts = ls.restarts ?? ls.restart_count ?? 0;
+      const displayStatus = isNonRunning(ls.status) ? 'STOPPED' : 'HEALTHY';
       return {
-        ...cfgSvc,
+        id: `svc-${idx}`,
+        name: nameClean,
+        matchKey: nameClean.toLowerCase().replace(/\.service$/, ''),
+        type: ls.type || getServiceType(nameClean, isWindowsHost),
+        os: isWindowsHost ? 'windows' : 'linux',
+        description: ls.description || getServiceDescription(nameClean, isWindowsHost),
         status: displayStatus,
         restarts: actualRestarts,
         circuitBreaker: displayStatus === 'STOPPED' ? 'TRIPPED' : 'ARMED',
